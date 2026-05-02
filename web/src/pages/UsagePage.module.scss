@@ -846,8 +846,8 @@
 .apiHeader {
   width: 100%;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 8px;
   padding: 10px;
   border: 0;
   background: transparent;
@@ -898,9 +898,17 @@
 }
 
 .expandIcon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  margin-left: 0;
   color: var(--text-secondary);
   font-size: 12px;
-  margin-left: 6px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.expandIconExpanded {
+  transform: rotate(90deg);
 }
 
 .apiModels {
@@ -912,6 +920,159 @@
   border-top: 1px solid var(--border-color);
   margin-top: 0;
   padding-top: 10px;
+}
+
+.apiDetailsCard {
+  @include mobile {
+    height: auto;
+    overflow: visible;
+  }
+}
+
+.apiDetailsScroll {
+  @include mobile {
+    overflow: visible;
+  }
+}
+
+.apiDesktopList {
+  @include mobile {
+    display: none;
+  }
+}
+
+.apiDetailsMobileCards {
+  display: none;
+
+  @include mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.apiDetailsLoadMore {
+  display: none;
+
+  @include mobile {
+    display: block;
+    margin-top: 2px;
+  }
+}
+
+.apiDetailsMobileCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+}
+
+.apiDetailsMobileHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: $radius-sm;
+  }
+}
+
+.apiDetailsMobileEndpoint {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.apiDetailsMobileMetrics,
+.apiDetailsMobileModelMetrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.apiDetailsMobileMetric {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-primary);
+}
+
+.apiDetailsMobileMetricWide {
+  grid-column: 1 / -1;
+}
+
+.apiDetailsMobileMetricLabel {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.apiDetailsMobileMetricValue {
+  margin: 3px 0 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.apiDetailsMobileModels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.apiDetailsMobileModelItem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+
+  .apiDetailsMobileMetric {
+    background: var(--bg-secondary);
+  }
+}
+
+.apiDetailsMobileModelHeader {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.apiDetailsMobileModelName {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  word-break: break-all;
 }
 
 .modelRow {

@@ -191,8 +191,11 @@ export function CredentialStatsCard({
                                 aria-expanded={isExpanded}
                                 aria-controls={panelId}
                               >
-                                <span className={styles.expandIcon} aria-hidden="true">
-                                  {isExpanded ? '▼' : '▶'}
+                                <span
+                                  className={`${styles.expandIcon} ${isExpanded ? styles.expandIconExpanded : ''}`.trim()}
+                                  aria-hidden="true"
+                                >
+                                  ▶
                                 </span>
                                 <span>{row.displayName}</span>
                               </button>
@@ -275,8 +278,11 @@ export function CredentialStatsCard({
                           aria-expanded={isExpanded}
                           aria-controls={panelId}
                         >
-                          <span className={styles.expandIcon} aria-hidden="true">
-                            {isExpanded ? '▼' : '▶'}
+                          <span
+                            className={`${styles.expandIcon} ${isExpanded ? styles.expandIconExpanded : ''}`.trim()}
+                            aria-hidden="true"
+                          >
+                            ▶
                           </span>
                           <span className={styles.credentialStatsMobileName}>{row.displayName}</span>
                         </button>

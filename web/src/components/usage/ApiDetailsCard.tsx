@@ -1,8 +1,11 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { formatCompactNumber, formatUsd, type ApiStats } from '@/utils/usage';
 import styles from '@/pages/UsagePage.module.scss';
+
+const MOBILE_API_DETAILS_PAGE_SIZE = 5;
 
 function ApiDetailsTitle({ title, subtitle, eyebrow }: { title: string; subtitle: string; eyebrow: string }) {
   return (
@@ -28,6 +31,10 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
   const [expandedApis, setExpandedApis] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<ApiSortKey>('requests');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [mobileRenderState, setMobileRenderState] = useState({
+    key: '',
+    count: MOBILE_API_DETAILS_PAGE_SIZE,
+  });
 
   const toggleExpand = (endpoint: string) => {
     setExpandedApis((prev) => {
@@ -67,6 +74,15 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
 
   const arrow = (key: ApiSortKey) =>
     sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const mobileRenderKey = `${sortKey}:${sortDir}:${hasPrices}:${sorted.map((api) => api.endpoint).join('|')}`;
+  const mobileVisibleCount = mobileRenderState.key === mobileRenderKey
+    ? mobileRenderState.count
+    : MOBILE_API_DETAILS_PAGE_SIZE;
+  const mobileApis = useMemo(
+    () => sorted.slice(0, mobileVisibleCount),
+    [mobileVisibleCount, sorted]
+  );
+  const canLoadMoreMobile = mobileApis.length < sorted.length;
 
   return (
     <Card
@@ -77,7 +93,7 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
           subtitle={t('usage_stats.api_details_subtitle')}
         />
       }
-      className={styles.detailsFixedCard}
+      className={`${styles.detailsFixedCard} ${styles.apiDetailsCard}`}
     >
       {loading ? (
         <div className={styles.hint}>{t('common.loading')}</div>
@@ -101,8 +117,8 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
               </button>
             ))}
           </div>
-          <div className={styles.detailsScroll}>
-            <div className={styles.apiList}>
+          <div className={`${styles.detailsScroll} ${styles.apiDetailsScroll}`}>
+            <div className={`${styles.apiList} ${styles.apiDesktopList}`}>
               {sorted.map((api, index) => {
                 const isExpanded = expandedApis.has(api.endpoint);
                 const panelId = `api-models-${index}`;
@@ -116,6 +132,12 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
                       aria-expanded={isExpanded}
                       aria-controls={panelId}
                     >
+                      <span
+                        className={`${styles.expandIcon} ${isExpanded ? styles.expandIconExpanded : ''}`.trim()}
+                        aria-hidden="true"
+                      >
+                        ▶
+                      </span>
                       <div className={styles.apiInfo}>
                         <span className={styles.apiEndpoint}>{api.displayName}</span>
                         <div className={styles.apiStats}>
@@ -140,9 +162,6 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
                           )}
                         </div>
                       </div>
-                      <span className={styles.expandIcon}>
-                        {isExpanded ? '▼' : '▶'}
-                      </span>
                     </button>
                     {isExpanded && (
                       <div id={panelId} className={styles.apiModels}>
@@ -174,6 +193,133 @@ export function ApiDetailsCard({ apiStats, loading, hasPrices }: ApiDetailsCardP
                   </div>
                 );
               })}
+            </div>
+            <div className={styles.apiDetailsMobileCards}>
+              {mobileApis.map((api, index) => {
+                const isExpanded = expandedApis.has(api.endpoint);
+                const panelId = `api-mobile-models-${index}`;
+                const modelEntries = Object.entries(api.models);
+
+                return (
+                  <article key={api.endpoint} className={styles.apiDetailsMobileCard}>
+                    <button
+                      type="button"
+                      className={styles.apiDetailsMobileHeader}
+                      onClick={() => toggleExpand(api.endpoint)}
+                      aria-expanded={isExpanded}
+                      aria-controls={panelId}
+                    >
+                      <span
+                        className={`${styles.expandIcon} ${isExpanded ? styles.expandIconExpanded : ''}`.trim()}
+                        aria-hidden="true"
+                      >
+                        ▶
+                      </span>
+                      <span className={styles.apiDetailsMobileEndpoint}>{api.displayName}</span>
+                    </button>
+
+                    <dl className={styles.apiDetailsMobileMetrics}>
+                      <div className={`${styles.apiDetailsMobileMetric} ${styles.apiDetailsMobileMetricWide}`}>
+                        <dt className={styles.apiDetailsMobileMetricLabel}>
+                          {t('usage_stats.requests_count')}
+                        </dt>
+                        <dd className={styles.apiDetailsMobileMetricValue}>
+                          <span className={styles.requestCountCell}>
+                            <span>{api.totalRequests.toLocaleString()}</span>
+                            <span className={styles.requestBreakdown}>
+                              (<span className={styles.statSuccess}>{api.successCount.toLocaleString()}</span>{' '}
+                              <span className={styles.statFailure}>{api.failureCount.toLocaleString()}</span>)
+                            </span>
+                          </span>
+                        </dd>
+                      </div>
+                      <div className={styles.apiDetailsMobileMetric}>
+                        <dt className={styles.apiDetailsMobileMetricLabel}>
+                          {t('usage_stats.tokens_count')}
+                        </dt>
+                        <dd className={styles.apiDetailsMobileMetricValue}>
+                          {formatCompactNumber(api.totalTokens)}
+                        </dd>
+                      </div>
+                      {hasPrices && (
+                        <div className={styles.apiDetailsMobileMetric}>
+                          <dt className={styles.apiDetailsMobileMetricLabel}>
+                            {t('usage_stats.total_cost')}
+                          </dt>
+                          <dd className={styles.apiDetailsMobileMetricValue}>
+                            {api.totalCost > 0 ? formatUsd(api.totalCost) : '--'}
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    {isExpanded && modelEntries.length > 0 && (
+                      <div id={panelId} className={styles.apiDetailsMobileModels}>
+                        {modelEntries.map(([model, stats]) => (
+                          <article key={`${api.endpoint}:${model}`} className={styles.apiDetailsMobileModelItem}>
+                            <div className={styles.apiDetailsMobileModelHeader}>
+                              <span className={styles.apiDetailsMobileModelName}>{model}</span>
+                            </div>
+                            <dl className={styles.apiDetailsMobileModelMetrics}>
+                              <div className={`${styles.apiDetailsMobileMetric} ${styles.apiDetailsMobileMetricWide}`}>
+                                <dt className={styles.apiDetailsMobileMetricLabel}>
+                                  {t('usage_stats.requests_count')}
+                                </dt>
+                                <dd className={styles.apiDetailsMobileMetricValue}>
+                                  <span className={styles.requestCountCell}>
+                                    <span>{stats.requests.toLocaleString()}</span>
+                                    <span className={styles.requestBreakdown}>
+                                      (<span className={styles.statSuccess}>{stats.successCount.toLocaleString()}</span>{' '}
+                                      <span className={styles.statFailure}>{stats.failureCount.toLocaleString()}</span>)
+                                    </span>
+                                  </span>
+                                </dd>
+                              </div>
+                              <div className={styles.apiDetailsMobileMetric}>
+                                <dt className={styles.apiDetailsMobileMetricLabel}>
+                                  {t('usage_stats.tokens_count')}
+                                </dt>
+                                <dd className={styles.apiDetailsMobileMetricValue}>
+                                  {formatCompactNumber(stats.tokens)}
+                                </dd>
+                              </div>
+                              {hasPrices && (
+                                <div className={styles.apiDetailsMobileMetric}>
+                                  <dt className={styles.apiDetailsMobileMetricLabel}>
+                                    {t('usage_stats.total_cost')}
+                                  </dt>
+                                  <dd className={styles.apiDetailsMobileMetricValue}>
+                                    {stats.cost > 0 ? formatUsd(stats.cost) : '--'}
+                                  </dd>
+                                </div>
+                              )}
+                            </dl>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+              {canLoadMoreMobile && (
+                <div className={styles.apiDetailsLoadMore}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    fullWidth
+                    onClick={() => setMobileRenderState((current) => ({
+                      key: mobileRenderKey,
+                      count: (
+                        current.key === mobileRenderKey
+                          ? current.count
+                          : MOBILE_API_DETAILS_PAGE_SIZE
+                      ) + MOBILE_API_DETAILS_PAGE_SIZE,
+                    }))}
+                  >
+                    {t('usage_stats.api_details_load_more')}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </>
