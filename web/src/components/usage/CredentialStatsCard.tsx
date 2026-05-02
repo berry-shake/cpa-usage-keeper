@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bar } from 'react-chartjs-2';
 import type { ChartData, ChartOptions, TooltipItem } from 'chart.js';
@@ -22,6 +22,39 @@ export interface CredentialRow {
   successRate: number;
   cost: number;
   costAvailable: boolean;
+  models: CredentialModelRow[];
+}
+
+export interface CredentialModelRow {
+  model: string;
+  success: number;
+  failure: number;
+  total: number;
+  tokens: number;
+  cost: number;
+  costAvailable: boolean;
+}
+
+export function buildCredentialModelRows(models: UsageCredential['models'] = []): CredentialModelRow[] {
+  return models
+    .map((model) => {
+      const success = Number(model.success_count) || 0;
+      const failure = Number(model.failure_count) || 0;
+      const total = Number(model.total_count) || success + failure;
+      return {
+        model: String(model.model ?? '').trim() || 'unknown',
+        success,
+        failure,
+        total,
+        tokens: Number(model.total_tokens) || 0,
+        cost: Number(model.total_cost) || 0,
+        costAvailable: model.cost_available === true,
+      };
+    })
+    .sort((a, b) => {
+      if (b.total === a.total) return a.model.localeCompare(b.model);
+      return b.total - a.total;
+    });
 }
 
 export function buildCredentialRows(credentials: UsageCredential[]): CredentialRow[] {
@@ -45,6 +78,7 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
         successRate: total > 0 ? (success / total) * 100 : 100,
         cost,
         costAvailable,
+        models: buildCredentialModelRows(credential.models),
       };
     })
     .sort((a, b) => b.total - a.total);
@@ -73,8 +107,22 @@ export function CredentialStatsCard({
   loading,
 }: CredentialStatsCardProps) {
   const { t } = useTranslation();
+  const [expandedCredentials, setExpandedCredentials] = useState<Set<string>>(new Set());
   const rows = useMemo(() => buildCredentialRows(credentials), [credentials]);
   const showCost = useMemo(() => rows.some((row) => row.costAvailable || row.cost > 0), [rows]);
+  const columnCount = showCost ? 4 : 3;
+
+  const toggleExpand = (key: string) => {
+    setExpandedCredentials((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   return (
     <Card
@@ -102,39 +150,93 @@ export function CredentialStatsCard({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.key}>
-                    <td className={styles.modelCell}>
-                      <span>{row.displayName}</span>
-                      {row.type && <span className={styles.credentialType}>{row.type}</span>}
-                    </td>
-                    <td>
-                      <span className={styles.requestCountCell}>
-                        <span>{formatCompactNumber(row.total)}</span>
-                        <span className={styles.requestBreakdown}>
-                          (<span className={styles.statSuccess}>{row.success.toLocaleString()}</span>{' '}
-                          <span className={styles.statFailure}>{row.failure.toLocaleString()}</span>)
-                        </span>
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={
-                          row.successRate >= 95
-                            ? styles.statSuccess
-                            : row.successRate >= 80
-                              ? styles.statNeutral
-                              : styles.statFailure
-                        }
-                      >
-                        {row.successRate.toFixed(1)}%
-                      </span>
-                    </td>
-                    {showCost && (
-                      <td>{formatCredentialCost(row)}</td>
-                    )}
-                  </tr>
-                ))}
+                {rows.map((row, index) => {
+                  const isExpandable = row.models.length > 0;
+                  const isExpanded = expandedCredentials.has(row.key);
+                  const panelId = `credential-models-${index}`;
+
+                  return (
+                    <Fragment key={row.key}>
+                      <tr>
+                        <td className={styles.modelCell}>
+                          <span className={styles.credentialNameCell}>
+                            {isExpandable ? (
+                              <button
+                                type="button"
+                                className={styles.credentialExpandButton}
+                                onClick={() => toggleExpand(row.key)}
+                                aria-expanded={isExpanded}
+                                aria-controls={panelId}
+                              >
+                                <span className={styles.expandIcon} aria-hidden="true">
+                                  {isExpanded ? '▼' : '▶'}
+                                </span>
+                                <span>{row.displayName}</span>
+                              </button>
+                            ) : (
+                              <span>{row.displayName}</span>
+                            )}
+                            {row.type && <span className={styles.credentialType}>{row.type}</span>}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={styles.requestCountCell}>
+                            <span>{formatCompactNumber(row.total)}</span>
+                            <span className={styles.requestBreakdown}>
+                              (<span className={styles.statSuccess}>{row.success.toLocaleString()}</span>{' '}
+                              <span className={styles.statFailure}>{row.failure.toLocaleString()}</span>)
+                            </span>
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={
+                              row.successRate >= 95
+                                ? styles.statSuccess
+                                : row.successRate >= 80
+                                  ? styles.statNeutral
+                                  : styles.statFailure
+                            }
+                          >
+                            {row.successRate.toFixed(1)}%
+                          </span>
+                        </td>
+                        {showCost && (
+                          <td>{formatCredentialCost(row)}</td>
+                        )}
+                      </tr>
+                      {isExpandable && isExpanded && (
+                        <tr className={styles.credentialModelsTableRow}>
+                          <td colSpan={columnCount}>
+                            <div id={panelId} className={styles.credentialModelsPanel}>
+                              {row.models.map((model) => (
+                                <div
+                                  key={model.model}
+                                  className={`${styles.modelRow} ${showCost ? styles.modelRowWithCost : ''}`.trim()}
+                                >
+                                  <span className={styles.modelName}>{model.model}</span>
+                                  <span className={styles.modelStat}>
+                                    <span className={styles.requestCountCell}>
+                                      <span>{model.total.toLocaleString()}</span>
+                                      <span className={styles.requestBreakdown}>
+                                        (<span className={styles.statSuccess}>{model.success.toLocaleString()}</span>{' '}
+                                        <span className={styles.statFailure}>{model.failure.toLocaleString()}</span>)
+                                      </span>
+                                    </span>
+                                  </span>
+                                  <span className={styles.modelStat}>{formatCompactNumber(model.tokens)}</span>
+                                  {showCost && (
+                                    <span className={styles.modelStat}>{formatCredentialCost(model)}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

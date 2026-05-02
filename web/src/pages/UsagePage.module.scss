@@ -1046,6 +1046,59 @@
   word-break: break-all;
 }
 
+.credentialNameCell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.credentialExpandButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: $radius-sm;
+  }
+}
+
+.credentialModelsTableRow {
+  &:hover {
+    background-color: transparent;
+  }
+
+  td {
+    padding-top: 0;
+    background-color: var(--bg-secondary);
+  }
+}
+
+.credentialModelsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
 .credentialType {
   display: inline-flex;
   align-items: center;

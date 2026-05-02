@@ -264,6 +264,9 @@ func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	if !contains(body, `"total_cost":3.75`) || !contains(body, `"cost_available":true`) {
 		t.Fatalf("expected aggregated cost in response body: %s", body)
 	}
+	if !contains(body, `"models":[{"model":"claude-sonnet","success_count":3,"failure_count":1,"total_count":4`) || !contains(body, `"total_tokens":620`) {
+		t.Fatalf("expected credential model breakdown in response body: %s", body)
+	}
 	if provider.credentialsCalls != 1 {
 		t.Fatalf("expected ListUsageCredentialStats to be called once, got %d", provider.credentialsCalls)
 	}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UsageCredential } from '@/lib/types';
-import { buildCredentialRows, formatCredentialCost, getTopCredentialRows } from './CredentialStatsCard';
+import { buildCredentialModelRows, buildCredentialRows, formatCredentialCost, getTopCredentialRows } from './CredentialStatsCard';
 
 describe('CredentialStatsCard helpers', () => {
   it('sorts credentials by total request count descending', () => {
@@ -84,6 +84,39 @@ describe('CredentialStatsCard helpers', () => {
   it('shows calculated cost even when credential pricing is incomplete', () => {
     expect(formatCredentialCost({ cost: 0.001, costAvailable: false })).not.toBe('--');
     expect(formatCredentialCost({ cost: 0, costAvailable: false })).toBe('--');
+  });
+
+  it('builds sorted model rows for credential expansion', () => {
+    const models = buildCredentialModelRows([
+      {
+        model: 'model-b',
+        success_count: 1,
+        failure_count: 0,
+        total_count: 1,
+        total_tokens: 100,
+        total_cost: 0.001,
+        cost_available: true,
+      },
+      {
+        model: 'model-a',
+        success_count: 2,
+        failure_count: 1,
+        total_count: 3,
+        total_tokens: 500,
+        total_cost: 0.005,
+        cost_available: false,
+      },
+    ]);
+
+    expect(models.map((model) => model.model)).toEqual(['model-a', 'model-b']);
+    expect(models[0]).toMatchObject({
+      success: 2,
+      failure: 1,
+      total: 3,
+      tokens: 500,
+      cost: 0.005,
+      costAvailable: false,
+    });
   });
 
   it('returns only the top 10 non-empty credential rows', () => {

@@ -161,6 +161,20 @@ export interface UsageEventFilterOptionsResponse {
   sources: UsageSourceFilterOption[]
 }
 
+export interface UsageCredentialModel {
+  model: string
+  success_count: number
+  failure_count: number
+  total_count: number
+  input_tokens?: number
+  output_tokens?: number
+  reasoning_tokens?: number
+  cached_tokens?: number
+  total_tokens?: number
+  total_cost?: number
+  cost_available?: boolean
+}
+
 export interface UsageCredential {
   source: string
   source_type?: string
@@ -175,6 +189,7 @@ export interface UsageCredential {
   total_tokens?: number
   total_cost?: number
   cost_available?: boolean
+  models?: UsageCredentialModel[]
 }
 
 export interface UsageCredentialsResponse {
