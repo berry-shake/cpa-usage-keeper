@@ -13,12 +13,19 @@ type usageCredentialsResponse struct {
 }
 
 type usageCredentialPayload struct {
-	Source       string `json:"source"`
-	SourceType   string `json:"source_type,omitempty"`
-	SourceKey    string `json:"source_key,omitempty"`
-	SuccessCount int64  `json:"success_count"`
-	FailureCount int64  `json:"failure_count"`
-	TotalCount   int64  `json:"total_count"`
+	Source          string  `json:"source"`
+	SourceType      string  `json:"source_type,omitempty"`
+	SourceKey       string  `json:"source_key,omitempty"`
+	SuccessCount    int64   `json:"success_count"`
+	FailureCount    int64   `json:"failure_count"`
+	TotalCount      int64   `json:"total_count"`
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	ReasoningTokens int64   `json:"reasoning_tokens"`
+	CachedTokens    int64   `json:"cached_tokens"`
+	TotalTokens     int64   `json:"total_tokens"`
+	TotalCost       float64 `json:"total_cost"`
+	CostAvailable   bool    `json:"cost_available"`
 }
 
 func registerUsageCredentialsRoute(
@@ -71,9 +78,10 @@ func buildUsageCredentialsPayload(rows []service.UsageCredentialStat, resolver u
 		payload, ok := buckets[bucketKey]
 		if !ok {
 			payload = &usageCredentialPayload{
-				Source:     resolved.DisplayName,
-				SourceType: resolved.SourceType,
-				SourceKey:  resolved.SourceKey,
+				Source:        resolved.DisplayName,
+				SourceType:    resolved.SourceType,
+				SourceKey:     resolved.SourceKey,
+				CostAvailable: true,
 			}
 			buckets[bucketKey] = payload
 			orderedKeys = append(orderedKeys, bucketKey)
@@ -84,6 +92,15 @@ func buildUsageCredentialsPayload(rows []service.UsageCredentialStat, resolver u
 			payload.SuccessCount += row.RequestCount
 		}
 		payload.TotalCount = payload.SuccessCount + payload.FailureCount
+		payload.InputTokens += row.InputTokens
+		payload.OutputTokens += row.OutputTokens
+		payload.ReasoningTokens += row.ReasoningTokens
+		payload.CachedTokens += row.CachedTokens
+		payload.TotalTokens += row.TotalTokens
+		payload.TotalCost += row.TotalCost
+		if !row.CostAvailable {
+			payload.CostAvailable = false
+		}
 	}
 
 	result := make([]usageCredentialPayload, 0, len(orderedKeys))

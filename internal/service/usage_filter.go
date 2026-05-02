@@ -54,10 +54,18 @@ type UsageEventRecord struct {
 }
 
 type UsageCredentialStat struct {
-	Source       string
-	AuthIndex    string
-	Failed       bool
-	RequestCount int64
+	Source          string
+	AuthIndex       string
+	Model           string
+	Failed          bool
+	RequestCount    int64
+	InputTokens     int64
+	OutputTokens    int64
+	ReasoningTokens int64
+	CachedTokens    int64
+	TotalTokens     int64
+	TotalCost       float64
+	CostAvailable   bool
 }
 
 type UsageAnalysisModelStat struct {

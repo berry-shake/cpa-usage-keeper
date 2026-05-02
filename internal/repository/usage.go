@@ -148,13 +148,36 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter UsageQueryFilter) ([
 	}
 
 	query := applyUsageEventsListFilter(db.Model(&models.UsageEvent{}), filter)
-	query = query.Select("TRIM(source) AS source, TRIM(auth_index) AS auth_index, failed, COUNT(*) AS request_count")
-	query = query.Group("TRIM(source), TRIM(auth_index), failed")
-	query = query.Order("request_count DESC, source ASC, auth_index ASC, failed ASC")
+	query = query.Select(strings.Join([]string{
+		"TRIM(source) AS source",
+		"TRIM(auth_index) AS auth_index",
+		"TRIM(model) AS model",
+		"failed",
+		"COUNT(*) AS request_count",
+		"SUM(input_tokens) AS input_tokens",
+		"SUM(output_tokens) AS output_tokens",
+		"SUM(reasoning_tokens) AS reasoning_tokens",
+		"SUM(cached_tokens) AS cached_tokens",
+		"SUM(total_tokens) AS total_tokens",
+	}, ", "))
+	query = query.Group("TRIM(source), TRIM(auth_index), TRIM(model), failed")
+	query = query.Order("request_count DESC, source ASC, auth_index ASC, model ASC, failed ASC")
 
 	var rows []UsageCredentialStatRecord
 	if err := query.Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load usage credential stats: %w", err)
+	}
+	pricingByModel, err := loadPriceSettingsByModel(db)
+	if err != nil {
+		return nil, err
+	}
+	for index := range rows {
+		modelName := normalizeUsageOverviewDimension(rows[index].Model)
+		rows[index].Model = modelName
+		if pricing, ok := pricingByModel[modelName]; ok {
+			rows[index].TotalCost = calculateTokenCost(rows[index].InputTokens, rows[index].OutputTokens, rows[index].CachedTokens, pricing)
+			rows[index].CostAvailable = true
+		}
 	}
 	return rows, nil
 }
@@ -555,15 +578,16 @@ func loadPriceSettingsByModel(db *gorm.DB) (map[string]models.ModelPriceSetting,
 }
 
 func calculateUsageEventCost(event models.UsageEvent, pricing models.ModelPriceSetting) float64 {
-	inputTokens := event.InputTokens
+	return calculateTokenCost(event.InputTokens, event.OutputTokens, event.CachedTokens, pricing)
+}
+
+func calculateTokenCost(inputTokens int64, completionTokens int64, cachedTokens int64, pricing models.ModelPriceSetting) float64 {
 	if inputTokens < 0 {
 		inputTokens = 0
 	}
-	completionTokens := event.OutputTokens
 	if completionTokens < 0 {
 		completionTokens = 0
 	}
-	cachedTokens := event.CachedTokens
 	if cachedTokens < 0 {
 		cachedTokens = 0
 	}

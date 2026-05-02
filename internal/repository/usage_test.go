@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -178,6 +179,73 @@ func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
 	}
 	if len(models) != 1 || models[0].Model != "claude-sonnet" || models[0].TotalRequests != 1 || models[0].FailureCount != 0 {
 		t.Fatalf("expected analysis model stats to include only matching successful event, got %+v", models)
+	}
+}
+
+func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
+	db := openUsageTestDatabase(t)
+	if _, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+		Model:                "claude-sonnet",
+		PromptPricePer1M:     10,
+		CompletionPricePer1M: 20,
+		CachePricePer1M:      1,
+	}); err != nil {
+		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
+	}
+	events := []models.UsageEvent{
+		{
+			EventKey:      "credential-cost-1",
+			SnapshotRunID: 1,
+			APIGroupKey:   "provider-a",
+			Model:         "claude-sonnet",
+			Timestamp:     time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+			Source:        "source-a",
+			AuthIndex:     "1",
+			InputTokens:   250,
+			OutputTokens:  100,
+			CachedTokens:  50,
+			TotalTokens:   400,
+		},
+		{
+			EventKey:      "credential-cost-2",
+			SnapshotRunID: 1,
+			APIGroupKey:   "provider-a",
+			Model:         "unknown-model",
+			Timestamp:     time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC),
+			Source:        "source-a",
+			AuthIndex:     "1",
+			InputTokens:   100,
+			OutputTokens:  50,
+			TotalTokens:   150,
+		},
+	}
+	if _, _, err := InsertUsageEvents(db, events); err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+
+	rows, err := ListUsageCredentialStatsWithFilter(db, UsageQueryFilter{})
+	if err != nil {
+		t.Fatalf("ListUsageCredentialStatsWithFilter returned error: %v", err)
+	}
+	byModel := make(map[string]UsageCredentialStatRecord, len(rows))
+	for _, row := range rows {
+		byModel[row.Model] = row
+	}
+
+	known := byModel["claude-sonnet"]
+	if known.RequestCount != 1 || known.InputTokens != 250 || known.OutputTokens != 100 || known.CachedTokens != 50 || known.TotalTokens != 400 {
+		t.Fatalf("expected token totals for priced model, got %+v", known)
+	}
+	if !known.CostAvailable || math.Abs(known.TotalCost-0.00405) > 0.000000001 {
+		t.Fatalf("expected calculated cost for priced model, got %+v", known)
+	}
+
+	unknown := byModel["unknown-model"]
+	if unknown.RequestCount != 1 || unknown.TotalTokens != 150 {
+		t.Fatalf("expected unpriced model stats, got %+v", unknown)
+	}
+	if unknown.CostAvailable || unknown.TotalCost != 0 {
+		t.Fatalf("expected missing pricing to mark cost unavailable, got %+v", unknown)
 	}
 }
 

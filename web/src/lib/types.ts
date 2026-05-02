@@ -168,6 +168,13 @@ export interface UsageCredential {
   success_count: number
   failure_count: number
   total_count: number
+  input_tokens?: number
+  output_tokens?: number
+  reasoning_tokens?: number
+  cached_tokens?: number
+  total_tokens?: number
+  total_cost?: number
+  cost_available?: boolean
 }
 
 export interface UsageCredentialsResponse {

@@ -207,15 +207,31 @@ func TestUsageEventFilterOptionsReturnsStableModelsAndSources(t *testing.T) {
 
 func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	provider := &usageEventsStub{credentialStats: []service.UsageCredentialStat{{
-		Source:       "sk-provider-key",
-		AuthIndex:    "2",
-		Failed:       false,
-		RequestCount: 3,
+		Source:          "sk-provider-key",
+		AuthIndex:       "2",
+		Model:           "claude-sonnet",
+		Failed:          false,
+		RequestCount:    3,
+		InputTokens:     300,
+		OutputTokens:    120,
+		ReasoningTokens: 15,
+		CachedTokens:    30,
+		TotalTokens:     465,
+		TotalCost:       1.5,
+		CostAvailable:   true,
 	}, {
-		Source:       "sk-provider-key",
-		AuthIndex:    "2",
-		Failed:       true,
-		RequestCount: 1,
+		Source:          "sk-provider-key",
+		AuthIndex:       "2",
+		Model:           "claude-sonnet",
+		Failed:          true,
+		RequestCount:    1,
+		InputTokens:     100,
+		OutputTokens:    40,
+		ReasoningTokens: 5,
+		CachedTokens:    10,
+		TotalTokens:     155,
+		TotalCost:       2.25,
+		CostAvailable:   true,
 	}}}
 	router := NewRouter("", nil, provider, authFileStub{files: []models.AuthFile{{AuthIndex: "2", Email: "user@example.com", Type: "auth-file"}}}, providerMetadataStub{items: []models.ProviderMetadata{{LookupKey: "sk-provider-key", ProviderType: "openai", DisplayName: "OpenAI Mirror", ProviderKey: "openai:OpenAI Mirror"}}}, nil, AuthConfig{}, nil, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
@@ -241,6 +257,12 @@ func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	}
 	if !contains(body, `"success_count":3`) || !contains(body, `"failure_count":1`) || !contains(body, `"total_count":4`) {
 		t.Fatalf("expected aggregated counts in response body: %s", body)
+	}
+	if !contains(body, `"input_tokens":400`) || !contains(body, `"output_tokens":160`) || !contains(body, `"cached_tokens":40`) || !contains(body, `"total_tokens":620`) {
+		t.Fatalf("expected aggregated token counts in response body: %s", body)
+	}
+	if !contains(body, `"total_cost":3.75`) || !contains(body, `"cost_available":true`) {
+		t.Fatalf("expected aggregated cost in response body: %s", body)
 	}
 	if provider.credentialsCalls != 1 {
 		t.Fatalf("expected ListUsageCredentialStats to be called once, got %d", provider.credentialsCalls)

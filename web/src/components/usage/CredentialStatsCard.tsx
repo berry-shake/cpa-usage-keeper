@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Bar } from 'react-chartjs-2';
 import type { ChartData, ChartOptions, TooltipItem } from 'chart.js';
 import { Card } from '@/components/ui/Card';
-import { formatCompactNumber } from '@/utils/usage';
+import { formatCompactNumber, formatUsd } from '@/utils/usage';
 import type { UsageCredential } from '@/lib/types';
 import styles from '@/pages/UsagePage.module.scss';
 
@@ -20,6 +20,8 @@ export interface CredentialRow {
   failure: number;
   total: number;
   successRate: number;
+  cost: number;
+  costAvailable: boolean;
 }
 
 export function buildCredentialRows(credentials: UsageCredential[]): CredentialRow[] {
@@ -31,6 +33,8 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
       const success = Number(credential.success_count) || 0;
       const failure = Number(credential.failure_count) || 0;
       const total = Number(credential.total_count) || success + failure;
+      const costAvailable = credential.cost_available === true;
+      const cost = Number(credential.total_cost) || 0;
       return {
         key,
         displayName,
@@ -39,6 +43,8 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
         failure,
         total,
         successRate: total > 0 ? (success / total) * 100 : 100,
+        cost,
+        costAvailable,
       };
     })
     .sort((a, b) => b.total - a.total);
@@ -46,6 +52,10 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
 
 export function getTopCredentialRows(rows: CredentialRow[], limit = 10): CredentialRow[] {
   return rows.filter((row) => row.total > 0).slice(0, limit);
+}
+
+export function formatCredentialCost(row: Pick<CredentialRow, 'cost' | 'costAvailable'>): string {
+  return row.costAvailable || row.cost > 0 ? formatUsd(row.cost) : '--';
 }
 
 function CredentialStatsTitle({ title, subtitle, eyebrow }: { title: string; subtitle: string; eyebrow: string }) {
@@ -64,6 +74,7 @@ export function CredentialStatsCard({
 }: CredentialStatsCardProps) {
   const { t } = useTranslation();
   const rows = useMemo(() => buildCredentialRows(credentials), [credentials]);
+  const showCost = useMemo(() => rows.some((row) => row.costAvailable || row.cost > 0), [rows]);
 
   return (
     <Card
@@ -87,6 +98,7 @@ export function CredentialStatsCard({
                   <th>{t('usage_stats.credential_name')}</th>
                   <th>{t('usage_stats.requests_count')}</th>
                   <th>{t('usage_stats.success_rate')}</th>
+                  {showCost && <th>{t('usage_stats.total_cost')}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -118,6 +130,9 @@ export function CredentialStatsCard({
                         {row.successRate.toFixed(1)}%
                       </span>
                     </td>
+                    {showCost && (
+                      <td>{formatCredentialCost(row)}</td>
+                    )}
                   </tr>
                 ))}
               </tbody>

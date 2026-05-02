@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UsageCredential } from '@/lib/types';
-import { buildCredentialRows, getTopCredentialRows } from './CredentialStatsCard';
+import { buildCredentialRows, formatCredentialCost, getTopCredentialRows } from './CredentialStatsCard';
 
 describe('CredentialStatsCard helpers', () => {
   it('sorts credentials by total request count descending', () => {
@@ -45,6 +45,45 @@ describe('CredentialStatsCard helpers', () => {
 
     expect(rows[0].total).toBe(5);
     expect(rows[0].successRate).toBe(60);
+  });
+
+  it('maps backend cost fields into credential rows', () => {
+    const rows = buildCredentialRows([
+      {
+        source: 'priced',
+        source_key: 'priced',
+        success_count: 3,
+        failure_count: 1,
+        total_count: 4,
+        total_cost: 0.0123,
+        cost_available: true,
+      },
+      {
+        source: 'unpriced',
+        source_key: 'unpriced',
+        success_count: 1,
+        failure_count: 0,
+        total_count: 1,
+        total_cost: 0.001,
+        cost_available: false,
+      },
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      displayName: 'priced',
+      cost: 0.0123,
+      costAvailable: true,
+    });
+    expect(rows[1]).toMatchObject({
+      displayName: 'unpriced',
+      cost: 0.001,
+      costAvailable: false,
+    });
+  });
+
+  it('shows calculated cost even when credential pricing is incomplete', () => {
+    expect(formatCredentialCost({ cost: 0.001, costAvailable: false })).not.toBe('--');
+    expect(formatCredentialCost({ cost: 0, costAvailable: false })).toBe('--');
   });
 
   it('returns only the top 10 non-empty credential rows', () => {
