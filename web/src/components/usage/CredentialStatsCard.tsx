@@ -2,10 +2,13 @@ import { Fragment, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bar } from 'react-chartjs-2';
 import type { ChartData, ChartOptions, TooltipItem } from 'chart.js';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { formatCompactNumber, formatUsd } from '@/utils/usage';
 import type { UsageCredential } from '@/lib/types';
 import styles from '@/pages/UsagePage.module.scss';
+
+const MOBILE_CREDENTIAL_STATS_PAGE_SIZE = 5;
 
 export interface CredentialStatsCardProps {
   credentials: UsageCredential[];
@@ -108,9 +111,22 @@ export function CredentialStatsCard({
 }: CredentialStatsCardProps) {
   const { t } = useTranslation();
   const [expandedCredentials, setExpandedCredentials] = useState<Set<string>>(new Set());
+  const [mobileRenderState, setMobileRenderState] = useState({
+    key: '',
+    count: MOBILE_CREDENTIAL_STATS_PAGE_SIZE,
+  });
   const rows = useMemo(() => buildCredentialRows(credentials), [credentials]);
   const showCost = useMemo(() => rows.some((row) => row.costAvailable || row.cost > 0), [rows]);
   const columnCount = showCost ? 4 : 3;
+  const mobileRenderKey = `${showCost}:${rows.map((row) => row.key).join('|')}`;
+  const mobileVisibleCount = mobileRenderState.key === mobileRenderKey
+    ? mobileRenderState.count
+    : MOBILE_CREDENTIAL_STATS_PAGE_SIZE;
+  const mobileRows = useMemo(
+    () => rows.slice(0, mobileVisibleCount),
+    [mobileVisibleCount, rows]
+  );
+  const canLoadMoreMobile = mobileRows.length < rows.length;
 
   const toggleExpand = (key: string) => {
     setExpandedCredentials((current) => {
@@ -123,6 +139,13 @@ export function CredentialStatsCard({
       return next;
     });
   };
+  const successRateClass = (successRate: number) => (
+    successRate >= 95
+      ? styles.statSuccess
+      : successRate >= 80
+        ? styles.statNeutral
+        : styles.statFailure
+  );
 
   return (
     <Card
@@ -133,13 +156,13 @@ export function CredentialStatsCard({
           subtitle={t('usage_stats.credential_stats_subtitle')}
         />
       }
-      className={styles.detailsFixedCard}
+      className={`${styles.detailsFixedCard} ${styles.credentialStatsCard}`}
     >
       {loading ? (
         <div className={styles.hint}>{t('common.loading')}</div>
       ) : rows.length > 0 ? (
-        <div className={styles.detailsScroll}>
-          <div className={styles.tableWrapper}>
+        <div className={`${styles.detailsScroll} ${styles.credentialStatsScroll}`}>
+          <div className={`${styles.tableWrapper} ${styles.credentialStatsTableWrapper}`}>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -190,13 +213,7 @@ export function CredentialStatsCard({
                         </td>
                         <td>
                           <span
-                            className={
-                              row.successRate >= 95
-                                ? styles.statSuccess
-                                : row.successRate >= 80
-                                  ? styles.statNeutral
-                                  : styles.statFailure
-                            }
+                            className={successRateClass(row.successRate)}
                           >
                             {row.successRate.toFixed(1)}%
                           </span>
@@ -239,6 +256,145 @@ export function CredentialStatsCard({
                 })}
               </tbody>
             </table>
+          </div>
+          <div className={styles.credentialStatsMobileCards}>
+            {mobileRows.map((row, index) => {
+              const isExpandable = row.models.length > 0;
+              const isExpanded = expandedCredentials.has(row.key);
+              const panelId = `credential-mobile-models-${index}`;
+
+              return (
+                <article key={row.key} className={styles.credentialStatsMobileCard}>
+                  <div className={styles.credentialStatsMobileHeader}>
+                    <div className={styles.credentialStatsMobileNameRow}>
+                      {isExpandable ? (
+                        <button
+                          type="button"
+                          className={styles.credentialStatsMobileExpandButton}
+                          onClick={() => toggleExpand(row.key)}
+                          aria-expanded={isExpanded}
+                          aria-controls={panelId}
+                        >
+                          <span className={styles.expandIcon} aria-hidden="true">
+                            {isExpanded ? '▼' : '▶'}
+                          </span>
+                          <span className={styles.credentialStatsMobileName}>{row.displayName}</span>
+                        </button>
+                      ) : (
+                        <span className={styles.credentialStatsMobileName}>{row.displayName}</span>
+                      )}
+                      {row.type && <span className={styles.credentialType}>{row.type}</span>}
+                    </div>
+                  </div>
+
+                  <dl className={styles.credentialStatsMobileMetrics}>
+                    <div className={styles.credentialStatsMobileMetric}>
+                      <dt className={styles.credentialStatsMobileMetricLabel}>
+                        {t('usage_stats.requests_count')}
+                      </dt>
+                      <dd className={styles.credentialStatsMobileMetricValue}>
+                        <span className={styles.requestCountCell}>
+                          <span>{row.total.toLocaleString()}</span>
+                          <span className={styles.requestBreakdown}>
+                            (<span className={styles.statSuccess}>{row.success.toLocaleString()}</span>{' '}
+                            <span className={styles.statFailure}>{row.failure.toLocaleString()}</span>)
+                          </span>
+                        </span>
+                      </dd>
+                    </div>
+                    <div className={styles.credentialStatsMobileMetric}>
+                      <dt className={styles.credentialStatsMobileMetricLabel}>
+                        {t('usage_stats.success_rate')}
+                      </dt>
+                      <dd className={`${styles.credentialStatsMobileMetricValue} ${successRateClass(row.successRate)}`}>
+                        {row.successRate.toFixed(1)}%
+                      </dd>
+                    </div>
+                    {showCost && (
+                      <div
+                        className={`${styles.credentialStatsMobileMetric} ${styles.credentialStatsMobileMetricWide}`}
+                      >
+                        <dt className={styles.credentialStatsMobileMetricLabel}>
+                          {t('usage_stats.total_cost')}
+                        </dt>
+                        <dd className={styles.credentialStatsMobileMetricValue}>
+                          {formatCredentialCost(row)}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+
+                  {isExpandable && isExpanded && (
+                    <div id={panelId} className={styles.credentialStatsMobileModels}>
+                      {row.models.map((model) => (
+                        <article key={model.model} className={styles.credentialStatsMobileModelItem}>
+                          <div className={styles.credentialStatsMobileModelHeader}>
+                            <span className={styles.credentialStatsMobileModelName}>{model.model}</span>
+                          </div>
+                          <dl className={styles.credentialStatsMobileModelMetrics}>
+                            <div className={styles.credentialStatsMobileMetric}>
+                              <dt className={styles.credentialStatsMobileMetricLabel}>
+                                {t('usage_stats.requests_count')}
+                              </dt>
+                              <dd className={styles.credentialStatsMobileMetricValue}>
+                                <span className={styles.requestCountCell}>
+                                  <span>{model.total.toLocaleString()}</span>
+                                  <span className={styles.requestBreakdown}>
+                                    (<span className={styles.statSuccess}>{model.success.toLocaleString()}</span>{' '}
+                                    <span className={styles.statFailure}>{model.failure.toLocaleString()}</span>)
+                                  </span>
+                                </span>
+                              </dd>
+                            </div>
+                            <div className={styles.credentialStatsMobileMetric}>
+                              <dt className={styles.credentialStatsMobileMetricLabel}>
+                                {t('usage_stats.tokens_count')}
+                              </dt>
+                              <dd className={styles.credentialStatsMobileMetricValue}>
+                                {formatCompactNumber(model.tokens)}
+                              </dd>
+                            </div>
+                            {showCost && (
+                              <div
+                                className={
+                                  `${styles.credentialStatsMobileMetric} ${styles.credentialStatsMobileMetricWide}`
+                                }
+                              >
+                                <dt className={styles.credentialStatsMobileMetricLabel}>
+                                  {t('usage_stats.total_cost')}
+                                </dt>
+                                <dd className={styles.credentialStatsMobileMetricValue}>
+                                  {formatCredentialCost(model)}
+                                </dd>
+                              </div>
+                            )}
+                          </dl>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+            {canLoadMoreMobile && (
+              <div className={styles.credentialStatsLoadMore}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  fullWidth
+                  onClick={() => setMobileRenderState((current) => ({
+                    key: mobileRenderKey,
+                    count: (
+                      current.key === mobileRenderKey
+                        ? current.count
+                        : MOBILE_CREDENTIAL_STATS_PAGE_SIZE
+                    ) + MOBILE_CREDENTIAL_STATS_PAGE_SIZE,
+                  }))}
+                >
+                  {t('usage_stats.credential_stats_load_more')}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       ) : (

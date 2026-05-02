@@ -973,6 +973,19 @@
   overscroll-behavior: contain;
 }
 
+.credentialStatsCard {
+  @include mobile {
+    height: auto;
+    overflow: visible;
+  }
+}
+
+.credentialStatsScroll {
+  @include mobile {
+    overflow: visible;
+  }
+}
+
 .detailsNote {
   padding: 0 4px 10px;
   font-size: 12px;
@@ -1130,6 +1143,160 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   word-break: break-word;
+}
+
+.credentialStatsTableWrapper {
+  @include mobile {
+    display: none;
+  }
+}
+
+.credentialStatsMobileCards {
+  display: none;
+
+  @include mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.credentialStatsLoadMore {
+  display: none;
+
+  @include mobile {
+    display: block;
+    margin-top: 2px;
+  }
+}
+
+.credentialStatsMobileCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+}
+
+.credentialStatsMobileHeader {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.credentialStatsMobileNameRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.credentialStatsMobileExpandButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: $radius-sm;
+  }
+}
+
+.credentialStatsMobileName {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.credentialStatsMobileMetrics,
+.credentialStatsMobileModelMetrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.credentialStatsMobileMetric {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-primary);
+}
+
+.credentialStatsMobileMetricWide {
+  grid-column: 1 / -1;
+}
+
+.credentialStatsMobileMetricLabel {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.credentialStatsMobileMetricValue {
+  margin: 3px 0 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.credentialStatsMobileModels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.credentialStatsMobileModelItem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+
+  .credentialStatsMobileMetric {
+    background: var(--bg-secondary);
+  }
+}
+
+.credentialStatsMobileModelHeader {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.credentialStatsMobileModelName {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  word-break: break-all;
 }
 
 .credentialNameCell {
