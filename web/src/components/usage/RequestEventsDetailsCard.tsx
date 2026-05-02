@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -10,6 +10,7 @@ import { downloadBlob } from '@/utils/download';
 import styles from '@/pages/UsagePage.module.scss';
 
 const ALL_FILTER = '__all__';
+const MOBILE_PAGE_SIZE = 5;
 
 type SelectOption = { value: string; label: string };
 
@@ -154,6 +155,7 @@ export function RequestEventsDetailsCard({
   }, [events, i18n.language]);
 
   const hasLatencyData = useMemo(() => rows.some((row) => row.latencyMs !== null), [rows]);
+  const [mobileRenderState, setMobileRenderState] = useState({ key: '', count: MOBILE_PAGE_SIZE });
 
   const modelOptions = useMemo(() => {
     const options = [
@@ -213,6 +215,15 @@ export function RequestEventsDetailsCard({
   const pageLabel = safeTotalPages > 0
     ? t('usage_stats.request_events_page_control', { page: safePage, totalPages: safeTotalPages })
     : t('usage_stats.request_events_page_empty');
+  const mobileRenderKey = `${page}:${pageSize}:${modelFilter}:${sourceFilter}:${resultFilter}:${rows.length}`;
+  const mobileVisibleCount = mobileRenderState.key === mobileRenderKey
+    ? mobileRenderState.count
+    : MOBILE_PAGE_SIZE;
+  const mobileRows = useMemo(
+    () => rows.slice(0, mobileVisibleCount),
+    [mobileVisibleCount, rows]
+  );
+  const canLoadMoreMobile = mobileRows.length < rows.length;
 
   const handleClearFilters = () => {
     onModelFilterChange(ALL_FILTER);
@@ -467,6 +478,90 @@ export function RequestEventsDetailsCard({
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className={styles.requestEventsMobileCards}>
+            {mobileRows.map((row) => (
+              <article key={row.id} className={styles.requestEventMobileCard}>
+                <div className={styles.requestEventMobileHeader}>
+                  <div className={styles.requestEventMobileTitleBlock}>
+                    <span className={styles.requestEventMobileModel}>{row.model}</span>
+                    <span className={styles.requestEventMobileTimestamp} title={row.timestamp}>
+                      {row.timestampLabel}
+                    </span>
+                  </div>
+                  <span
+                    className={
+                      row.failed
+                        ? styles.requestEventsResultFailed
+                        : styles.requestEventsResultSuccess
+                    }
+                  >
+                    {row.failed ? t('usage_stats.failure') : t('usage_stats.success')}
+                  </span>
+                </div>
+
+                <dl className={styles.requestEventMobileMeta}>
+                  <div className={styles.requestEventMobileMetaItem}>
+                    <dt>{t('usage_stats.request_events_source')}</dt>
+                    <dd title={row.source}>
+                      <span>{row.source}</span>
+                      {row.sourceType && (
+                        <span className={styles.credentialType}>{row.sourceType}</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div className={styles.requestEventMobileMetaItem}>
+                    <dt>{t('usage_stats.request_events_auth_index')}</dt>
+                    <dd>{row.authIndex}</dd>
+                  </div>
+                  {hasLatencyData && (
+                    <div className={styles.requestEventMobileMetaItem}>
+                      <dt>{t('usage_stats.time')}</dt>
+                      <dd>{formatDurationMs(row.latencyMs)}</dd>
+                    </div>
+                  )}
+                </dl>
+
+                <dl className={styles.requestEventMobileTokenGrid}>
+                  <div>
+                    <dt>{t('usage_stats.input_tokens')}</dt>
+                    <dd>{row.inputTokens.toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('usage_stats.output_tokens')}</dt>
+                    <dd>{row.outputTokens.toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('usage_stats.reasoning_tokens')}</dt>
+                    <dd>{row.reasoningTokens.toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('usage_stats.cached_tokens')}</dt>
+                    <dd>{row.cachedTokens.toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('usage_stats.total_tokens')}</dt>
+                    <dd>{row.totalTokens.toLocaleString()}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+            {canLoadMoreMobile && (
+              <div className={styles.requestEventsLoadMore}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  fullWidth
+                  onClick={() => setMobileRenderState((current) => ({
+                    key: mobileRenderKey,
+                    count: (current.key === mobileRenderKey ? current.count : MOBILE_PAGE_SIZE) + MOBILE_PAGE_SIZE,
+                  }))}
+                >
+                  {t('usage_stats.request_events_load_more')}
+                </Button>
+              </div>
+            )}
           </div>
         </>
       )}

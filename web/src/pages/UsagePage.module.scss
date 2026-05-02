@@ -1617,6 +1617,10 @@
   max-height: 460px;
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
+
+  @include mobile {
+    display: none;
+  }
 }
 
 .requestEventsTimestamp {
@@ -1655,6 +1659,128 @@
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.requestEventsMobileCards {
+  display: none;
+
+  @include mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.requestEventsLoadMore {
+  display: none;
+
+  @include mobile {
+    display: block;
+    margin-top: 2px;
+  }
+}
+
+.requestEventMobileCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+}
+
+.requestEventMobileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.requestEventMobileTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.requestEventMobileModel {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.requestEventMobileTimestamp {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.requestEventMobileMeta,
+.requestEventMobileTokenGrid {
+  margin: 0;
+}
+
+.requestEventMobileMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.requestEventMobileMetaItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+
+  dt {
+    flex: 0 0 auto;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  dd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 12px;
+    text-align: right;
+    word-break: break-all;
+  }
+}
+
+.requestEventMobileTokenGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+
+  div {
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    background: var(--bg-primary);
+  }
+
+  dt {
+    color: var(--text-tertiary);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  dd {
+    margin: 3px 0 0;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 .chartLineHeader {

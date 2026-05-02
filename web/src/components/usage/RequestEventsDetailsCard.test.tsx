@@ -124,4 +124,36 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).not.toContain('Export CSV');
     expect(html).not.toContain('Export JSON');
   });
+
+  it('renders a mobile card layout with event details and token metrics', () => {
+    const html = renderCard();
+
+    expect(html).toContain('_requestEventsMobileCards_');
+    expect(html).toContain('_requestEventMobileCard_');
+    expect(html).toContain('claude-sonnet');
+    expect(html).toContain('Provider A');
+    expect(html).toContain('openai');
+    expect(html).toContain('Credential');
+    expect(html).toContain('120ms');
+    expect(html).toContain('Input');
+    expect(html).toContain('Output');
+    expect(html).toContain('Reasoning');
+    expect(html).toContain('Cached');
+    expect(html).toContain('Total Tokens');
+  });
+
+  it('renders the first five mobile cards and a load more action by default', () => {
+    const manyEvents = Array.from({ length: 8 }, (_, index) => ({
+      ...events[0],
+      id: 200 + index,
+      timestamp: `2026-04-23T02:0${index}:00.000Z`,
+      model: `model-${index + 1}`,
+    }));
+
+    const html = renderCard({ events: manyEvents, totalCount: 8, totalPages: 1 });
+
+    expect(countOccurrences(html, '_requestEventMobileCard_')).toBe(5);
+    expect(html).toContain('Load more');
+    expect(html).toContain('model-5');
+  });
 });
