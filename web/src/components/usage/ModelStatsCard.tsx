@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import {
   LATENCY_SOURCE_FIELD,
@@ -9,6 +10,8 @@ import {
   type ModelStatsSummary,
 } from '@/utils/usage';
 import styles from '@/pages/UsagePage.module.scss';
+
+const MOBILE_MODEL_STATS_PAGE_SIZE = 5;
 
 function ModelStatsTitle({ title, subtitle, eyebrow }: { title: string; subtitle: string; eyebrow: string }) {
   return (
@@ -46,6 +49,10 @@ export function ModelStatsCard({ modelStats, loading, hasPrices }: ModelStatsCar
   const { t } = useTranslation();
   const [sortKey, setSortKey] = useState<SortKey>('requests');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [mobileRenderState, setMobileRenderState] = useState({
+    key: '',
+    count: MOBILE_MODEL_STATS_PAGE_SIZE,
+  });
   const latencyHint = t('usage_stats.latency_unit_hint', {
     field: LATENCY_SOURCE_FIELD,
     unit: t('usage_stats.duration_unit_ms'),
@@ -85,6 +92,15 @@ export function ModelStatsCard({ modelStats, loading, hasPrices }: ModelStatsCar
   const ariaSort = (key: SortKey): 'none' | 'ascending' | 'descending' =>
     sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   const hasLatencyData = sorted.some((stat) => stat.latencySampleCount > 0);
+  const mobileRenderKey = `${sortKey}:${sortDir}:${hasPrices}:${sorted.map((stat) => stat.model).join('|')}`;
+  const mobileVisibleCount = mobileRenderState.key === mobileRenderKey
+    ? mobileRenderState.count
+    : MOBILE_MODEL_STATS_PAGE_SIZE;
+  const mobileStats = useMemo(
+    () => sorted.slice(0, mobileVisibleCount),
+    [mobileVisibleCount, sorted]
+  );
+  const canLoadMoreMobile = mobileStats.length < sorted.length;
 
   return (
     <Card
@@ -103,7 +119,7 @@ export function ModelStatsCard({ modelStats, loading, hasPrices }: ModelStatsCar
         <>
           {hasLatencyData && <div className={styles.detailsNote}>{latencyHint}</div>}
           <div className={styles.detailsScroll}>
-            <div className={styles.tableWrapper}>
+            <div className={`${styles.tableWrapper} ${styles.modelStatsTableWrapper}`}>
               <table className={styles.table}>
                 <thead>
                   <tr>
@@ -227,6 +243,102 @@ export function ModelStatsCard({ modelStats, loading, hasPrices }: ModelStatsCar
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className={styles.modelStatsMobileCards}>
+              {mobileStats.map((stat) => (
+                <article key={stat.model} className={styles.modelStatsMobileCard}>
+                  <div className={styles.modelStatsMobileHeader}>
+                    <span className={styles.modelStatsMobileName}>{stat.model}</span>
+                    <span
+                      className={
+                        stat.successRate >= 95
+                          ? styles.statSuccess
+                          : stat.successRate >= 80
+                            ? styles.statNeutral
+                            : styles.statFailure
+                      }
+                    >
+                      {stat.successRate.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  <div className={styles.modelStatsMobileMetrics}>
+                    <div className={styles.modelStatsMobileMetric}>
+                      <span className={styles.modelStatsMobileMetricLabel}>
+                        {t('usage_stats.requests_count')}
+                      </span>
+                      <span className={styles.modelStatsMobileMetricValue}>
+                        <span className={styles.requestCountCell}>
+                          <span>{stat.requests.toLocaleString()}</span>
+                          <span className={styles.requestBreakdown}>
+                            (
+                            <span className={styles.statSuccess}>
+                              {stat.successCount.toLocaleString()}
+                            </span>{' '}
+                            <span className={styles.statFailure}>
+                              {stat.failureCount.toLocaleString()}
+                            </span>
+                            )
+                          </span>
+                        </span>
+                      </span>
+                    </div>
+                    <div className={styles.modelStatsMobileMetric}>
+                      <span className={styles.modelStatsMobileMetricLabel}>
+                        {t('usage_stats.tokens_count')}
+                      </span>
+                      <span className={styles.modelStatsMobileMetricValue}>
+                        {formatCompactNumber(stat.tokens)}
+                      </span>
+                    </div>
+                    <div className={styles.modelStatsMobileMetric}>
+                      <span className={styles.modelStatsMobileMetricLabel}>
+                        {t('usage_stats.avg_time')}
+                      </span>
+                      <span className={styles.modelStatsMobileMetricValue}>
+                        {formatDurationMs(stat.averageLatencyMs)}
+                      </span>
+                    </div>
+                    <div className={styles.modelStatsMobileMetric}>
+                      <span className={styles.modelStatsMobileMetricLabel}>
+                        {t('usage_stats.total_time')}
+                      </span>
+                      <span className={styles.modelStatsMobileMetricValue}>
+                        {formatDurationMs(stat.totalLatencyMs)}
+                      </span>
+                    </div>
+                    {hasPrices && (
+                      <div className={`${styles.modelStatsMobileMetric} ${styles.modelStatsMobileMetricWide}`}>
+                        <span className={styles.modelStatsMobileMetricLabel}>
+                          {t('usage_stats.total_cost')}
+                        </span>
+                        <span className={styles.modelStatsMobileMetricValue}>
+                          {stat.cost > 0 ? formatUsd(stat.cost) : '--'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {canLoadMoreMobile && (
+                <div className={styles.modelStatsLoadMore}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    fullWidth
+                    onClick={() => setMobileRenderState((current) => ({
+                      key: mobileRenderKey,
+                      count: (
+                        current.key === mobileRenderKey
+                          ? current.count
+                          : MOBILE_MODEL_STATS_PAGE_SIZE
+                      ) + MOBILE_MODEL_STATS_PAGE_SIZE,
+                    }))}
+                  >
+                    {t('usage_stats.model_stats_load_more')}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </>

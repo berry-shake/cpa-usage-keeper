@@ -1046,6 +1046,92 @@
   word-break: break-all;
 }
 
+.modelStatsTableWrapper {
+  @include mobile {
+    display: none;
+  }
+}
+
+.modelStatsMobileCards {
+  display: none;
+
+  @include mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.modelStatsLoadMore {
+  display: none;
+
+  @include mobile {
+    display: block;
+    margin-top: 2px;
+  }
+}
+
+.modelStatsMobileCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+}
+
+.modelStatsMobileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modelStatsMobileName {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.modelStatsMobileMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.modelStatsMobileMetric {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-primary);
+}
+
+.modelStatsMobileMetricWide {
+  grid-column: 1 / -1;
+}
+
+.modelStatsMobileMetricLabel {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.modelStatsMobileMetricValue {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
 .credentialNameCell {
   display: inline-flex;
   align-items: center;
