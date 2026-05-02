@@ -1,4 +1,4 @@
-import type { UsageFilterWindow, UsageTimeRange } from '@/lib/types';
+import type { UsageAnalysisApi, UsageAnalysisModel, UsageFilterWindow, UsageTimeRange } from '@/lib/types';
 import type { UsagePayload } from '@/components/usage/hooks/useUsageData';
 import {
   LATENCY_SOURCE_FIELD,
@@ -58,6 +58,7 @@ export interface ApiStatsModelSummary {
   successCount: number;
   failureCount: number;
   tokens: number;
+  cost: number;
 }
 
 export interface ApiStats {
@@ -447,6 +448,54 @@ export function calculateCost(detail: UsageDetailRecord, modelPrices: Record<str
   );
 }
 
+export function calculateAnalysisModelCost(
+  model: UsageAnalysisModel,
+  modelPrices: Record<string, ModelPrice>
+): number {
+  const pricing = modelPrices[model.model];
+  if (!pricing) return 0;
+
+  const cachedTokens = Math.max(toNumber(model.cached_tokens), 0);
+  const inputTokens = Math.max(toNumber(model.input_tokens), 0);
+  const outputTokens = Math.max(toNumber(model.output_tokens), 0);
+  const promptTokens = Math.max(inputTokens - cachedTokens, 0);
+
+  return (
+    (promptTokens / 1_000_000) * pricing.prompt +
+    (outputTokens / 1_000_000) * pricing.completion +
+    (cachedTokens / 1_000_000) * pricing.cache
+  );
+}
+
+export function getAnalysisApiStats(
+  apis: UsageAnalysisApi[],
+  modelPrices: Record<string, ModelPrice>
+): ApiStats[] {
+  return apis.map((api) => {
+    const modelEntries = api.models.map((model) => {
+      const cost = calculateAnalysisModelCost(model, modelPrices);
+      return [model.model, {
+        requests: model.total_requests,
+        successCount: model.success_count,
+        failureCount: model.failure_count,
+        tokens: model.total_tokens,
+        cost,
+      }] as const;
+    });
+
+    return {
+      endpoint: api.api_key,
+      displayName: api.display_name || api.api_key,
+      totalRequests: api.total_requests,
+      successCount: api.success_count,
+      failureCount: api.failure_count,
+      totalTokens: api.total_tokens,
+      totalCost: modelEntries.reduce((sum, [, model]) => sum + model.cost, 0),
+      models: Object.fromEntries(modelEntries)
+    };
+  });
+}
+
 export function buildCandidateUsageSourceIds({ apiKey, prefix }: { apiKey?: string; prefix?: string }): string[] {
   const set = new Set<string>();
   if (apiKey?.trim()) {
@@ -467,15 +516,18 @@ export function getApiStats(usage: UsagePayload | null, modelPrices: Record<stri
       const models: Record<string, ApiStatsModelSummary> = {};
       let totalCost = 0;
       Object.entries(api.models ?? {}).forEach(([modelName, model]) => {
+        let modelCost = 0;
+        (model.details ?? []).forEach((detail) => {
+          modelCost += calculateCost({ ...detail, __modelName: modelName }, modelPrices);
+        });
+        totalCost += modelCost;
         models[modelName] = {
           requests: toNumber(model.total_requests),
           successCount: toNumber(model.success_count),
           failureCount: toNumber(model.failure_count),
-          tokens: toNumber(model.total_tokens)
+          tokens: toNumber(model.total_tokens),
+          cost: modelCost
         };
-        (model.details ?? []).forEach((detail) => {
-          totalCost += calculateCost({ ...detail, __modelName: modelName }, modelPrices);
-        });
       });
       return {
         endpoint,

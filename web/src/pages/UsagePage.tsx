@@ -42,6 +42,7 @@ import {
   useChartData
 } from '@/components/usage';
 import {
+  getAnalysisApiStats,
   getModelNamesFromUsage,
   resolveUsageFilterWindow,
   sanitizeChartLines,
@@ -1044,29 +1045,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     });
   }, [isOverviewTab, overviewModelNames]);
   const apiStats = useMemo(
-    () => analysisData.apis.map((api) => ({
-      endpoint: api.api_key,
-      displayName: api.display_name || api.api_key,
-      totalRequests: api.total_requests,
-      successCount: api.success_count,
-      failureCount: api.failure_count,
-      totalTokens: api.total_tokens,
-      totalCost: api.models.reduce((sum, model) => {
-        const pricing = modelPrices[model.model];
-        if (!pricing) return sum;
-        const cachedTokens = Math.max(Number(model.cached_tokens) || 0, 0);
-        const inputTokens = Math.max(Number(model.input_tokens) || 0, 0);
-        const outputTokens = Math.max(Number(model.output_tokens) || 0, 0);
-        const promptTokens = Math.max(inputTokens - cachedTokens, 0);
-        return sum + ((promptTokens / 1_000_000) * pricing.prompt) + ((outputTokens / 1_000_000) * pricing.completion) + ((cachedTokens / 1_000_000) * pricing.cache);
-      }, 0),
-      models: Object.fromEntries(api.models.map((model) => [model.model, {
-        requests: model.total_requests,
-        successCount: model.success_count,
-        failureCount: model.failure_count,
-        tokens: model.total_tokens,
-      }]))
-    })),
+    () => getAnalysisApiStats(analysisData.apis, modelPrices),
     [analysisData.apis, modelPrices]
   );
   const modelStats = useMemo(

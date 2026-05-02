@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildChartData, buildUsageFromDetails, filterUsageByWindow, filterUsageSnapshot, resolveUsageFilterWindow, sanitizeChartLines } from '@/utils/usage';
+import { buildChartData, buildUsageFromDetails, filterUsageByWindow, filterUsageSnapshot, getAnalysisApiStats, getApiStats, resolveUsageFilterWindow, sanitizeChartLines } from '@/utils/usage';
 import type { UsageSnapshot } from '@/lib/types';
 
 afterEach(() => {
@@ -159,6 +159,78 @@ describe('filterUsageByWindow', () => {
     expect(filtered.apis['provider-a']?.total_tokens).toBe(200);
     expect(filtered.apis['provider-a']?.models['claude-sonnet']?.total_requests).toBe(1);
     expect(filtered.apis['provider-a']?.models['claude-sonnet']?.total_tokens).toBe(200);
+  });
+});
+
+describe('getApiStats', () => {
+  it('calculates cost for API totals and each expanded model row', () => {
+    const [api] = getApiStats(usage, {
+      'claude-sonnet': {
+        prompt: 10,
+        completion: 20,
+        cache: 1,
+      },
+    });
+
+    expect(api.totalCost).toBeCloseTo(0.0045);
+    expect(api.models['claude-sonnet']?.cost).toBeCloseTo(0.0045);
+  });
+});
+
+describe('getAnalysisApiStats', () => {
+  it('carries calculated costs into API totals and expanded model rows', () => {
+    const [api] = getAnalysisApiStats([
+      {
+        api_key: 'api-a',
+        display_name: 'API A',
+        total_requests: 3,
+        success_count: 2,
+        failure_count: 1,
+        input_tokens: 350,
+        output_tokens: 150,
+        reasoning_tokens: 0,
+        cached_tokens: 50,
+        total_tokens: 550,
+        models: [
+          {
+            model: 'claude-sonnet',
+            total_requests: 2,
+            success_count: 2,
+            failure_count: 0,
+            input_tokens: 250,
+            output_tokens: 100,
+            reasoning_tokens: 0,
+            cached_tokens: 50,
+            total_tokens: 400,
+            total_latency_ms: 0,
+            latency_sample_count: 0,
+          },
+          {
+            model: 'unknown-model',
+            total_requests: 1,
+            success_count: 0,
+            failure_count: 1,
+            input_tokens: 100,
+            output_tokens: 50,
+            reasoning_tokens: 0,
+            cached_tokens: 0,
+            total_tokens: 150,
+            total_latency_ms: 0,
+            latency_sample_count: 0,
+          },
+        ],
+      },
+    ], {
+      'claude-sonnet': {
+        prompt: 10,
+        completion: 20,
+        cache: 1,
+      },
+    });
+
+    expect(api.totalCost).toBeCloseTo(0.00405);
+    expect(api.models['claude-sonnet']?.cost).toBeCloseTo(0.00405);
+    expect(api.models['unknown-model']?.cost).toBe(0);
   });
 });
 

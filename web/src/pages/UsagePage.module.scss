@@ -930,6 +930,14 @@
   }
 }
 
+.modelRowWithCost {
+  grid-template-columns: 1fr auto auto auto;
+
+  @include mobile {
+    grid-template-columns: 1fr;
+  }
+}
+
 .modelName {
   color: var(--text-primary);
   font-weight: 500;
