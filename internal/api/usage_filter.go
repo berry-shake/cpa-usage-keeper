@@ -16,6 +16,7 @@ var presetUsageRangeDurations = map[string]time.Duration{
 	"12h": 12 * time.Hour,
 	"24h": 24 * time.Hour,
 	"7d":  7 * 24 * time.Hour,
+	"30d": 30 * 24 * time.Hour,
 }
 
 var allowedUsageEventsPageSizes = map[int]struct{}{

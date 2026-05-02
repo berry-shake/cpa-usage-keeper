@@ -227,8 +227,9 @@ describe('UsagePage time range options', () => {
   it('places Today after 24h position and removes 24h from selectable ranges', () => {
     const options = getTimeRangeOptions((key) => `translated:${key}`);
 
-    expect(options.map((option) => option.value)).toEqual(['4h', '8h', '12h', 'today', '7d', 'custom']);
+    expect(options.map((option) => option.value)).toEqual(['4h', '8h', '12h', 'today', '7d', '30d', 'custom']);
     expect(options.map((option) => option.label)).toContain('translated:usage_stats.range_today');
+    expect(options.map((option) => option.label)).toContain('translated:usage_stats.range_30d');
   });
 });
 

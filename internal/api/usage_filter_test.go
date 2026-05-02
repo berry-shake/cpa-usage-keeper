@@ -28,6 +28,28 @@ func TestParseUsageFilterQueryPresetRange(t *testing.T) {
 	}
 }
 
+func TestParseUsageFilterQueryThirtyDayPresetRange(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=30d", nil)
+	anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+
+	filter, err := parseUsageFilterQuery(req, anchor)
+	if err != nil {
+		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
+	}
+	if filter.Range != "30d" {
+		t.Fatalf("expected range to be preserved, got %+v", filter)
+	}
+	if filter.StartTime == nil || filter.EndTime == nil {
+		t.Fatalf("expected preset range to resolve concrete times, got %+v", filter)
+	}
+	if !filter.EndTime.Equal(anchor) {
+		t.Fatalf("expected preset range end to use anchor time, got %+v", filter)
+	}
+	if !filter.StartTime.Equal(anchor.Add(-30 * 24 * time.Hour)) {
+		t.Fatalf("expected preset range start to subtract 30d, got %+v", filter)
+	}
+}
+
 func TestParseUsageFilterQueryTodayRangeUsesLocalDayBoundary(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")

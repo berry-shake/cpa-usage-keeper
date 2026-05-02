@@ -201,12 +201,13 @@ const resolveHourlyChartEndMs = (details: UsageDetailRecord[], _hourWindowHours?
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
-const PRESET_WINDOW_HOURS: Record<Extract<UsageTimeRange, '4h' | '8h' | '12h' | '24h' | '7d'>, number> = {
+const PRESET_WINDOW_HOURS: Record<Extract<UsageTimeRange, '4h' | '8h' | '12h' | '24h' | '7d' | '30d'>, number> = {
   '4h': 4,
   '8h': 8,
   '12h': 12,
   '24h': 24,
-  '7d': 24 * 7
+  '7d': 24 * 7,
+  '30d': 24 * 30
 };
 
 const toValidTimestamp = (value: unknown): number | null => {

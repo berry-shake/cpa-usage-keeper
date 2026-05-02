@@ -10,6 +10,7 @@ const options: Array<{ value: UsageTimeRange; label: string }> = [
   { value: 'all', label: 'All data' },
   { value: 'today', label: 'Today' },
   { value: '7d', label: 'Last 7d' },
+  { value: '30d', label: 'Last 30d' },
 ]
 
 export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
