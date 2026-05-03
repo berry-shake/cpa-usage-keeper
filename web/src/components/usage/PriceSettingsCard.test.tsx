@@ -1,6 +1,8 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
-import { buildPricingModelOptions } from './PriceSettingsCard';
+import { renderToStaticMarkup } from 'react-dom/server';
+import '@/i18n';
+import { PriceSettingsCard, buildPricingModelOptions } from './PriceSettingsCard';
 
 const configuredBadge = <span data-testid="configured" />;
 
@@ -27,5 +29,30 @@ describe('buildPricingModelOptions', () => {
     expect(options.find((option) => option.value === 'unpriced-alpha')?.suffix).toBeUndefined();
     expect(options.find((option) => option.value === 'priced-alpha')?.suffix).toBe(configuredBadge);
     expect(options.find((option) => option.value === 'priced-alpha')?.suffixAriaLabel).toBe('Configured');
+  });
+});
+
+describe('PriceSettingsCard', () => {
+  it('renders remote sync action and last sync summary', () => {
+    const html = renderToStaticMarkup(
+      <PriceSettingsCard
+        modelNames={['claude-sonnet']}
+        modelPrices={{}}
+        onPricesChange={() => {}}
+        onSyncPrices={async () => {}}
+        syncMeta={{
+          sourceUrl: 'https://example.test/prices.json',
+          sourceUrls: ['https://example.test/prices.json'],
+          importedCount: 10,
+          matchedCount: 1,
+          updatedCount: 1,
+          unmatchedModels: [],
+          syncedAt: '2026-05-03T01:02:03Z',
+        }}
+      />
+    );
+
+    expect(html).toContain('Sync Remote Prices');
+    expect(html).toContain('matched 1 models');
   });
 });

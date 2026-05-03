@@ -423,6 +423,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     error: pricingError,
     loadPricing,
     setModelPrices,
+    syncingPrices,
+    syncMeta,
+    syncRemoteModelPrices,
   } = usePricingData({
     onAuthRequired,
     enabled: activeTab === 'pricing',
@@ -1368,6 +1371,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 modelNames={modelNames}
                 modelPrices={modelPrices}
                 onPricesChange={setModelPrices}
+                onSyncPrices={syncRemoteModelPrices}
+                syncingPrices={syncingPrices}
+                syncMeta={syncMeta}
                 loading={pricingLoading}
               />
             )}

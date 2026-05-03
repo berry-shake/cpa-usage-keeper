@@ -244,6 +244,17 @@ export interface PricingResponse {
   pricing: PricingEntry[]
 }
 
+export interface PricingSyncResponse {
+  source_url: string
+  source_urls: string[]
+  imported_count: number
+  matched_count: number
+  updated_count: number
+  unmatched_models: string[]
+  synced_at: string
+  pricing: PricingEntry[]
+}
+
 export type UsageTimeRange = 'all' | '4h' | '8h' | '12h' | '24h' | 'today' | '7d' | '30d' | 'custom'
 
 export interface UsageFilterWindow {

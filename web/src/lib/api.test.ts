@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchUsageEventFilterOptions, fetchUsageEvents, triggerSync } from './api';
+import { fetchUsageEventFilterOptions, fetchUsageEvents, syncRemotePricing, triggerSync } from './api';
 
 describe('fetchUsageEvents', () => {
   afterEach(() => {
@@ -81,5 +81,31 @@ describe('fetchUsageEvents', () => {
     expect(response.last_status).toBe('completed');
     expect(parsed.pathname).toBe('/api/v1/sync');
     expect(init).toMatchObject({ credentials: 'include', method: 'POST', signal });
+  });
+
+  it('posts to the remote pricing sync endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        source_url: 'https://example.test/prices.json',
+        source_urls: ['https://example.test/prices.json'],
+        imported_count: 10,
+        matched_count: 1,
+        updated_count: 1,
+        unmatched_models: [],
+        synced_at: '2026-05-03T01:02:03Z',
+        pricing: [],
+      }),
+    } as Response);
+
+    const response = await syncRemotePricing();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(response.matched_count).toBe(1);
+    expect(parsed.pathname).toBe('/api/v1/pricing/sync');
+    expect(init).toMatchObject({ credentials: 'include', method: 'POST' });
   });
 });

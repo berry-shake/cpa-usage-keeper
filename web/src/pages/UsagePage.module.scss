@@ -1618,6 +1618,16 @@
   min-height: 0;
 }
 
+.priceSyncSummary {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .priceForm {
   padding: 10px;
   background-color: var(--bg-secondary);

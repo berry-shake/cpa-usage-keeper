@@ -1,4 +1,4 @@
-import type { AuthSessionResponse, PricingEntry, PricingResponse, StatusResponse, UsageAnalysisResponse, UsageEventFilterOptionsResponse, UsedModelsResponse, UsageCredentialsResponse, UsageEventsResponse, UsageOverviewResponse } from './types'
+import type { AuthSessionResponse, PricingEntry, PricingResponse, PricingSyncResponse, StatusResponse, UsageAnalysisResponse, UsageEventFilterOptionsResponse, UsedModelsResponse, UsageCredentialsResponse, UsageEventsResponse, UsageOverviewResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -210,6 +210,16 @@ export async function fetchPricing(signal?: AbortSignal): Promise<PricingRespons
   const response = await apiFetch(apiPath('/pricing'), { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load pricing: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function syncRemotePricing(): Promise<PricingSyncResponse> {
+  const response = await apiFetch(apiPath('/pricing/sync'), {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to sync pricing: ${response.status}`)
   }
   return response.json()
 }

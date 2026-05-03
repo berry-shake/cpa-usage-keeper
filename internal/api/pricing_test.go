@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"cpa-usage-keeper/internal/models"
 	"cpa-usage-keeper/internal/service"
@@ -17,6 +18,7 @@ type pricingStub struct {
 	updated    *models.ModelPriceSetting
 	lastUpdate *service.UpdatePricingInput
 	deleted    string
+	syncResult *service.RemotePricingSyncResult
 	err        error
 }
 
@@ -36,6 +38,10 @@ func (s *pricingStub) UpdatePricing(_ context.Context, input service.UpdatePrici
 func (s *pricingStub) DeletePricing(_ context.Context, model string) error {
 	s.deleted = model
 	return s.err
+}
+
+func (s *pricingStub) SyncRemotePricing(context.Context) (*service.RemotePricingSyncResult, error) {
+	return s.syncResult, s.err
 }
 
 func TestPricingRoutesReturnEmptyResponsesWithoutProvider(t *testing.T) {
@@ -140,5 +146,39 @@ func TestDeletePricingRoute(t *testing.T) {
 	}
 	if provider.deleted != "openai/gpt-4.1" {
 		t.Fatalf("expected model to be deleted, got %q", provider.deleted)
+	}
+}
+
+func TestSyncPricingRoute(t *testing.T) {
+	provider := &pricingStub{
+		syncResult: &service.RemotePricingSyncResult{
+			SourceURL:       "https://example.test/prices.json",
+			SourceURLs:      []string{"https://example.test/prices.json"},
+			ImportedCount:   10,
+			MatchedCount:    1,
+			UpdatedCount:    1,
+			UnmatchedModels: []string{"unmatched-model"},
+			SyncedAt:        time.Date(2026, 5, 3, 1, 2, 3, 0, time.UTC),
+			Pricing: []models.ModelPriceSetting{{
+				Model:                "claude-sonnet",
+				PromptPricePer1M:     3,
+				CompletionPricePer1M: 15,
+				CachePricePer1M:      0.3,
+			}},
+		},
+	}
+	router := NewRouter("", nil, nil, nil, nil, provider, AuthConfig{}, nil, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/pricing/sync", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK ||
+		!contains(body, `"matched_count":1`) ||
+		!contains(body, `"updated_count":1`) ||
+		!contains(body, `"model":"claude-sonnet"`) ||
+		!contains(body, `"synced_at":"2026-05-03T01:02:03Z"`) {
+		t.Fatalf("unexpected sync response: %d %s", resp.Code, body)
 	}
 }

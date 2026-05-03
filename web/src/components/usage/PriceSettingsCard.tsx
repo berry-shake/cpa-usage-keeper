@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { IconCheck } from '@/components/ui/icons';
+import type { PricingSyncMeta } from '@/components/usage/hooks/usePricingData';
 import type { ModelPrice } from '@/utils/usage';
 import styles from '@/pages/UsagePage.module.scss';
 
@@ -19,6 +20,9 @@ export interface PriceSettingsCardProps {
   modelNames: string[];
   modelPrices: Record<string, ModelPrice>;
   onPricesChange: (prices: Record<string, ModelPrice>) => void;
+  onSyncPrices: () => Promise<void>;
+  syncingPrices?: boolean;
+  syncMeta?: PricingSyncMeta | null;
   loading?: boolean;
 }
 
@@ -67,6 +71,9 @@ export function PriceSettingsCard({
   modelNames,
   modelPrices,
   onPricesChange,
+  onSyncPrices,
+  syncingPrices = false,
+  syncMeta = null,
   loading = false
 }: PriceSettingsCardProps) {
   const { t } = useTranslation();
@@ -146,6 +153,20 @@ export function PriceSettingsCard({
     ),
     [modelNames, modelPrices, t]
   );
+  const syncSummary = useMemo(() => {
+    if (!syncMeta?.syncedAt) {
+      return t('usage_stats.model_price_sync_hint');
+    }
+    const syncedAt = new Date(syncMeta.syncedAt);
+    const syncedAtText = Number.isNaN(syncedAt.getTime())
+      ? syncMeta.syncedAt
+      : syncedAt.toLocaleString();
+    return t('usage_stats.model_price_sync_summary', {
+      time: syncedAtText,
+      count: syncMeta.matchedCount,
+      source: syncMeta.sourceUrl || '-',
+    });
+  }, [syncMeta, t]);
 
   return (
     <Card
@@ -156,6 +177,17 @@ export function PriceSettingsCard({
           subtitle={t('usage_stats.model_price_settings_subtitle')}
         />
       }
+      extra={
+        <Button
+          variant="secondary"
+          size="sm"
+          loading={syncingPrices}
+          disabled={syncingPrices || loading || modelNames.length === 0}
+          onClick={() => void onSyncPrices()}
+        >
+          {t('usage_stats.model_price_sync')}
+        </Button>
+      }
       className={styles.detailsFixedCard}
     >
       <div className={styles.pricingSection}>
@@ -163,6 +195,7 @@ export function PriceSettingsCard({
           <div className={styles.hint}>{t('common.loading')}</div>
         ) : (
           <>
+            <div className={styles.priceSyncSummary}>{syncSummary}</div>
             <div className={styles.priceForm}>
               <div className={styles.formRow}>
                 <div className={styles.formField}>

@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"cpa-usage-keeper/internal/service"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,17 @@ type pricingEntryResponse struct {
 
 type pricingListResponse struct {
 	Pricing []pricingEntryResponse `json:"pricing"`
+}
+
+type pricingSyncResponse struct {
+	SourceURL       string                 `json:"source_url"`
+	SourceURLs      []string               `json:"source_urls"`
+	ImportedCount   int                    `json:"imported_count"`
+	MatchedCount    int                    `json:"matched_count"`
+	UpdatedCount    int                    `json:"updated_count"`
+	UnmatchedModels []string               `json:"unmatched_models"`
+	SyncedAt        string                 `json:"synced_at"`
+	Pricing         []pricingEntryResponse `json:"pricing"`
 }
 
 type updatePricingRequest struct {
@@ -68,6 +80,40 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 			})
 		}
 		c.JSON(http.StatusOK, pricingListResponse{Pricing: response})
+	})
+
+	router.POST("/pricing/sync", func(c *gin.Context) {
+		if pricingProvider == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "pricing provider is not configured"})
+			return
+		}
+
+		result, err := pricingProvider.SyncRemotePricing(c.Request.Context())
+		if err != nil {
+			writeInternalError(c, "sync pricing failed", err)
+			return
+		}
+
+		response := make([]pricingEntryResponse, 0, len(result.Pricing))
+		for _, setting := range result.Pricing {
+			response = append(response, pricingEntryResponse{
+				Model:                setting.Model,
+				PromptPricePer1M:     setting.PromptPricePer1M,
+				CompletionPricePer1M: setting.CompletionPricePer1M,
+				CachePricePer1M:      setting.CachePricePer1M,
+			})
+		}
+
+		c.JSON(http.StatusOK, pricingSyncResponse{
+			SourceURL:       result.SourceURL,
+			SourceURLs:      result.SourceURLs,
+			ImportedCount:   result.ImportedCount,
+			MatchedCount:    result.MatchedCount,
+			UpdatedCount:    result.UpdatedCount,
+			UnmatchedModels: result.UnmatchedModels,
+			SyncedAt:        result.SyncedAt.Format(time.RFC3339),
+			Pricing:         response,
+		})
 	})
 
 	router.PUT("/pricing", func(c *gin.Context) {

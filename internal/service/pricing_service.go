@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/models"
@@ -18,6 +19,7 @@ type PricingProvider interface {
 	ListPricing(context.Context) ([]models.ModelPriceSetting, error)
 	UpdatePricing(context.Context, UpdatePricingInput) (*models.ModelPriceSetting, error)
 	DeletePricing(context.Context, string) error
+	SyncRemotePricing(context.Context) (*RemotePricingSyncResult, error)
 }
 
 type ModelsFetcher interface {
@@ -32,12 +34,18 @@ type UpdatePricingInput struct {
 }
 
 type pricingService struct {
-	db            *gorm.DB
-	modelsFetcher ModelsFetcher
+	db                  *gorm.DB
+	modelsFetcher       ModelsFetcher
+	remotePricesFetcher RemoteModelPricesFetcher
+	now                 func() time.Time
 }
 
 func NewPricingService(db *gorm.DB, modelsFetcher ...ModelsFetcher) PricingProvider {
-	service := &pricingService{db: db}
+	service := &pricingService{
+		db:                  db,
+		remotePricesFetcher: NewHTTPRemoteModelPricesFetcher(nil, nil),
+		now:                 time.Now,
+	}
 	if len(modelsFetcher) > 0 {
 		service.modelsFetcher = modelsFetcher[0]
 	}
@@ -84,6 +92,69 @@ func (s *pricingService) UpdatePricing(ctx context.Context, input UpdatePricingI
 
 func (s *pricingService) DeletePricing(_ context.Context, model string) error {
 	return repository.DeleteModelPriceSetting(s.db, model)
+}
+
+func (s *pricingService) SyncRemotePricing(ctx context.Context) (*RemotePricingSyncResult, error) {
+	usedModels, err := s.effectiveModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	fetcher := s.remotePricesFetcher
+	if fetcher == nil {
+		fetcher = NewHTTPRemoteModelPricesFetcher(nil, nil)
+	}
+	remoteResult, err := fetcher.FetchRemoteModelPrices(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	matchedPrices := MatchRemoteModelPrices(usedModels, remoteResult.Prices)
+	matchedModels := make([]string, 0, len(matchedPrices))
+	for modelName := range matchedPrices {
+		matchedModels = append(matchedModels, modelName)
+	}
+	sort.Strings(matchedModels)
+
+	settings := make([]models.ModelPriceSetting, 0, len(matchedModels))
+	for _, modelName := range matchedModels {
+		price := matchedPrices[modelName]
+		setting, err := repository.UpsertModelPriceSetting(s.db, repository.ModelPriceSettingInput{
+			Model:                modelName,
+			PromptPricePer1M:     price.PromptPricePer1M,
+			CompletionPricePer1M: price.CompletionPricePer1M,
+			CachePricePer1M:      price.CachePricePer1M,
+		})
+		if err != nil {
+			return nil, err
+		}
+		settings = append(settings, *setting)
+	}
+
+	unmatchedModels := make([]string, 0, len(usedModels)-len(matchedModels))
+	for _, modelName := range usedModels {
+		if strings.TrimSpace(modelName) == "" {
+			continue
+		}
+		if _, ok := matchedPrices[modelName]; !ok {
+			unmatchedModels = append(unmatchedModels, modelName)
+		}
+	}
+
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	return &RemotePricingSyncResult{
+		SourceURL:       remoteResult.SourceURL,
+		SourceURLs:      remoteResult.SourceURLs,
+		ImportedCount:   remoteResult.ImportedCount,
+		MatchedCount:    len(matchedModels),
+		UpdatedCount:    len(settings),
+		UnmatchedModels: unmatchedModels,
+		Pricing:         settings,
+		SyncedAt:        now().UTC(),
+	}, nil
 }
 
 func (s *pricingService) effectiveModels(ctx context.Context) ([]string, error) {
