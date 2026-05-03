@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	RemoteModelPricePrimaryURL  = "https://raw.githubusercontent.com/berry-shake/Cli-Proxy-API-Management-Center/refs/heads/sync_upstream/model_prices.json"
+	RemoteModelPricePrimaryURL  = "https://raw.githubusercontent.com/berry-shake/cpa-usage-keeper/refs/heads/mod/model_prices.json"
 	RemoteModelPriceFallbackURL = "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/refs/heads/main/model_prices_and_context_window.json"
 
 	remoteModelPriceRequestTimeout = 15 * time.Second

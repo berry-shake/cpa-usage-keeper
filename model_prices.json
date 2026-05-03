@@ -1,0 +1,332 @@
+{
+  "claude-opus-4-7": {
+    "prompt": 5,
+    "completion": 25,
+    "cache": 0.5
+  },
+  "claude-opus-4-6": {
+    "prompt": 5,
+    "completion": 25,
+    "cache": 0.5
+  },
+  "claude-sonnet-4-6": {
+    "prompt": 3,
+    "completion": 15,
+    "cache": 0.3
+  },
+  "claude-haiku-4-5-20251001": {
+    "prompt": 1,
+    "completion": 5,
+    "cache": 0.1
+  },
+  "claude-haiku-4-5": {
+    "prompt": 1,
+    "completion": 5,
+    "cache": 0.1
+  },
+  "gpt-5.5": {
+    "prompt": 5,
+    "completion": 30,
+    "cache": 0.5
+  },
+  "gpt-5.5-pro": {
+    "prompt": 30,
+    "completion": 180,
+    "cache": 0
+  },
+  "gpt-5.4-pro": {
+    "prompt": 30,
+    "completion": 180,
+    "cache": 0
+  },
+  "gpt-5.4": {
+    "prompt": 2.5,
+    "completion": 15,
+    "cache": 0.25
+  },
+  "gpt-5.4-mini": {
+    "prompt": 0.75,
+    "completion": 4.5,
+    "cache": 0.075
+  },
+  "gpt-5.4-nano": {
+    "prompt": 0.2,
+    "completion": 1.25,
+    "cache": 0.02
+  },
+  "gpt-5.3": {
+    "prompt": 1.75,
+    "completion": 14,
+    "cache": 0.175
+  },
+  "gpt-5.3-chat-latest": {
+    "prompt": 1.75,
+    "completion": 14,
+    "cache": 0.175
+  },
+  "gpt-5.3-codex": {
+    "prompt": 1.75,
+    "completion": 14,
+    "cache": 0.175
+  },
+  "gpt-5.3-codex-spark": {
+    "prompt": 1.75,
+    "completion": 14,
+    "cache": 0.175
+  },
+  "gpt-5.2": {
+    "prompt": 1.75,
+    "completion": 14,
+    "cache": 0.175
+  },
+  "gpt-5.2-pro": {
+    "prompt": 21,
+    "completion": 168,
+    "cache": 0
+  },
+  "gpt-5.2-chat-latest": {
+    "prompt": 1.75,
+    "completion": 14,
+    "cache": 0.175
+  },
+  "gpt-5.2-codex": {
+    "prompt": 1.75,
+    "completion": 14,
+    "cache": 0.175
+  },
+  "gpt-5.1": {
+    "prompt": 1.25,
+    "completion": 10,
+    "cache": 0.125
+  },
+  "gpt-5.1-chat-latest": {
+    "prompt": 1.25,
+    "completion": 10,
+    "cache": 0.125
+  },
+  "gpt-5.1-codex": {
+    "prompt": 1.25,
+    "completion": 10,
+    "cache": 0.125
+  },
+  "gpt-5.1-codex-mini": {
+    "prompt": 0.25,
+    "completion": 2,
+    "cache": 0.025
+  },
+  "gpt-5.1-codex-max": {
+    "prompt": 1.25,
+    "completion": 10,
+    "cache": 0.125
+  },
+  "gpt-5": {
+    "prompt": 1.25,
+    "completion": 10,
+    "cache": 0.125
+  },
+  "gpt-5-mini": {
+    "prompt": 0.25,
+    "completion": 2,
+    "cache": 0.025
+  },
+  "gpt-5-nano": {
+    "prompt": 0.05,
+    "completion": 0.4,
+    "cache": 0.005
+  },
+  "gpt-5-pro": {
+    "prompt": 15,
+    "completion": 120,
+    "cache": 0
+  },
+  "gpt-5-chat-latest": {
+    "prompt": 1.25,
+    "completion": 10,
+    "cache": 0.125
+  },
+  "gpt-5-codex": {
+    "prompt": 1.25,
+    "completion": 10,
+    "cache": 0.125
+  },
+  "gpt-5-codex-mini": {
+    "prompt": 0.25,
+    "completion": 2,
+    "cache": 0.025
+  },
+  "codex-mini-latest": {
+    "prompt": 1.5,
+    "completion": 6,
+    "cache": 0.375
+  },
+  "MiniMax-M2": {
+    "prompt": 0.3,
+    "completion": 1.2,
+    "cache": 0.03
+  },
+  "MiniMax-M2.5": {
+    "prompt": 0.3,
+    "completion": 1.2,
+    "cache": 0.03
+  },
+  "MiniMax-M2.5-highspeed": {
+    "prompt": 0.6,
+    "completion": 2.4,
+    "cache": 0.03
+  },
+  "MiniMax-M2.7": {
+    "prompt": 0.3,
+    "completion": 1.2,
+    "cache": 0.06
+  },
+  "MiniMax-M2.7-highspeed": {
+    "prompt": 0.6,
+    "completion": 2.4,
+    "cache": 0.06
+  },
+  "M2-her": {
+    "prompt": 0.3,
+    "completion": 1.2,
+    "cache": 0
+  },
+  "glm-5.1": {
+    "prompt": 1.4,
+    "completion": 4.4,
+    "cache": 0.26
+  },
+  "glm-5": {
+    "prompt": 1,
+    "completion": 3.2,
+    "cache": 0.2
+  },
+  "glm-5-turbo": {
+    "prompt": 1.2,
+    "completion": 4,
+    "cache": 0.24
+  },
+  "glm-4.7": {
+    "prompt": 0.6,
+    "completion": 2.2,
+    "cache": 0.11
+  },
+  "glm-4.7-flashx": {
+    "prompt": 0.07,
+    "completion": 0.4,
+    "cache": 0.01
+  },
+  "kimi-k2.6": {
+    "prompt": 0.95,
+    "completion": 4,
+    "cache": 0.16
+  },
+  "kimi-k2.5": {
+    "prompt": 0.6,
+    "completion": 3,
+    "cache": 0.1
+  },
+  "kimi-k2-0905-preview": {
+    "prompt": 0.6,
+    "completion": 2.5,
+    "cache": 0.15
+  },
+  "kimi-k2-0711-preview": {
+    "prompt": 0.6,
+    "completion": 2.5,
+    "cache": 0.15
+  },
+  "kimi-k2-turbo": {
+    "prompt": 1.15,
+    "completion": 8,
+    "cache": 0
+  },
+  "kimi-k2-turbo-preview": {
+    "prompt": 1.15,
+    "completion": 8,
+    "cache": 0.15
+  },
+  "kimi-k2-thinking": {
+    "prompt": 0.6,
+    "completion": 2.5,
+    "cache": 0.15
+  },
+  "kimi-k2-thinking-turbo": {
+    "prompt": 1.15,
+    "completion": 8,
+    "cache": 0.15
+  },
+  "deepseek-v4-pro": {
+    "prompt": 1.74,
+    "completion": 3.48,
+    "cache": 0.0145
+  },
+  "deepseek-v4-flash": {
+    "prompt": 0.14,
+    "completion": 0.28,
+    "cache": 0.0028
+  },
+  "deepseek-chat": {
+    "prompt": 0.14,
+    "completion": 0.28,
+    "cache": 0.0028
+  },
+  "deepseek-reasoner": {
+    "prompt": 0.14,
+    "completion": 0.28,
+    "cache": 0.0028
+  },
+  "deepseek-v3.2": {
+    "prompt": 0.57,
+    "completion": 1.71,
+    "cache": 0.057
+  },
+  "qwen3-max": {
+    "prompt": 1.2,
+    "completion": 6,
+    "cache": 0.12
+  },
+  "qwen3.5-plus": {
+    "prompt": 0.4,
+    "completion": 2.4,
+    "cache": 0.04
+  },
+  "qwen3.5-flash": {
+    "prompt": 0.1,
+    "completion": 0.4,
+    "cache": 0.01
+  },
+  "qwen3-coder-plus": {
+    "prompt": 1,
+    "completion": 5,
+    "cache": 0.1
+  },
+  "qwen3-coder-flash": {
+    "prompt": 0.3,
+    "completion": 1.5,
+    "cache": 0.03
+  },
+  "mimo-v2.5-pro": {
+    "prompt": 1,
+    "completion": 3,
+    "cache": 0.2
+  },
+  "mimo-v2-pro": {
+    "prompt": 1,
+    "completion": 3,
+    "cache": 0.2
+  },
+  "mimo-v2.5": {
+    "prompt": 0.4,
+    "completion": 2,
+    "cache": 0.08
+  },
+  "mimo-v2-omni": {
+    "prompt": 0.4,
+    "completion": 2,
+    "cache": 0.08
+  },
+  "mimo-v2-flash": {
+    "prompt": 0.1,
+    "completion": 0.3,
+    "cache": 0.01
+  }
+}
