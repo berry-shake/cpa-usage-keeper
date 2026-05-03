@@ -153,6 +153,10 @@ export function PriceSettingsCard({
     ),
     [modelNames, modelPrices, t]
   );
+  const savedPriceEntries = useMemo(
+    () => Object.entries(modelPrices).sort(([left], [right]) => left.localeCompare(right)),
+    [modelPrices]
+  );
   const syncSummary = useMemo(() => {
     if (!syncMeta?.syncedAt) {
       return t('usage_stats.model_price_sync_hint');
@@ -188,7 +192,7 @@ export function PriceSettingsCard({
           {t('usage_stats.model_price_sync')}
         </Button>
       }
-      className={styles.detailsFixedCard}
+      className={`${styles.detailsFixedCard} ${styles.priceSettingsCard}`}
     >
       <div className={styles.pricingSection}>
         {loading && modelNames.length === 0 && Object.keys(modelPrices).length === 0 ? (
@@ -245,24 +249,11 @@ export function PriceSettingsCard({
 
             <div className={styles.pricesList}>
               <h4 className={styles.pricesTitle}>{t('usage_stats.saved_prices')}</h4>
-              {Object.keys(modelPrices).length > 0 ? (
+              {savedPriceEntries.length > 0 ? (
                 <div className={styles.pricesGrid}>
-                  {Object.entries(modelPrices).map(([model, price]) => (
+                  {savedPriceEntries.map(([model, price]) => (
                     <div key={model} className={styles.priceItem}>
-                      <div className={styles.priceInfo}>
-                        <span className={styles.priceModel}>{formatDisplayName(model)}</span>
-                        <div className={styles.priceMeta}>
-                          <span>
-                            {t('usage_stats.model_price_prompt')}: ${price.prompt.toFixed(4)}/1M
-                          </span>
-                          <span>
-                            {t('usage_stats.model_price_completion')}: ${price.completion.toFixed(4)}/1M
-                          </span>
-                          <span>
-                            {t('usage_stats.model_price_cache')}: ${price.cache.toFixed(4)}/1M
-                          </span>
-                        </div>
-                      </div>
+                      <span className={styles.priceModel}>{formatDisplayName(model)}</span>
                       <div className={styles.priceActions}>
                         <Button variant="secondary" size="sm" onClick={() => handleOpenEdit(model)}>
                           {t('common.edit')}
@@ -270,6 +261,32 @@ export function PriceSettingsCard({
                         <Button variant="danger" size="sm" onClick={() => handleDeletePrice(model)}>
                           {t('common.delete')}
                         </Button>
+                      </div>
+                      <div className={styles.priceMeta}>
+                        <div className={styles.priceMetaCell}>
+                          <span className={styles.priceMetaLabel}>
+                            {t('usage_stats.model_price_prompt')}
+                          </span>
+                          <span className={styles.priceMetaValue}>
+                            ${price.prompt.toFixed(4)}<em>/1M</em>
+                          </span>
+                        </div>
+                        <div className={styles.priceMetaCell}>
+                          <span className={styles.priceMetaLabel}>
+                            {t('usage_stats.model_price_completion')}
+                          </span>
+                          <span className={styles.priceMetaValue}>
+                            ${price.completion.toFixed(4)}<em>/1M</em>
+                          </span>
+                        </div>
+                        <div className={styles.priceMetaCell}>
+                          <span className={styles.priceMetaLabel}>
+                            {t('usage_stats.model_price_cache')}
+                          </span>
+                          <span className={styles.priceMetaValue}>
+                            ${price.cache.toFixed(4)}<em>/1M</em>
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}

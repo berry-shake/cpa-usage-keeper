@@ -5,6 +5,7 @@ import '@/i18n';
 import { PriceSettingsCard, buildPricingModelOptions } from './PriceSettingsCard';
 
 const configuredBadge = <span data-testid="configured" />;
+const countOccurrences = (text: string, value: string) => text.split(value).length - 1;
 
 describe('buildPricingModelOptions', () => {
   it('keeps unpriced models selectable before priced models and marks priced models', () => {
@@ -54,5 +55,24 @@ describe('PriceSettingsCard', () => {
 
     expect(html).toContain('Sync Remote Prices');
     expect(html).toContain('matched 1 models');
+  });
+
+  it('renders saved prices as three metric cells', () => {
+    const html = renderToStaticMarkup(
+      <PriceSettingsCard
+        modelNames={['claude-sonnet']}
+        modelPrices={{
+          'claude-sonnet': { prompt: 3, completion: 15, cache: 0.3 },
+        }}
+        onPricesChange={() => {}}
+        onSyncPrices={async () => {}}
+      />
+    );
+
+    expect(html).toContain('_priceMetaCell_');
+    expect(countOccurrences(html, '_priceMetaCell_')).toBe(3);
+    expect(html).toContain('$3.0000');
+    expect(html).toContain('$15.0000');
+    expect(html).toContain('$0.3000');
   });
 });
