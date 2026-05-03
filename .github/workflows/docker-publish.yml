@@ -3,7 +3,7 @@ name: Publish release Docker image
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*fork*'
 
 permissions:
   contents: read
