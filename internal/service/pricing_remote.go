@@ -17,6 +17,7 @@ import (
 const (
 	RemoteModelPricePrimaryURL  = "https://raw.githubusercontent.com/berry-shake/cpa-usage-keeper/refs/heads/mod/model_prices.json"
 	RemoteModelPriceFallbackURL = "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/refs/heads/main/model_prices_and_context_window.json"
+	RemoteModelPriceLiteLLMURL  = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
 	remoteModelPriceRequestTimeout = 15 * time.Second
 	tokensPerPriceUnit             = 1_000_000
@@ -50,9 +51,20 @@ type RemoteModelPricesFetcher interface {
 	FetchRemoteModelPrices(context.Context) (*RemoteModelPricesResult, error)
 }
 
+// RemoteModelPricesParser converts a decoded JSON payload into a price map.
+// Each remote source can supply its own parser to handle provider-specific
+// payload shapes (e.g. LiteLLM's region-prefixed Bedrock keys).
+type RemoteModelPricesParser func(payload any) map[string]RemoteModelPrice
+
+// RemoteSource pairs a remote URL with the parser to use for that URL.
+type RemoteSource struct {
+	URL   string
+	Parse RemoteModelPricesParser
+}
+
 type HTTPRemoteModelPricesFetcher struct {
-	client *http.Client
-	urls   []string
+	client  *http.Client
+	sources []RemoteSource
 }
 
 type priceScale string
@@ -136,33 +148,76 @@ var cachePriceFields = []priceFieldDefinition{
 }
 
 func DefaultRemoteModelPriceURLs() []string {
-	return []string{RemoteModelPricePrimaryURL, RemoteModelPriceFallbackURL}
+	sources := DefaultRemoteModelPriceSources()
+	urls := make([]string, 0, len(sources))
+	for _, source := range sources {
+		urls = append(urls, source.URL)
+	}
+	return urls
 }
 
+// DefaultRemoteModelPriceSources returns the ordered remote sources used when
+// no explicit sources are supplied. Order matters: the first source whose
+// payload contains a model name wins, later sources only fill in models the
+// earlier ones did not provide.
+func DefaultRemoteModelPriceSources() []RemoteSource {
+	return []RemoteSource{
+		{URL: RemoteModelPricePrimaryURL, Parse: ConvertRemoteModelPrices},
+		{URL: RemoteModelPriceFallbackURL, Parse: ConvertRemoteModelPrices},
+		{URL: RemoteModelPriceLiteLLMURL, Parse: ConvertLiteLLMModelPrices},
+	}
+}
+
+// NewHTTPRemoteModelPricesFetcher builds a fetcher from a list of URLs. Each
+// URL is paired with the generic parser (ConvertRemoteModelPrices). For
+// payload shapes that need a dedicated parser (e.g. LiteLLM), use
+// NewHTTPRemoteModelPricesFetcherFromSources instead.
 func NewHTTPRemoteModelPricesFetcher(client *http.Client, urls []string) *HTTPRemoteModelPricesFetcher {
+	if len(urls) == 0 {
+		return NewHTTPRemoteModelPricesFetcherFromSources(client, nil)
+	}
+	sources := make([]RemoteSource, 0, len(urls))
+	for _, url := range urls {
+		if trimmed := strings.TrimSpace(url); trimmed != "" {
+			sources = append(sources, RemoteSource{URL: trimmed, Parse: ConvertRemoteModelPrices})
+		}
+	}
+	return NewHTTPRemoteModelPricesFetcherFromSources(client, sources)
+}
+
+// NewHTTPRemoteModelPricesFetcherFromSources builds a fetcher from explicit
+// (URL, parser) pairs. When sources is empty, DefaultRemoteModelPriceSources
+// is used.
+func NewHTTPRemoteModelPricesFetcherFromSources(client *http.Client, sources []RemoteSource) *HTTPRemoteModelPricesFetcher {
 	if client == nil {
 		client = &http.Client{Timeout: remoteModelPriceRequestTimeout}
 	}
-	cleanedURLs := make([]string, 0, len(urls))
-	for _, url := range urls {
-		if trimmed := strings.TrimSpace(url); trimmed != "" {
-			cleanedURLs = append(cleanedURLs, trimmed)
+	cleaned := make([]RemoteSource, 0, len(sources))
+	for _, source := range sources {
+		trimmed := strings.TrimSpace(source.URL)
+		if trimmed == "" {
+			continue
 		}
+		parser := source.Parse
+		if parser == nil {
+			parser = ConvertRemoteModelPrices
+		}
+		cleaned = append(cleaned, RemoteSource{URL: trimmed, Parse: parser})
 	}
-	if len(cleanedURLs) == 0 {
-		cleanedURLs = DefaultRemoteModelPriceURLs()
+	if len(cleaned) == 0 {
+		cleaned = DefaultRemoteModelPriceSources()
 	}
-	return &HTTPRemoteModelPricesFetcher{client: client, urls: cleanedURLs}
+	return &HTTPRemoteModelPricesFetcher{client: client, sources: cleaned}
 }
 
 func (f *HTTPRemoteModelPricesFetcher) FetchRemoteModelPrices(ctx context.Context) (*RemoteModelPricesResult, error) {
 	var mergedPrices map[string]RemoteModelPrice
-	sourceURLs := make([]string, 0, len(f.urls))
+	sourceURLs := make([]string, 0, len(f.sources))
 	sourceURL := ""
 	var lastErr error
 
-	for _, source := range f.urls {
-		result, err := f.fetchRemoteModelPricesFromURL(ctx, source)
+	for _, source := range f.sources {
+		result, err := f.fetchRemoteModelPricesFromSource(ctx, source)
 		if err != nil {
 			lastErr = err
 			continue
@@ -196,8 +251,8 @@ func (f *HTTPRemoteModelPricesFetcher) FetchRemoteModelPrices(ctx context.Contex
 	}, nil
 }
 
-func (f *HTTPRemoteModelPricesFetcher) fetchRemoteModelPricesFromURL(ctx context.Context, sourceURL string) (*RemoteModelPricesResult, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+func (f *HTTPRemoteModelPricesFetcher) fetchRemoteModelPricesFromSource(ctx context.Context, source RemoteSource) (*RemoteModelPricesResult, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +265,7 @@ func (f *HTTPRemoteModelPricesFetcher) fetchRemoteModelPricesFromURL(ctx context
 	defer response.Body.Close()
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s returned HTTP %d", sourceURL, response.StatusCode)
+		return nil, fmt.Errorf("%s returned HTTP %d", source.URL, response.StatusCode)
 	}
 
 	var payload any
@@ -218,16 +273,20 @@ func (f *HTTPRemoteModelPricesFetcher) fetchRemoteModelPricesFromURL(ctx context
 		return nil, fmt.Errorf("decode remote model prices: %w", err)
 	}
 
-	prices := ConvertRemoteModelPrices(payload)
+	parser := source.Parse
+	if parser == nil {
+		parser = ConvertRemoteModelPrices
+	}
+	prices := parser(payload)
 	if len(prices) == 0 {
-		return nil, fmt.Errorf("%s did not contain pricing entries", sourceURL)
+		return nil, fmt.Errorf("%s did not contain pricing entries", source.URL)
 	}
 
 	return &RemoteModelPricesResult{
 		Prices:        prices,
 		ImportedCount: len(prices),
-		SourceURL:     sourceURL,
-		SourceURLs:    []string{sourceURL},
+		SourceURL:     source.URL,
+		SourceURLs:    []string{source.URL},
 	}, nil
 }
 
