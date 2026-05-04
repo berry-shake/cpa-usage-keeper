@@ -45,7 +45,7 @@ func (s *pricingStub) SyncRemotePricing(context.Context) (*service.RemotePricing
 }
 
 func TestPricingRoutesReturnEmptyResponsesWithoutProvider(t *testing.T) {
-	router := NewRouter("", nil, nil, nil, nil, nil, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, nil, nil, nil, nil, AuthConfig{}, nil, "")
 
 	usedReq := httptest.NewRequest(http.MethodGet, "/api/v1/models/used", nil)
 	usedResp := httptest.NewRecorder()
@@ -63,7 +63,7 @@ func TestPricingRoutesReturnEmptyResponsesWithoutProvider(t *testing.T) {
 }
 
 func TestPricingRoutesReturnConfiguredData(t *testing.T) {
-	router := NewRouter("", nil, nil, nil, nil, &pricingStub{
+	router := NewRouter(nil, nil, nil, nil, nil, &pricingStub{
 		usedModels: []string{"claude-sonnet"},
 		pricing: []models.ModelPriceSetting{{
 			Model:                "claude-sonnet",
@@ -97,7 +97,7 @@ func TestUpdatePricingRoute(t *testing.T) {
 			CachePricePer1M:      0.3,
 		},
 	}
-	router := NewRouter("", nil, nil, nil, nil, provider, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing/claude-sonnet", strings.NewReader(`{"prompt_price_per_1m":3,"completion_price_per_1m":15,"cache_price_per_1m":0.3}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -118,7 +118,7 @@ func TestUpdatePricingRouteAcceptsModelInBody(t *testing.T) {
 			CachePricePer1M:      0.3,
 		},
 	}
-	router := NewRouter("", nil, nil, nil, nil, provider, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing", strings.NewReader(`{"model":"openai/gpt-4.1","prompt_price_per_1m":3,"completion_price_per_1m":15,"cache_price_per_1m":0.3}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -135,7 +135,7 @@ func TestUpdatePricingRouteAcceptsModelInBody(t *testing.T) {
 
 func TestDeletePricingRoute(t *testing.T) {
 	provider := &pricingStub{}
-	router := NewRouter("", nil, nil, nil, nil, provider, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/pricing?model=openai%2Fgpt-4.1", nil)
 	resp := httptest.NewRecorder()
