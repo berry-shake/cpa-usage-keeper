@@ -1,4 +1,4 @@
-import type { AuthSessionResponse, PricingEntry, PricingResponse, PricingSyncResponse, StatusResponse, UsageAnalysisResponse, UsageEventFilterOptionsResponse, UsedModelsResponse, UsageIdentitiesResponse, UsageEventsResponse, UsageOverviewResponse } from './types'
+import type { AuthSessionResponse, PricingEntry, PricingResponse, PricingSyncResponse, StatusResponse, UsageAnalysisResponse, UsageCredentialsResponse, UsageEventFilterOptionsResponse, UsedModelsResponse, UsageIdentitiesResponse, UsageEventsResponse, UsageOverviewResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -143,6 +143,23 @@ export async function fetchUsageIdentities(signal?: AbortSignal): Promise<UsageI
   const response = await apiFetch(apiPath('/usage/identities'), { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage identities: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUsageCredentials(range: string, start?: string, end?: string, signal?: AbortSignal): Promise<UsageCredentialsResponse> {
+  const params = new URLSearchParams()
+  params.set('range', range)
+  if (start) {
+    params.set('start', start)
+  }
+  if (end) {
+    params.set('end', end)
+  }
+  const query = params.toString()
+  const response = await apiFetch(`${apiPath('/usage/credentials')}${query ? `?${query}` : ''}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage credentials: ${response.status}`)
   }
   return response.json()
 }
