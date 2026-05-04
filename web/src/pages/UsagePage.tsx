@@ -14,8 +14,8 @@ import {
   Legend,
   Filler
 } from 'chart.js';
-import { ApiError, fetchStatus, fetchUsageAnalysis, fetchUsageCredentials, fetchUsageEventFilterOptions, fetchUsageEvents, triggerSync } from '@/lib/api';
-import type { StatusResponse, UsageAnalysisResponse, UsageCredential, UsageEvent, UsageSourceFilterOption } from '@/lib/types';
+import { ApiError, fetchStatus, fetchUsageAnalysis, fetchUsageEventFilterOptions, fetchUsageEvents, fetchUsageIdentities, triggerSync } from '@/lib/api';
+import type { StatusResponse, UsageAnalysisResponse, UsageEvent, UsageIdentity, UsageSourceFilterOption } from '@/lib/types';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Select } from '@/components/ui/Select';
@@ -203,10 +203,22 @@ export const scheduleOverviewAutoRefresh = ({
 };
 
 export const syncCpaData = async ({ triggerBackendSync, refreshActiveTab, refreshStatus, onStatus }: SyncCpaDataOptions) => {
-  await triggerBackendSync();
-  await refreshActiveTab();
-  const nextStatus = await refreshStatus();
-  onStatus(nextStatus);
+  try {
+    await triggerBackendSync();
+    await refreshActiveTab();
+    const nextStatus = await refreshStatus();
+    onStatus(nextStatus);
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 401)) {
+      try {
+        const nextStatus = await refreshStatus();
+        onStatus(nextStatus);
+      } catch {
+        // 忽略状态刷新失败，继续抛出原始同步错误。
+      }
+    }
+    throw error;
+  }
 };
 
 export const sanitizeRequestEventFilters = (
@@ -453,7 +465,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [manualSyncLoading, setManualSyncLoading] = useState(false);
   const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [credentialsError, setCredentialsError] = useState('');
-  const [credentialsData, setCredentialsData] = useState<UsageCredential[]>([]);
+  const [credentialsData, setCredentialsData] = useState<UsageIdentity[]>([]);
   const credentialsRequestControllerRef = useRef<AbortController | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
@@ -678,17 +690,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, [customTimeRange.end, customTimeRange.start, timeRange]);
 
   const loadEventFilterOptions = useCallback(async () => {
-    const queryWindow = getEventQueryWindow();
-    const optionsKey = `${timeRange}|${queryWindow.start ?? ''}|${queryWindow.end ?? ''}`;
+    const optionsKey = 'stable';
 
-    if (!queryWindow.valid) {
-      eventsFilterOptionsRequestControllerRef.current?.abort();
-      eventsFilterOptionsRequestControllerRef.current = null;
-      loadedEventsFilterOptionsKeyRef.current = '';
-      setEventsModelOptions([]);
-      setEventsSourceOptions([]);
-      return;
-    }
     if (loadedEventsFilterOptionsKeyRef.current === optionsKey) {
       return;
     }
@@ -698,7 +701,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     eventsFilterOptionsRequestControllerRef.current = controller;
 
     try {
-      const response = await fetchUsageEventFilterOptions(timeRange, queryWindow.start, queryWindow.end, controller.signal);
+      const response = await fetchUsageEventFilterOptions(controller.signal);
       if (eventsFilterOptionsRequestControllerRef.current !== controller) {
         return;
       }
@@ -722,7 +725,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
         eventsFilterOptionsRequestControllerRef.current = null;
       }
     }
-  }, [getEventQueryWindow, onAuthRequired, timeRange]);
+  }, [onAuthRequired]);
 
   const loadEvents = useCallback(async () => {
     const queryWindow = getEventQueryWindow();
@@ -808,27 +811,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, [resetEventsPage]);
 
   const loadCredentials = useCallback(async () => {
-    if (timeRange === 'custom') {
-      if (!customTimeRange.start || !customTimeRange.end) {
-        credentialsRequestControllerRef.current?.abort();
-        credentialsRequestControllerRef.current = null;
-        setCredentialsData([]);
-        setCredentialsError('');
-        setCredentialsLoading(false);
-        return;
-      }
-      const startMs = parseCustomDateStart(customTimeRange.start);
-      const endMs = parseCustomDateEnd(customTimeRange.end);
-      if (startMs === undefined || endMs === undefined || startMs > endMs) {
-        credentialsRequestControllerRef.current?.abort();
-        credentialsRequestControllerRef.current = null;
-        setCredentialsData([]);
-        setCredentialsError('');
-        setCredentialsLoading(false);
-        return;
-      }
-    }
-
     credentialsRequestControllerRef.current?.abort();
     const controller = new AbortController();
     credentialsRequestControllerRef.current = controller;
@@ -837,12 +819,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setCredentialsError('');
     setCredentialsData([]);
     try {
-      const queryWindow = timeRange === 'custom' ? buildCustomDateRangeQuery({ start: customTimeRange.start, end: customTimeRange.end }) : { start: undefined, end: undefined };
-      const response = await fetchUsageCredentials(timeRange, queryWindow.start, queryWindow.end, controller.signal);
+      const response = await fetchUsageIdentities(controller.signal);
       if (credentialsRequestControllerRef.current !== controller) {
         return;
       }
-      setCredentialsData(response.credentials);
+      setCredentialsData(response.identities);
     } catch (error) {
       if (controller.signal.aborted) {
         return;
@@ -854,14 +835,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
         onAuthRequired?.();
         return;
       }
-      setCredentialsError(error instanceof Error ? error.message : 'Failed to load usage credentials');
+      setCredentialsError(error instanceof Error ? error.message : 'Failed to load usage identities');
     } finally {
       if (credentialsRequestControllerRef.current === controller) {
         setCredentialsLoading(false);
         credentialsRequestControllerRef.current = null;
       }
     }
-  }, [customTimeRange.end, customTimeRange.start, onAuthRequired, timeRange]);
+  }, [onAuthRequired]);
 
   const refreshActiveTab = useCallback(async () => {
     if (activeTab === 'events') {

@@ -1613,6 +1613,7 @@
 .priceSettingsCard {
   @include mobile {
     height: auto;
+    min-height: 0;
     overflow: visible;
   }
 }
