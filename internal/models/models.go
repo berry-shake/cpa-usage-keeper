@@ -64,6 +64,7 @@ type UsageIdentity struct {
 	Identity     string                `gorm:"uniqueIndex:uniq_usage_identities_type_identity;index:idx_usage_identities_identity"`
 	Type         string                `gorm:"column:type"`
 	Provider     string
+	LookupKey    string
 
 	TotalRequests   int64
 	SuccessCount    int64

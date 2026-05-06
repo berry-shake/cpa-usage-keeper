@@ -52,10 +52,12 @@ cp .env.example .env
 | `APP_PORT` | No | `8080` | HTTP listen port |
 | `APP_BASE_PATH` | No | root path | Subpath prefix such as `/cpa`; empty means `/` |
 | `TZ` | No | `Asia/Shanghai` | Project business timezone; affects Today, daily aggregation, scheduled tasks, and log timestamps |
-| `REDIS_QUEUE_ADDR` | No | `CPA_BASE_URL` hostname + `8317` | CPA Redis/RESP TCP address; set `host:port` for non-default ports |
+| `REDIS_QUEUE_ADDR` | No | `CPA_BASE_URL` hostname + `8317` | CPA Redis/RESP TCP address; when empty, uses the `CPA_BASE_URL` hostname with port `8317` and auto-detects TLS from whether `CPA_BASE_URL` is https; set `host:port` for non-default ports |
+| `REDIS_QUEUE_TLS` | No | `false` | Use TLS for Redis queue connection; when `REDIS_QUEUE_ADDR` is set explicitly, enable this with `true` to use TLS |
 | `REDIS_QUEUE_BATCH_SIZE` | No | `1000` | Maximum queue records per pull |
 | `REDIS_QUEUE_IDLE_INTERVAL` | No | `1s` | Empty queue check interval |
 | `REQUEST_TIMEOUT` | No | `30s` | CPA request timeout |
+| `TLS_SKIP_VERIFY` | No | `false` | Skip TLS certificate verification for CPA HTTPS and Redis queue TLS; enable only with self-signed certificates |
 | `WORK_DIR` | No | `./data` | Application work directory; database, logs, and backups default to `app.db`, `logs/`, and `backups/` under it |
 | `LOG_LEVEL` | No | `info` | Log level |
 | `LOG_FILE_ENABLED` | No | `true` | Write persistent log files |

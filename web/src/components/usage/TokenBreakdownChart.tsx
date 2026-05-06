@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Line } from 'react-chartjs-2';
 import { Card } from '@/components/ui/Card';
@@ -38,7 +38,8 @@ const normalizeHourWindow = (hourWindowHours?: number): number => {
   if (!Number.isFinite(hourWindowHours) || !hourWindowHours || hourWindowHours <= 0) {
     return 24;
   }
-  return Math.min(Math.max(Math.floor(hourWindowHours), 1), 24);
+  const resolvedHours = Math.min(Math.max(Math.floor(hourWindowHours), 1), 24);
+  return resolvedHours >= 24 ? 24 : resolvedHours + 1;
 };
 
 const formatHourBucketKey = (timestampMs: number): string => `${new Date(timestampMs).toISOString().slice(0, 13)}:00:00Z`;
@@ -97,6 +98,7 @@ export interface TokenBreakdownChartProps {
   isMobile: boolean;
   hourWindowHours?: number;
   endMs?: number;
+  preferredPeriod?: TokenBreakdownChartPeriod;
 }
 
 export function TokenBreakdownChart({
@@ -105,10 +107,15 @@ export function TokenBreakdownChart({
   isDark,
   isMobile,
   hourWindowHours,
-  endMs
+  endMs,
+  preferredPeriod = 'hour'
 }: TokenBreakdownChartProps) {
   const { t } = useTranslation();
-  const [period, setPeriod] = useState<'hour' | 'day'>('hour');
+  const [period, setPeriod] = useState<TokenBreakdownChartPeriod>(preferredPeriod);
+
+  useEffect(() => {
+    setPeriod(preferredPeriod);
+  }, [preferredPeriod]);
 
   const { chartData, chartOptions } = useMemo(() => {
     const series = buildTokenBreakdownChartSeries({ usage, period, hourWindowHours, endMs });

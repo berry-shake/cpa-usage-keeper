@@ -97,7 +97,7 @@ export interface FetchUsageEventsOptions {
 }
 
 export async function fetchUsageEventFilterOptions(signal?: AbortSignal): Promise<UsageEventFilterOptionsResponse> {
-  const response = await apiFetch(apiPath('/usage/events/filters'), { signal })
+  const response = await apiFetch(apiPath('/usage/events/filters'), { signal, cache: 'no-store' })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage event filters: ${response.status}`)
   }

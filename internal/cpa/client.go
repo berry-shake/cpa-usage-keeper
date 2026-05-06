@@ -2,10 +2,13 @@ package cpa
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -64,19 +67,40 @@ func (c *Client) doManagementJSONRequest(ctx context.Context, path string, targe
 	})
 }
 
-func NewClient(baseURL, managementKey string, timeout time.Duration) *Client {
+func NewClient(baseURL, managementKey string, timeout time.Duration, tlsSkipVerify bool) *Client {
+	httpClient := &http.Client{
+		Timeout: timeout,
+	}
+	if tlsSkipVerify {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		httpClient.Transport = transport
+	}
 	return &Client{
 		baseURL:       strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		managementKey: strings.TrimSpace(managementKey),
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
+		httpClient:    httpClient,
 	}
 }
 
 func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*ExternalAPIKeysResult, error) {
 	result := &ExternalAPIKeysResult{}
 	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementExternalAPIKeysEndpoint, &result.Payload, "external api keys")
+	result.StatusCode = statusCode
+	result.Body = body
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (c *Client) FetchUsageQueue(ctx context.Context, count int) (*UsageQueueResult, error) {
+	result := &UsageQueueResult{}
+	if count <= 0 {
+		return result, fmt.Errorf("usage queue count must be positive")
+	}
+	queryPath := cpaManagementUsageQueueEndpoint + "?count=" + url.QueryEscape(strconv.Itoa(count))
+	statusCode, body, err := c.doManagementJSONRequest(ctx, queryPath, &result.Payload, "usage queue")
 	result.StatusCode = statusCode
 	result.Body = body
 	if err != nil {

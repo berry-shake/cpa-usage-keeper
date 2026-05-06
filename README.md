@@ -52,10 +52,12 @@ cp .env.example .env
 | `APP_PORT` | 否 | `8080` | HTTP 监听端口 |
 | `APP_BASE_PATH` | 否 | 根路径 | 子路径部署前缀，例如 `/cpa`；留空表示 `/` |
 | `TZ` | 否 | `Asia/Shanghai` | 项目业务时区，影响 Today、按天聚合、定时任务和日志时间 |
-| `REDIS_QUEUE_ADDR` | 否 | `CPA_BASE_URL` 主机名 + `8317` | CPA Redis/RESP TCP 地址；非默认端口时填写 `host:port` |
+| `REDIS_QUEUE_ADDR` | 否 | `CPA_BASE_URL` 主机名 + `8317` | CPA Redis/RESP TCP 地址；留空时会使用 `CPA_BASE_URL` 的主机名和默认端口 `8317`，且当 `CPA_BASE_URL` 为 https 时自动启用 TLS；非默认端口时填写 `host:port` |
+| `REDIS_QUEUE_TLS` | 否 | `false` | 是否使用 TLS 连接 Redis 队列；仅在 `REDIS_QUEUE_ADDR` 留空且 `CPA_BASE_URL` 为 https 时自动启用；如果显式设置了 `REDIS_QUEUE_ADDR`，需手动设为 `true` |
 | `REDIS_QUEUE_BATCH_SIZE` | 否 | `1000` | 每次最多拉取的队列记录数 |
 | `REDIS_QUEUE_IDLE_INTERVAL` | 否 | `1s` | 队列为空时的检查间隔 |
 | `REQUEST_TIMEOUT` | 否 | `30s` | CPA 请求超时 |
+| `TLS_SKIP_VERIFY` | 否 | `false` | 跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证；仅在使用自签名证书时启用 |
 | `WORK_DIR` | 否 | `./data` | 应用工作目录；数据库、日志和备份默认分别写入 `app.db`、`logs/`、`backups/` |
 | `LOG_LEVEL` | 否 | `info` | 日志级别 |
 | `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |

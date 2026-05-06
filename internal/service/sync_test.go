@@ -700,7 +700,7 @@ func TestSyncMetadataWritesProviderMetadataToUsageIdentities(t *testing.T) {
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
 		BaseURL: "https://cpa.example.com",
 		MetadataFetcher: stubMetadataFetcher{providerConfig: cpa.ProviderMetadataConfig{
-			ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "claude-key", Prefix: "claude-prefix", Name: "Claude Team"}},
+			ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "claude-key", Prefix: "claude-prefix", Name: "Claude Team", AuthIndex: "claude-auth-index"}},
 		}},
 	})
 
@@ -712,8 +712,8 @@ func TestSyncMetadataWritesProviderMetadataToUsageIdentities(t *testing.T) {
 		t.Fatalf("list usage identities: %v", err)
 	}
 	byIdentity := usageIdentitiesByIdentity(items)
-	apiKey := byIdentity["claude-key"]
-	if apiKey.Name != "Claude Team" || apiKey.AuthType != models.UsageIdentityAuthTypeAIProvider || apiKey.AuthTypeName != "apikey" || apiKey.Identity != "claude-key" || apiKey.Type != "claude" || apiKey.Provider != "Claude Team" || apiKey.IsDeleted {
+	apiKey := byIdentity["claude-auth-index"]
+	if apiKey.Name != "Claude Team" || apiKey.AuthType != models.UsageIdentityAuthTypeAIProvider || apiKey.AuthTypeName != "apikey" || apiKey.Identity != "claude-auth-index" || apiKey.Type != "claude" || apiKey.LookupKey != "claude-key" || apiKey.Provider != "Claude Team" || apiKey.IsDeleted {
 		t.Fatalf("unexpected provider usage identity for api key: %+v", apiKey)
 	}
 	if _, ok := byIdentity["claude-prefix"]; ok {
@@ -727,7 +727,7 @@ func TestSyncMetadataKeepsProviderIdentityWhenPrefixEqualsAPIKey(t *testing.T) {
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
 		BaseURL: "https://cpa.example.com",
 		MetadataFetcher: stubMetadataFetcher{providerConfig: cpa.ProviderMetadataConfig{
-			ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "same-value", Prefix: "same-value", Name: "Claude Same"}},
+			ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "same-value", Prefix: "same-value", Name: "Claude Same", AuthIndex: "same-auth-index"}},
 		}},
 	})
 
@@ -735,10 +735,10 @@ func TestSyncMetadataKeepsProviderIdentityWhenPrefixEqualsAPIKey(t *testing.T) {
 		t.Fatalf("SyncMetadata returned error: %v", err)
 	}
 	var identity models.UsageIdentity
-	if err := db.Where("auth_type = ? AND identity = ?", models.UsageIdentityAuthTypeAIProvider, "same-value").First(&identity).Error; err != nil {
+	if err := db.Where("auth_type = ? AND identity = ?", models.UsageIdentityAuthTypeAIProvider, "same-auth-index").First(&identity).Error; err != nil {
 		t.Fatalf("load protected api key usage identity: %v", err)
 	}
-	if identity.IsDeleted || identity.Type != "claude" || identity.Provider != "Claude Same" {
+	if identity.IsDeleted || identity.Type != "claude" || identity.Provider != "Claude Same" || identity.LookupKey != "same-value" {
 		t.Fatalf("expected api key matching prefix to remain active, got %+v", identity)
 	}
 }
@@ -750,7 +750,7 @@ func TestSyncMetadataDoesNotUseOpenAICompatibilityPrefixAsDisplayName(t *testing
 		MetadataFetcher: stubMetadataFetcher{providerConfig: cpa.ProviderMetadataConfig{
 			OpenAICompatibility: []cpa.OpenAICompatibilityConfig{{
 				Prefix:        "https://proxy.internal/v1",
-				APIKeyEntries: []cpa.OpenAIApiKeyEntry{{APIKey: "openai-compatible-key"}},
+				APIKeyEntries: []cpa.OpenAIApiKeyEntry{{APIKey: "openai-compatible-key", AuthIndex: "openai-compatible-auth-index"}},
 			}},
 		}},
 	})
@@ -763,8 +763,8 @@ func TestSyncMetadataDoesNotUseOpenAICompatibilityPrefixAsDisplayName(t *testing
 		t.Fatalf("list usage identities: %v", err)
 	}
 	byIdentity := usageIdentitiesByIdentity(items)
-	identity := byIdentity["openai-compatible-key"]
-	if identity.Identity != "openai-compatible-key" {
+	identity := byIdentity["openai-compatible-auth-index"]
+	if identity.Identity != "openai-compatible-auth-index" || identity.LookupKey != "openai-compatible-key" {
 		t.Fatalf("expected OpenAI compatibility api key usage identity, got %+v", identity)
 	}
 	if identity.Name != "openai" || identity.Provider != "openai" {
@@ -801,7 +801,7 @@ func TestSyncMetadataUsageIdentityPartialFailureKeepsFailedProviderType(t *testi
 		BaseURL: "https://cpa.example.com",
 		Now:     func() time.Time { return now },
 		MetadataFetcher: stubMetadataFetcher{
-			providerConfig: cpa.ProviderMetadataConfig{ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "new-claude-key", Prefix: "new-claude-prefix", Name: "New Claude"}}},
+			providerConfig: cpa.ProviderMetadataConfig{ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "new-claude-key", Prefix: "new-claude-prefix", Name: "New Claude", AuthIndex: "new-claude-auth-index"}}},
 			geminiErr:      errors.New("gemini unavailable"),
 		},
 	})
@@ -821,7 +821,7 @@ func TestSyncMetadataUsageIdentityPartialFailureKeepsFailedProviderType(t *testi
 	if oldClaude := byIdentity["old-claude-key"]; oldClaude.Identity == "" || !oldClaude.IsDeleted || oldClaude.DeletedAt == nil || !oldClaude.DeletedAt.Equal(now) {
 		t.Fatalf("expected stale successful claude identity to be deleted at sync time, got %+v", oldClaude)
 	}
-	if newClaude := byIdentity["new-claude-key"]; newClaude.Identity == "" || newClaude.IsDeleted {
+	if newClaude := byIdentity["new-claude-auth-index"]; newClaude.Identity == "" || newClaude.LookupKey != "new-claude-key" || newClaude.IsDeleted {
 		t.Fatalf("expected new claude identity to be active, got %+v", newClaude)
 	}
 }
@@ -873,12 +873,12 @@ func TestSyncMetadataPersistsProviderUsageIdentitiesFromDedicatedEndpoints(t *te
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
 		BaseURL: "https://cpa.example.com",
 		MetadataFetcher: stubMetadataFetcher{providerConfig: cpa.ProviderMetadataConfig{
-			GeminiAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "gemini-key", Prefix: "gemini-prefix", Name: "Gemini"}},
-			ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "claude-key", Prefix: "claude-prefix", Name: "Claude"}},
+			GeminiAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "gemini-key", Prefix: "gemini-prefix", Name: "Gemini", AuthIndex: "gemini-auth-index"}},
+			ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "claude-key", Prefix: "claude-prefix", Name: "Claude", AuthIndex: "claude-auth-index"}},
 			OpenAICompatibility: []cpa.OpenAICompatibilityConfig{{
 				Name:          "Custom OpenAI",
 				Prefix:        "custom-openai",
-				APIKeyEntries: []cpa.OpenAIApiKeyEntry{{APIKey: "custom-key"}},
+				APIKeyEntries: []cpa.OpenAIApiKeyEntry{{APIKey: "custom-key", AuthIndex: "custom-auth-index"}},
 			}},
 		}},
 	})
@@ -891,9 +891,9 @@ func TestSyncMetadataPersistsProviderUsageIdentitiesFromDedicatedEndpoints(t *te
 		t.Fatalf("list usage identities: %v", err)
 	}
 	providerItems := usageIdentitiesByIdentity(items)
-	for _, expected := range []string{"gemini-key", "claude-key", "custom-key"} {
+	for expected, lookupKey := range map[string]string{"gemini-auth-index": "gemini-key", "claude-auth-index": "claude-key", "custom-auth-index": "custom-key"} {
 		identity := providerItems[expected]
-		if identity.Identity != expected || identity.AuthType != models.UsageIdentityAuthTypeAIProvider || identity.AuthTypeName != "apikey" || identity.IsDeleted {
+		if identity.Identity != expected || identity.LookupKey != lookupKey || identity.AuthType != models.UsageIdentityAuthTypeAIProvider || identity.AuthTypeName != "apikey" || identity.IsDeleted {
 			t.Fatalf("expected active provider usage identity %q, got %+v", expected, identity)
 		}
 	}
@@ -910,7 +910,7 @@ func TestSyncMetadataPersistsSuccessfulProviderUsageIdentitiesWhenOneEndpointFai
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
 		BaseURL: "https://cpa.example.com",
 		MetadataFetcher: stubMetadataFetcher{
-			providerConfig: cpa.ProviderMetadataConfig{ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "claude-key", Prefix: "claude-prefix", Name: "Claude"}}},
+			providerConfig: cpa.ProviderMetadataConfig{ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "claude-key", Prefix: "claude-prefix", Name: "Claude", AuthIndex: "claude-auth-index"}}},
 			geminiErr:      errors.New("gemini unavailable"),
 		},
 	})
@@ -924,8 +924,8 @@ func TestSyncMetadataPersistsSuccessfulProviderUsageIdentitiesWhenOneEndpointFai
 		t.Fatalf("list usage identities: %v", listErr)
 	}
 	byIdentity := usageIdentitiesByIdentity(items)
-	identity := byIdentity["claude-key"]
-	if identity.Identity != "claude-key" || identity.Type != "claude" || identity.AuthType != models.UsageIdentityAuthTypeAIProvider || identity.IsDeleted {
+	identity := byIdentity["claude-auth-index"]
+	if identity.Identity != "claude-auth-index" || identity.LookupKey != "claude-key" || identity.Type != "claude" || identity.AuthType != models.UsageIdentityAuthTypeAIProvider || identity.IsDeleted {
 		t.Fatalf("expected successful provider usage identity to persist, got %+v", identity)
 	}
 	if _, ok := byIdentity["claude-prefix"]; ok {
@@ -960,7 +960,7 @@ func TestSyncMetadataKeepsFailedProviderUsageIdentitiesDuringPartialFailure(t *t
 		BaseURL: "https://cpa.example.com",
 		Now:     func() time.Time { return now },
 		MetadataFetcher: stubMetadataFetcher{
-			providerConfig: cpa.ProviderMetadataConfig{ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "new-claude-key", Prefix: "new-claude-prefix", Name: "New Claude"}}},
+			providerConfig: cpa.ProviderMetadataConfig{ClaudeAPIKeys: []cpa.ProviderKeyConfig{{APIKey: "new-claude-key", Prefix: "new-claude-prefix", Name: "New Claude", AuthIndex: "new-claude-auth-index"}}},
 			geminiErr:      errors.New("gemini unavailable"),
 		},
 	})
@@ -980,8 +980,8 @@ func TestSyncMetadataKeepsFailedProviderUsageIdentitiesDuringPartialFailure(t *t
 	if oldClaude := byIdentity["old-claude-key"]; oldClaude.Identity == "" || !oldClaude.IsDeleted || oldClaude.DeletedAt == nil || !oldClaude.DeletedAt.Equal(now) {
 		t.Fatalf("expected stale successful claude usage identity to be deleted, got %+v", oldClaude)
 	}
-	newClaude := byIdentity["new-claude-key"]
-	if newClaude.Identity != "new-claude-key" || newClaude.IsDeleted {
+	newClaude := byIdentity["new-claude-auth-index"]
+	if newClaude.Identity != "new-claude-auth-index" || newClaude.LookupKey != "new-claude-key" || newClaude.IsDeleted {
 		t.Fatalf("expected active replacement usage identity, got %+v", newClaude)
 	}
 	if _, ok := byIdentity["new-claude-prefix"]; ok {

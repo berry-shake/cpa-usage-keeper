@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getTimeRangeOptions, getUsageTabOptions, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, syncCpaData } from './UsagePage';
+import { buildCustomDateRangeQuery, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, shouldShowRangeControls, syncCpaData } from './UsagePage';
 import { ApiError } from '@/lib/api';
 import { filterUsageByWindow, type UsageFilterWindow } from '@/utils/usage';
 import type { StatusResponse, UsageSnapshot } from '@/lib/types';
@@ -207,12 +207,12 @@ describe('UsagePage request event filters', () => {
     const next = sanitizeRequestEventFilters(
       {
         model: 'claude-opus',
-        source: 'source-b',
+        source: 'authidx-source-b',
         result: 'failed',
       },
       {
         models: ['claude-sonnet'],
-        sources: [{ value: 'source-a', label: 'Provider A' }],
+        sources: [{ value: 'authidx-source-a', label: 'authidx-source-a' }],
       },
     );
 
@@ -222,15 +222,60 @@ describe('UsagePage request event filters', () => {
       result: 'failed',
     });
   });
+
+  it('keeps source filters that are still available after refreshing options', () => {
+    const next = sanitizeRequestEventFilters(
+      {
+        model: 'claude-sonnet',
+        source: 'authidx-source-a',
+        result: 'success',
+      },
+      {
+        models: ['claude-sonnet'],
+        sources: [{ value: 'authidx-source-a', label: 'authidx-source-a' }],
+      },
+    );
+
+    expect(next).toEqual({
+      model: 'claude-sonnet',
+      source: 'authidx-source-a',
+      result: 'success',
+    });
+  });
 });
 
+for (const [tab, expected] of [
+  ['overview', true],
+  ['analysis', true],
+  ['events', true],
+  ['credentials', false],
+  ['pricing', false],
+] as const) {
+  it(`returns ${expected} for ${tab} range controls visibility`, () => {
+    expect(shouldShowRangeControls(tab)).toBe(expected);
+  });
+}
+
 describe('UsagePage time range options', () => {
-  it('places Today after 24h position and removes 24h from selectable ranges', () => {
+  it('includes rolling 24h, local Today, and 30d ranges', () => {
     const options = getTimeRangeOptions((key) => `translated:${key}`);
 
-    expect(options.map((option) => option.value)).toEqual(['4h', '8h', '12h', 'today', '7d', '30d', 'custom']);
+    expect(options.map((option) => option.value)).toEqual(['4h', '8h', '12h', '24h', 'today', '7d', '30d', 'custom']);
+    expect(options.map((option) => option.label)).toContain('translated:usage_stats.range_24h');
     expect(options.map((option) => option.label)).toContain('translated:usage_stats.range_today');
     expect(options.map((option) => option.label)).toContain('translated:usage_stats.range_30d');
+  });
+});
+
+describe('UsagePage Overview chart period preference', () => {
+  it('keeps sub-day windows on By Hour', () => {
+    expect(getPreferredOverviewChartPeriod({ windowMinutes: 12 * 60 })).toBe('hour');
+  });
+
+  it('uses By Day only for windows longer than one day without inspecting chart data', () => {
+    expect(getPreferredOverviewChartPeriod({ windowMinutes: 24 * 60 })).toBe('hour');
+    expect(getPreferredOverviewChartPeriod({ windowMinutes: (24 * 60) + 1 })).toBe('day');
+    expect(getPreferredOverviewChartPeriod({ windowMinutes: 30 * 24 * 60 })).toBe('day');
   });
 });
 

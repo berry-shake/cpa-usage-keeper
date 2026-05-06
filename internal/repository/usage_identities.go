@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/models"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -213,23 +214,24 @@ func normalizeUsageIdentities(identities []models.UsageIdentity, authType models
 	seen := make(map[string]struct{}, len(identities))
 
 	for _, identity := range identities {
-		key := strings.TrimSpace(identity.Identity)
-		if key == "" {
+		authIndex := strings.TrimSpace(identity.Identity)
+		if authIndex == "" {
 			continue
 		}
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[authIndex]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
-		incomingIdentities = append(incomingIdentities, key)
+		seen[authIndex] = struct{}{}
+		incomingIdentities = append(incomingIdentities, authIndex)
 
 		identity.ID = 0
 		identity.AuthType = authType
-		identity.Identity = key
+		identity.Identity = authIndex
 		identity.Name = strings.TrimSpace(identity.Name)
 		identity.AuthTypeName = strings.TrimSpace(identity.AuthTypeName)
 		identity.Type = strings.TrimSpace(identity.Type)
 		identity.Provider = strings.TrimSpace(identity.Provider)
+		identity.LookupKey = strings.TrimSpace(identity.LookupKey)
 		identity.IsDeleted = false
 		identity.DeletedAt = nil
 		normalized = append(normalized, identity)
@@ -267,6 +269,7 @@ func upsertUsageIdentities(tx *gorm.DB, identities []models.UsageIdentity) error
 			"auth_type_name": gorm.Expr("excluded.auth_type_name"),
 			"type":           gorm.Expr("excluded.type"),
 			"provider":       gorm.Expr("excluded.provider"),
+			"lookup_key":     gorm.Expr("excluded.lookup_key"),
 			"is_deleted":     false,
 			"deleted_at":     nil,
 			"updated_at":     gorm.Expr("excluded.updated_at"),

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -128,27 +127,10 @@ func applyUsageEventsSourceFilter(filter *service.UsageFilter) error {
 	if source == "" {
 		return nil
 	}
-	if value, ok := strings.CutPrefix(source, "auth:"); ok {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return fmt.Errorf("source auth filter value is required")
-		}
-		filter.AuthType = "oauth"
-		filter.AuthIndex = value
-		filter.Source = value
-		filter.Provider = ""
-		return nil
-	}
-	if value, ok := strings.CutPrefix(source, "provider:"); ok {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return fmt.Errorf("source provider filter value is required")
-		}
-		filter.AuthType = "apikey"
-		filter.Provider = value
-		filter.Source = ""
-		filter.AuthIndex = ""
-	}
+	filter.AuthIndex = source
+	filter.Source = ""
+	filter.Provider = ""
+	filter.AuthType = ""
 	return nil
 }
 
@@ -181,21 +163,34 @@ func buildUsageEventsPayload(rows []service.UsageEventRecord) []usageEventPayloa
 }
 
 func usageEventPublicSource(row service.UsageEventRecord) (string, string) {
+	authIndex := strings.TrimSpace(row.AuthIndex)
 	switch strings.TrimSpace(row.AuthType) {
 	case "apikey":
 		provider := strings.TrimSpace(row.Provider)
 		if provider == "" {
 			provider = "AI Provider"
 		}
+		if authIndex != "" {
+			return provider, authIndex
+		}
 		return provider, "provider:" + provider
 	case "oauth":
-		source := firstNonEmptyString(row.Source, row.AuthIndex, "unknown")
+		source := firstNonEmptyString(row.Source, authIndex, "unknown")
+		if authIndex != "" {
+			return source, authIndex
+		}
 		return source, "auth:" + source
 	default:
 		if provider := strings.TrimSpace(row.Provider); provider != "" {
+			if authIndex != "" {
+				return provider, authIndex
+			}
 			return provider, "provider:" + provider
 		}
-		source := firstNonEmptyString(row.Source, row.AuthIndex, "unknown")
+		source := firstNonEmptyString(row.Source, authIndex, "unknown")
+		if authIndex != "" {
+			return source, authIndex
+		}
 		return source, "auth:" + source
 	}
 }
@@ -225,20 +220,13 @@ func buildUsageSourceFilterOptions(sources []string, identities []models.UsageId
 
 func usageSourceFilterOptionFromIdentity(identity models.UsageIdentity) (usageSourceFilterOption, bool) {
 	switch identity.AuthType {
-	case models.UsageIdentityAuthTypeAuthFile:
+	case models.UsageIdentityAuthTypeAuthFile, models.UsageIdentityAuthTypeAIProvider:
 		value := strings.TrimSpace(identity.Identity)
 		if value == "" {
 			return usageSourceFilterOption{}, false
 		}
 		label := firstNonEmptyString(identity.Name, value)
-		return usageSourceFilterOption{Value: "auth:" + value, Label: label}, true
-	case models.UsageIdentityAuthTypeAIProvider:
-		provider := safeAIProviderDisplayValue(identity.Provider, identity.Identity, "")
-		label := firstNonEmptyString(provider, safeAIProviderDisplayValue(identity.Name, identity.Identity, ""), safeAIProviderDisplayValue(identity.Type, identity.Identity, ""))
-		if label == "" {
-			return usageSourceFilterOption{}, false
-		}
-		return usageSourceFilterOption{Value: "provider:" + label, Label: label}, true
+		return usageSourceFilterOption{Value: value, Label: label}, true
 	default:
 		return usageSourceFilterOption{}, false
 	}

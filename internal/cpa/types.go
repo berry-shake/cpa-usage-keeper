@@ -108,6 +108,12 @@ type AuthFile struct {
 	RuntimeOnly bool   `json:"runtime_only"`
 }
 
+type UsageQueueResult struct {
+	StatusCode int
+	Body       []byte
+	Payload    []json.RawMessage
+}
+
 type ProviderKeyConfigResult struct {
 	StatusCode int
 	Body       []byte
@@ -129,9 +135,10 @@ type ProviderMetadataConfig struct {
 }
 
 type ProviderKeyConfig struct {
-	APIKey string
-	Prefix string
-	Name   string
+	APIKey    string
+	Prefix    string
+	Name      string
+	AuthIndex string
 }
 
 func (p *ProviderKeyConfig) UnmarshalJSON(data []byte) error {
@@ -142,6 +149,7 @@ func (p *ProviderKeyConfig) UnmarshalJSON(data []byte) error {
 	p.APIKey = firstString(raw, "apiKey", "api-key", "key")
 	p.Prefix = firstString(raw, "prefix")
 	p.Name = firstString(raw, "name")
+	p.AuthIndex = firstString(raw, "auth-index", "auth_index", "authIndex")
 	return nil
 }
 
@@ -175,7 +183,8 @@ func (c *OpenAICompatibilityConfig) UnmarshalJSON(data []byte) error {
 }
 
 type OpenAIApiKeyEntry struct {
-	APIKey string
+	APIKey    string
+	AuthIndex string
 }
 
 func (e *OpenAIApiKeyEntry) UnmarshalJSON(data []byte) error {
@@ -215,25 +224,24 @@ func decodeOpenAIApiKeyEntry(raw any) (OpenAIApiKeyEntry, error) {
 	case string:
 		return OpenAIApiKeyEntry{APIKey: value}, nil
 	case map[string]any:
-		return OpenAIApiKeyEntry{APIKey: firstString(value, "apiKey", "api-key", "key")}, nil
+		return OpenAIApiKeyEntry{
+			APIKey:    firstString(value, "apiKey", "api-key", "key"),
+			AuthIndex: firstString(value, "auth-index", "auth_index", "authIndex"),
+		}, nil
 	case nil:
 		return OpenAIApiKeyEntry{}, nil
 	default:
-		return OpenAIApiKeyEntry{}, fmt.Errorf("decode openai api key entry: unsupported value %T", raw)
+		return OpenAIApiKeyEntry{}, fmt.Errorf("unsupported openai api key entry type %T", raw)
 	}
 }
 
 func firstString(raw map[string]any, keys ...string) string {
 	for _, key := range keys {
 		value, ok := raw[key]
-		if !ok || value == nil {
-			continue
-		}
-		text, ok := value.(string)
 		if !ok {
 			continue
 		}
-		if text != "" {
+		if text, ok := value.(string); ok {
 			return text
 		}
 	}

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ScriptableContext } from 'chart.js';
 import { Line } from 'react-chartjs-2';
@@ -16,6 +16,7 @@ export interface CostTrendChartProps {
   isMobile: boolean;
   hourWindowHours?: number;
   endMs?: number;
+  preferredPeriod?: 'hour' | 'day';
 }
 
 interface OverviewCostTrendSeries {
@@ -151,10 +152,15 @@ export function CostTrendChart({
   isDark,
   isMobile,
   hourWindowHours,
-  endMs
+  endMs,
+  preferredPeriod = 'hour'
 }: CostTrendChartProps) {
   const { t } = useTranslation();
-  const [period, setPeriod] = useState<'hour' | 'day'>('hour');
+  const [period, setPeriod] = useState<'hour' | 'day'>(preferredPeriod);
+
+  useEffect(() => {
+    setPeriod(preferredPeriod);
+  }, [preferredPeriod]);
 
   const { chartData, chartOptions, hasData, costAvailable } = useMemo(() => {
     const series = buildOverviewCostTrendSeries({ usage, period, hourWindowHours, endMs });

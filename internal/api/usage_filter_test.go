@@ -7,24 +7,35 @@ import (
 )
 
 func TestParseUsageFilterQueryPresetRange(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v1/usage/overview?range=24h", nil)
-	anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		rangeVal string
+		duration time.Duration
+	}{
+		{name: "24h", rangeVal: "24h", duration: 24 * time.Hour},
+		{name: "30d", rangeVal: "30d", duration: 30 * 24 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/v1/usage/overview?range="+tc.rangeVal, nil)
+			anchor := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
 
-	filter, err := parseUsageFilterQuery(req, anchor)
-	if err != nil {
-		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
-	}
-	if filter.Range != "24h" {
-		t.Fatalf("expected range to be preserved, got %+v", filter)
-	}
-	if filter.StartTime == nil || filter.EndTime == nil {
-		t.Fatalf("expected preset range to resolve concrete times, got %+v", filter)
-	}
-	if !filter.EndTime.Equal(anchor) {
-		t.Fatalf("expected preset range end to use anchor time, got %+v", filter)
-	}
-	if !filter.StartTime.Equal(anchor.Add(-24 * time.Hour)) {
-		t.Fatalf("expected preset range start to subtract 24h, got %+v", filter)
+			filter, err := parseUsageFilterQuery(req, anchor)
+			if err != nil {
+				t.Fatalf("parseUsageFilterQuery returned error: %v", err)
+			}
+			if filter.Range != tc.rangeVal {
+				t.Fatalf("expected range to be preserved, got %+v", filter)
+			}
+			if filter.StartTime == nil || filter.EndTime == nil {
+				t.Fatalf("expected preset range to resolve concrete times, got %+v", filter)
+			}
+			if !filter.EndTime.Equal(anchor) {
+				t.Fatalf("expected preset range end to use anchor time, got %+v", filter)
+			}
+			if !filter.StartTime.Equal(anchor.Add(-tc.duration)) {
+				t.Fatalf("expected preset range start to subtract %s, got %+v", tc.duration, filter)
+			}
+		})
 	}
 }
 

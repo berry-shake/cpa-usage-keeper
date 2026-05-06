@@ -31,7 +31,7 @@ describe('fetchUsageEvents', () => {
     expect(parsed.searchParams.get('model')).toBeNull();
     expect(parsed.searchParams.get('source')).toBeNull();
     expect(parsed.searchParams.get('result')).toBeNull();
-    expect(init).toMatchObject({ credentials: 'include', signal });
+    expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
   });
 
   it('passes pagination and server-side filters as query params', async () => {
@@ -46,7 +46,7 @@ describe('fetchUsageEvents', () => {
       page: 3,
       pageSize: 100,
       model: 'claude-sonnet',
-      source: 'source-a',
+      source: 'authidx-source-a',
       result: 'failed',
     });
 
@@ -60,7 +60,7 @@ describe('fetchUsageEvents', () => {
     expect(parsed.searchParams.get('page')).toBe('3');
     expect(parsed.searchParams.get('page_size')).toBe('100');
     expect(parsed.searchParams.get('model')).toBe('claude-sonnet');
-    expect(parsed.searchParams.get('source')).toBe('source-a');
+    expect(parsed.searchParams.get('source')).toBe('authidx-source-a');
     expect(parsed.searchParams.get('result')).toBe('failed');
     expect(parsed.searchParams.get('auth_index')).toBeNull();
     expect(init).toMatchObject({ credentials: 'include', signal });

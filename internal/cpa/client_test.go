@@ -2,6 +2,8 @@ package cpa
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,7 +23,7 @@ func TestFetchExternalAPIKeysSendsBearerTokenAndParsesExternalKeys(t *testing.T)
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	result, err := client.FetchExternalAPIKeys(context.Background())
 	if err != nil {
 		t.Fatalf("FetchExternalAPIKeys returned error: %v", err)
@@ -34,6 +36,42 @@ func TestFetchExternalAPIKeysSendsBearerTokenAndParsesExternalKeys(t *testing.T)
 	}
 	if len(result.Payload.ExternalAPIKeys) != 3 || result.Payload.ExternalAPIKeys[2] != "normal-api-key" {
 		t.Fatalf("unexpected external API keys payload: %#v", result.Payload)
+	}
+}
+
+func TestFetchUsageQueueUsesManagementEndpointAndParsesMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != cpaManagementUsageQueueEndpoint {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("count"); got != "2" {
+			t.Fatalf("expected count=2, got %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
+			t.Fatalf("expected management Authorization header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"request_id":"req-1"},{"request_id":"req-2"}]`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.FetchUsageQueue(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("FetchUsageQueue returned error: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", result.StatusCode)
+	}
+	if len(result.Payload) != 2 || string(result.Payload[0]) != `{"request_id":"req-1"}` || string(result.Payload[1]) != `{"request_id":"req-2"}` {
+		t.Fatalf("unexpected usage queue payload: %#v", result.Payload)
+	}
+}
+
+func TestFetchUsageQueueRejectsNonPositiveCount(t *testing.T) {
+	client := NewClient("https://cpa.example.com", "management-secret", 2*time.Second, false)
+	if _, err := client.FetchUsageQueue(context.Background(), 0); err == nil {
+		t.Fatal("expected invalid count error")
 	}
 }
 
@@ -58,7 +96,7 @@ func TestFetchModelsUsesExternalAPIKeyAndParsesOpenAICompatibleResponse(t *testi
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	result, err := client.FetchModels(context.Background())
 	if err != nil {
 		t.Fatalf("FetchModels returned error: %v", err)
@@ -80,7 +118,7 @@ func TestFetchModelsRejectsMissingExternalAPIKeys(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	if _, err := client.FetchModels(context.Background()); err == nil {
 		t.Fatal("expected missing external API keys error")
 	}
@@ -99,7 +137,7 @@ func TestFetchModelsDoesNotUseProviderEndpointsWhenCPAExternalAPIKeysAreMissing(
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	if _, err := client.FetchModels(context.Background()); err == nil {
 		t.Fatal("expected missing CPA external API keys error")
 	}
@@ -118,7 +156,7 @@ func TestFetchModelsHandlesModelNonSuccessStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	_, err := client.FetchModels(context.Background())
 	if err == nil {
 		t.Fatal("expected non-success status error")
@@ -139,7 +177,7 @@ func TestFetchModelsRejectsRedirectStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	_, err := client.FetchModels(context.Background())
 	if err == nil {
 		t.Fatal("expected redirect status error")
@@ -160,7 +198,7 @@ func TestFetchModelsRejectsInvalidModelsJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	_, err := client.FetchModels(context.Background())
 	if err == nil {
 		t.Fatal("expected invalid json error")
@@ -180,7 +218,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchGeminiAPIKeys(ctx)
 			},
-			response: `[{"apiKey":"gemini-key","prefix":"gemini-prefix","name":"Gemini"}]`,
+			response: `[{"apiKey":"gemini-key","prefix":"gemini-prefix","name":"Gemini","auth-index":"gemini-auth-index"}]`,
 		},
 		{
 			name: "claude",
@@ -188,7 +226,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchClaudeAPIKeys(ctx)
 			},
-			response: `[{"api-key":"claude-key","prefix":"claude-prefix","name":"Claude"}]`,
+			response: `[{"api-key":"claude-key","prefix":"claude-prefix","name":"Claude","auth_index":"claude-auth-index"}]`,
 		},
 		{
 			name: "codex",
@@ -196,7 +234,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchCodexAPIKeys(ctx)
 			},
-			response: `[{"key":"codex-key","prefix":"codex-prefix","name":"Codex"}]`,
+			response: `[{"key":"codex-key","prefix":"codex-prefix","name":"Codex","authIndex":"codex-auth-index"}]`,
 		},
 		{
 			name: "vertex",
@@ -204,7 +242,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchVertexAPIKeys(ctx)
 			},
-			response: `[{"apiKey":"vertex-key","prefix":"vertex-prefix","name":"Vertex"}]`,
+			response: `[{"apiKey":"vertex-key","prefix":"vertex-prefix","name":"Vertex","auth-index":"vertex-auth-index"}]`,
 		},
 	}
 
@@ -221,7 +259,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewClient(server.URL, "management-secret", 2*time.Second)
+			client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 			result, err := tt.fetch(context.Background(), client)
 			if err != nil {
 				t.Fatalf("fetch returned error: %v", err)
@@ -229,7 +267,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 			if result.StatusCode != http.StatusOK || len(result.Body) == 0 {
 				t.Fatalf("unexpected result metadata: %+v", result)
 			}
-			if len(result.Payload) != 1 || result.Payload[0].APIKey == "" || result.Payload[0].Prefix == "" || result.Payload[0].Name == "" {
+			if len(result.Payload) != 1 || result.Payload[0].APIKey == "" || result.Payload[0].Prefix == "" || result.Payload[0].Name == "" || result.Payload[0].AuthIndex == "" {
 				t.Fatalf("unexpected provider payload: %#v", result.Payload)
 			}
 		})
@@ -249,7 +287,7 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchGeminiAPIKeys(ctx)
 			},
-			response: `{"gemini-api-key":[{"apiKey":"gemini-key","prefix":"gemini-prefix","name":"Gemini"}]}`,
+			response: `{"gemini-api-key":[{"apiKey":"gemini-key","prefix":"gemini-prefix","name":"Gemini","auth-index":"gemini-auth-index"}]}`,
 		},
 		{
 			name: "claude",
@@ -257,7 +295,7 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchClaudeAPIKeys(ctx)
 			},
-			response: `{"claude-api-key":[{"api-key":"claude-key","prefix":"claude-prefix","name":"Claude"}]}`,
+			response: `{"claude-api-key":[{"api-key":"claude-key","prefix":"claude-prefix","name":"Claude","auth_index":"claude-auth-index"}]}`,
 		},
 		{
 			name: "codex",
@@ -265,7 +303,7 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchCodexAPIKeys(ctx)
 			},
-			response: `{"codex-api-key":[{"key":"codex-key","prefix":"codex-prefix","name":"Codex"}]}`,
+			response: `{"codex-api-key":[{"key":"codex-key","prefix":"codex-prefix","name":"Codex","authIndex":"codex-auth-index"}]}`,
 		},
 		{
 			name: "vertex",
@@ -273,7 +311,7 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
 				return client.FetchVertexAPIKeys(ctx)
 			},
-			response: `{"vertex-api-key":[{"apiKey":"vertex-key","prefix":"vertex-prefix","name":"Vertex"}]}`,
+			response: `{"vertex-api-key":[{"apiKey":"vertex-key","prefix":"vertex-prefix","name":"Vertex","auth-index":"vertex-auth-index"}]}`,
 		},
 	}
 
@@ -287,12 +325,12 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewClient(server.URL, "management-secret", 2*time.Second)
+			client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 			result, err := tt.fetch(context.Background(), client)
 			if err != nil {
 				t.Fatalf("fetch returned error: %v", err)
 			}
-			if len(result.Payload) != 1 || result.Payload[0].APIKey == "" || result.Payload[0].Prefix == "" || result.Payload[0].Name == "" {
+			if len(result.Payload) != 1 || result.Payload[0].APIKey == "" || result.Payload[0].Prefix == "" || result.Payload[0].Name == "" || result.Payload[0].AuthIndex == "" {
 				t.Fatalf("unexpected wrapped provider payload: %#v", result.Payload)
 			}
 		})
@@ -304,16 +342,16 @@ func TestFetchOpenAICompatibilityParsesWrappedEndpointResponse(t *testing.T) {
 		if r.URL.Path != cpaManagementOpenAICompatibilityEndpoint {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"openai-compatibility":[{"id":"custom-openai","prefix":"custom","api-keys":["custom-key"]}]}`))
+		_, _ = w.Write([]byte(`{"openai-compatibility":[{"id":"custom-openai","prefix":"custom","api-key-entries":[{"api-key":"custom-key","auth-index":"custom-auth-index"}]}]}`))
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	result, err := client.FetchOpenAICompatibility(context.Background())
 	if err != nil {
 		t.Fatalf("FetchOpenAICompatibility returned error: %v", err)
 	}
-	if len(result.Payload) != 1 || result.Payload[0].Name != "custom-openai" || result.Payload[0].Prefix != "custom" || len(result.Payload[0].APIKeyEntries) != 1 || result.Payload[0].APIKeyEntries[0].APIKey != "custom-key" {
+	if len(result.Payload) != 1 || result.Payload[0].Name != "custom-openai" || result.Payload[0].Prefix != "custom" || len(result.Payload[0].APIKeyEntries) != 1 || result.Payload[0].APIKeyEntries[0].APIKey != "custom-key" || result.Payload[0].APIKeyEntries[0].AuthIndex != "custom-auth-index" {
 		t.Fatalf("unexpected wrapped openai compatibility payload: %#v", result.Payload)
 	}
 }
@@ -330,7 +368,7 @@ func TestFetchOpenAICompatibilityUsesDedicatedEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "management-secret", 2*time.Second)
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	result, err := client.FetchOpenAICompatibility(context.Background())
 	if err != nil {
 		t.Fatalf("FetchOpenAICompatibility returned error: %v", err)
@@ -341,4 +379,35 @@ func TestFetchOpenAICompatibilityUsesDedicatedEndpoint(t *testing.T) {
 	if len(result.Payload) != 1 || result.Payload[0].Name != "custom-openai" || result.Payload[0].Prefix != "custom" || len(result.Payload[0].APIKeyEntries) != 1 || result.Payload[0].APIKeyEntries[0].APIKey != "custom-key" {
 		t.Fatalf("unexpected openai compatibility payload: %#v", result.Payload)
 	}
+}
+
+func TestNewClientTLSSkipVerify(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"api-keys":["test-key"]}`))
+	}))
+	defer server.Close()
+
+	t.Run("fails without skip verify", func(t *testing.T) {
+		client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+		_, err := client.FetchExternalAPIKeys(context.Background())
+		if err == nil {
+			t.Fatal("expected TLS certificate error, got nil")
+		}
+		var unknownAuth x509.UnknownAuthorityError
+		if !errors.As(err, &unknownAuth) {
+			t.Fatalf("expected x509.UnknownAuthorityError, got: %T: %v", err, err)
+		}
+	})
+
+	t.Run("succeeds with skip verify", func(t *testing.T) {
+		client := NewClient(server.URL, "management-secret", 2*time.Second, true)
+		result, err := client.FetchExternalAPIKeys(context.Background())
+		if err != nil {
+			t.Fatalf("expected success with tlsSkipVerify=true, got error: %v", err)
+		}
+		if result.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", result.StatusCode)
+		}
+	})
 }

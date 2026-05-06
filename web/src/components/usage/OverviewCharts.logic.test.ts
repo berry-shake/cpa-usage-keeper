@@ -428,6 +428,30 @@ describe('overview chart data flow', () => {
     expect(series.dataByCategory.output[23]).toBe(50);
   });
 
+  it('aligns token breakdown sub-day hour buckets with request and token trends', () => {
+    const series = buildTokenBreakdownChartSeries({
+      usage: {
+        ...overviewUsage,
+        hourly_series: {
+          ...overviewUsage.hourly_series!,
+          input_tokens: {
+            '2026-04-24T02:00:00Z': 100,
+            '2026-04-24T04:00:00Z': 200,
+          },
+          output_tokens: {},
+          cached_tokens: {},
+          reasoning_tokens: {},
+        },
+      },
+      period: 'hour',
+      hourWindowHours: 4,
+      endMs: Date.parse('2026-04-24T04:16:00Z'),
+    });
+
+    expect(series.labels).toHaveLength(5);
+    expect(series.dataByCategory.input).toEqual([0, 0, 100, 0, 200]);
+  });
+
   it('keeps overview hour charts capped to the latest 24 hours even when the query range is 7d', () => {
     const usageWithSevenDaysOfDetails = {
       ...overviewUsage.usage,
