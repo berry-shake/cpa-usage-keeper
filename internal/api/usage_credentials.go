@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"cpa-usage-keeper/internal/service"
 	"github.com/gin-gonic/gin"
@@ -60,7 +61,13 @@ func registerUsageCredentialsRoute(
 			return
 		}
 
-		rows, err := usageProvider.ListUsageCredentialStats(c.Request.Context(), service.UsageFilter{})
+		filter, err := parseUsageTimeFilterQuery(c.Request, time.Now().UTC())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		rows, err := usageProvider.ListUsageCredentialStats(c.Request.Context(), filter)
 		if err != nil {
 			writeInternalError(c, "list usage credential stats failed", err)
 			return

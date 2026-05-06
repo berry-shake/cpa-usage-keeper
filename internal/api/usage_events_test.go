@@ -315,7 +315,13 @@ func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	if provider.credentialsCalls != 1 {
 		t.Fatalf("expected ListUsageCredentialStats to be called once, got %d", provider.credentialsCalls)
 	}
-	if provider.lastFilter.Range != "" || provider.lastFilter.StartTime != nil || provider.lastFilter.EndTime != nil || provider.lastFilter.Model != "" || provider.lastFilter.Source != "" || provider.lastFilter.AuthIndex != "" || provider.lastFilter.Result != "" {
-		t.Fatalf("expected credentials endpoint to ignore query filters, got %+v", provider.lastFilter)
+	if provider.lastFilter.Range != "24h" {
+		t.Fatalf("expected range to be passed through, got %+v", provider.lastFilter)
+	}
+	if provider.lastFilter.StartTime == nil || provider.lastFilter.EndTime == nil {
+		t.Fatalf("expected resolved time bounds in filter, got %+v", provider.lastFilter)
+	}
+	if provider.lastFilter.Model != "" || provider.lastFilter.Source != "" || provider.lastFilter.AuthIndex != "" || provider.lastFilter.Result != "" {
+		t.Fatalf("expected credentials endpoint to only pass time filters, got %+v", provider.lastFilter)
 	}
 }

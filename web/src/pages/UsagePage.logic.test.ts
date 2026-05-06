@@ -248,7 +248,7 @@ for (const [tab, expected] of [
   ['overview', true],
   ['analysis', true],
   ['events', true],
-  ['credentials', false],
+  ['credentials', true],
   ['pricing', false],
 ] as const) {
   it(`returns ${expected} for ${tab} range controls visibility`, () => {

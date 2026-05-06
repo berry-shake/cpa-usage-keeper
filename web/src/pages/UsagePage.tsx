@@ -112,7 +112,7 @@ const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 100;
 const ALL_REQUEST_EVENTS_FILTER = '__all__';
 const OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
 
-export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'pricing' && tab !== 'credentials';
+export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'pricing';
 
 type RequestEventFilterState = {
   model: string;
