@@ -3,17 +3,17 @@ package models
 import "time"
 
 type UsageEvent struct {
-	ID              uint      `gorm:"primaryKey"`
+	ID              uint      `gorm:"primaryKey;index:idx_usage_events_timestamp_id,sort:desc,priority:2;index:idx_usage_events_auth_type_auth_index_id,priority:3;index:idx_usage_events_auth_type_source_id,priority:3"`
 	EventKey        string    `gorm:"uniqueIndex:uniq_usage_events_event_key"`
-	APIGroupKey     string    `gorm:"index:idx_usage_events_api_group_key"`
-	Provider        string    `gorm:"column:provider"`
+	APIGroupKey     string    `gorm:"index:idx_usage_events_trim_api_group_key,expression:TRIM(api_group_key)"`
+	Provider        string    `gorm:"column:provider;index:idx_usage_events_trim_provider,expression:TRIM(provider)"`
 	Endpoint        string    `gorm:"column:endpoint"`
-	AuthType        string    `gorm:"column:auth_type"`
+	AuthType        string    `gorm:"column:auth_type;index:idx_usage_events_trim_auth_type,expression:TRIM(auth_type);index:idx_usage_events_auth_type_auth_index_id,priority:1;index:idx_usage_events_auth_type_source_id,priority:1"`
 	RequestID       string    `gorm:"column:request_id"`
-	Model           string    `gorm:"index:idx_usage_events_model"`
-	Timestamp       time.Time `gorm:"index:idx_usage_events_timestamp"`
-	Source          string    `gorm:"index:idx_usage_events_source"`
-	AuthIndex       string    `gorm:"index:idx_usage_events_auth_index"`
+	Model           string    `gorm:"index:idx_usage_events_model;index:idx_usage_events_trim_model,expression:TRIM(model)"`
+	Timestamp       time.Time `gorm:"index:idx_usage_events_timestamp_id,sort:desc,priority:1"`
+	Source          string    `gorm:"index:idx_usage_events_trim_source,expression:TRIM(source);index:idx_usage_events_auth_type_source_id,priority:2"`
+	AuthIndex       string    `gorm:"index:idx_usage_events_trim_auth_index,expression:TRIM(auth_index);index:idx_usage_events_auth_type_auth_index_id,priority:2"`
 	Failed          bool      `gorm:"index:idx_usage_events_failed"`
 	LatencyMS       int64
 	InputTokens     int64
@@ -25,18 +25,18 @@ type UsageEvent struct {
 }
 
 type RedisUsageInbox struct {
-	ID            uint   `gorm:"primaryKey"`
-	QueueKey      string `gorm:"not null;index"`
-	MessageHash   string `gorm:"not null;index"`
+	ID            uint   `gorm:"primaryKey;index:idx_redis_usage_inboxes_status_id,priority:2"`
+	QueueKey      string `gorm:"not null"`
+	MessageHash   string `gorm:"not null"`
 	RawMessage    string `gorm:"not null"`
-	Status        string `gorm:"not null;index"`
+	Status        string `gorm:"not null;index:idx_redis_usage_inboxes_status_id,priority:1;index:idx_redis_usage_inboxes_status_processed_at,priority:1;index:idx_redis_usage_inboxes_status_updated_at,priority:1;index:idx_redis_usage_inboxes_status_usage_event_key,priority:1"`
 	AttemptCount  int    `gorm:"not null;default:0"`
 	LastError     string
-	UsageEventKey string    `gorm:"index"`
-	PoppedAt      time.Time `gorm:"not null;index"`
-	ProcessedAt   *time.Time
+	UsageEventKey string     `gorm:"index:idx_redis_usage_inboxes_status_usage_event_key,priority:2"`
+	PoppedAt      time.Time  `gorm:"not null"`
+	ProcessedAt   *time.Time `gorm:"index:idx_redis_usage_inboxes_status_processed_at,priority:2"`
 	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	UpdatedAt     time.Time `gorm:"index:idx_redis_usage_inboxes_status_updated_at,priority:2"`
 }
 
 type ModelPriceSetting struct {
@@ -57,12 +57,12 @@ const (
 )
 
 type UsageIdentity struct {
-	ID           uint `gorm:"primaryKey"`
-	Name         string
-	AuthType     UsageIdentityAuthType `gorm:"uniqueIndex:uniq_usage_identities_type_identity;index:idx_usage_identities_auth_type"`
-	AuthTypeName string                `gorm:"index:idx_usage_identities_auth_type_name"`
-	Identity     string                `gorm:"uniqueIndex:uniq_usage_identities_type_identity;index:idx_usage_identities_identity"`
-	Type         string                `gorm:"column:type"`
+	ID           uint                  `gorm:"primaryKey;index:idx_usage_identities_auth_type_name_id,priority:3"`
+	Name         string                `gorm:"index:idx_usage_identities_auth_type_name_id,priority:2"`
+	AuthType     UsageIdentityAuthType `gorm:"uniqueIndex:uniq_usage_identities_type_identity;index:idx_usage_identities_auth_type_name_id,priority:1;index:idx_usage_identities_auth_type_type,priority:1"`
+	AuthTypeName string
+	Identity     string `gorm:"uniqueIndex:uniq_usage_identities_type_identity"`
+	Type         string `gorm:"column:type;index:idx_usage_identities_auth_type_type,priority:2"`
 	Provider     string
 	LookupKey    string
 
@@ -75,15 +75,15 @@ type UsageIdentity struct {
 	CachedTokens    int64
 	TotalTokens     int64
 
-	LastAggregatedUsageEventID uint `gorm:"index:idx_usage_identities_last_aggregated_usage_event_id"`
+	LastAggregatedUsageEventID uint
 	FirstUsedAt                *time.Time
 	LastUsedAt                 *time.Time
 	StatsUpdatedAt             *time.Time
 
-	IsDeleted bool `gorm:"index:idx_usage_identities_is_deleted"`
+	IsDeleted bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	DeletedAt *time.Time `gorm:"index:idx_usage_identities_deleted_at"`
+	DeletedAt *time.Time
 }
 
 func All() []any {

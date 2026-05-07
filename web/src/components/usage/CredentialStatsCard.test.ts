@@ -43,8 +43,35 @@ describe('CredentialStatsCard helpers', () => {
       },
     ]);
 
-    expect(rows[0].total).toBe(5);
-    expect(rows[0].successRate).toBe(60);
+    expect(rows[0]).toMatchObject({
+      total: 5,
+      successRate: 60,
+    });
+  });
+
+  it('omits credentials whose resolved total request count is zero', () => {
+    const credentials: UsageCredential[] = [
+      {
+        source: 'empty',
+        source_key: 'empty',
+        success_count: 0,
+        failure_count: 0,
+        total_count: 0,
+      },
+      {
+        source: 'active',
+        source_key: 'active',
+        success_count: 4,
+        failure_count: 1,
+        total_count: 5,
+      },
+    ];
+
+    const rows = buildCredentialRows(credentials);
+    const topRows = getTopCredentialRows(rows);
+
+    expect(rows.map((row) => row.displayName)).toEqual(['active']);
+    expect(topRows.map((row) => row.displayName)).toEqual(['active']);
   });
 
   it('maps backend cost fields into credential rows', () => {

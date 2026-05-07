@@ -21,6 +21,7 @@ const (
 	migrationRemovePrefixUsageIdentities            = "20260504_remove_prefix_usage_identities"
 	migrationAddUsageIdentityLookupKey              = "20260505_add_usage_identity_lookup_key"
 	migrationMigrateAIProviderIdentitiesToAuthIndex = "20260505_migrate_ai_provider_identities_to_auth_index"
+	migrationAddUsagePerformanceIndexes             = "20260506_add_usage_performance_indexes"
 )
 
 type schemaMigration struct {
@@ -38,14 +39,36 @@ type databaseMigration struct {
 }
 
 func Run(db *gorm.DB) error {
-	if err := db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at DATETIME NOT NULL)").Error; err != nil {
-		return fmt.Errorf("create schema_migrations table: %w", err)
+	if err := createSchemaMigrationsTable(db); err != nil {
+		return err
 	}
 
 	for _, migration := range orderedMigrations() {
 		if err := runSchemaMigration(db, migration); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func MarkAllAsApplied(db *gorm.DB) error {
+	if err := createSchemaMigrationsTable(db); err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		for _, migration := range orderedMigrations() {
+			if err := tx.Exec("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)", migration.version, now).Error; err != nil {
+				return fmt.Errorf("mark schema migration %s applied: %w", migration.version, err)
+			}
+		}
+		return nil
+	})
+}
+
+func createSchemaMigrationsTable(db *gorm.DB) error {
+	if err := db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at DATETIME NOT NULL)").Error; err != nil {
+		return fmt.Errorf("create schema_migrations table: %w", err)
 	}
 	return nil
 }
@@ -64,6 +87,7 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationRemovePrefixUsageIdentities, run: removePrefixUsageIdentitiesMigration},
 		{version: migrationAddUsageIdentityLookupKey, run: addUsageIdentityLookupKeyMigration},
 		{version: migrationMigrateAIProviderIdentitiesToAuthIndex, run: migrateAIProviderIdentitiesToAuthIndexMigration},
+		{version: migrationAddUsagePerformanceIndexes, run: addUsagePerformanceIndexesMigration},
 	}
 }
 

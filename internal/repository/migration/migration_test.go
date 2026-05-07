@@ -30,6 +30,7 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260504_remove_prefix_usage_identities",
 		"20260505_add_usage_identity_lookup_key",
 		"20260505_migrate_ai_provider_identities_to_auth_index",
+		"20260506_add_usage_performance_indexes",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected ordered migrations %v, got %v", want, got)
@@ -42,7 +43,10 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 }
 
 func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing.T) {
-	db := openMigratedDatabase(t, filepath.Join(t.TempDir(), "app.db"))
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedLegacyRedisUsageTables(t, dbPath)
+
+	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
 	if !db.Migrator().HasTable("schema_migrations") {
@@ -74,6 +78,7 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 		"20260504_remove_prefix_usage_identities",
 		"20260505_add_usage_identity_lookup_key",
 		"20260505_migrate_ai_provider_identities_to_auth_index",
+		"20260506_add_usage_performance_indexes",
 	}
 	if len(versions) != len(expected) {
 		t.Fatalf("expected migration versions %v, got %v", expected, versions)
@@ -86,7 +91,8 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 }
 
 func TestOpenDatabaseMigrationsAreIdempotent(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "app.db")
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedLegacyRedisUsageTables(t, dbPath)
 
 	db := openMigratedDatabase(t, dbPath)
 	closeOpenedDatabase(t, db)
@@ -98,14 +104,15 @@ func TestOpenDatabaseMigrationsAreIdempotent(t *testing.T) {
 	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
 		t.Fatalf("count schema migrations: %v", err)
 	}
-	if count != 12 {
-		t.Fatalf("expected 12 applied migrations after reopening database, got %d", count)
+	if count != 13 {
+		t.Fatalf("expected 13 applied migrations after reopening database, got %d", count)
 	}
 }
 
 func TestOpenDatabaseLogsSchemaMigrations(t *testing.T) {
 	logs := captureMigrationLogs(t, logrus.InfoLevel)
-	dbPath := filepath.Join(t.TempDir(), "app.db")
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedLegacyRedisUsageTables(t, dbPath)
 
 	db := openMigratedDatabase(t, dbPath)
 	closeOpenedDatabase(t, db)

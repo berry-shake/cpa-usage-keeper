@@ -49,9 +49,6 @@ func openMigratedDatabase(t *testing.T, dbPath string) *gorm.DB {
 	if err := Run(db); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if err := db.AutoMigrate(models.All()...); err != nil {
-		t.Fatalf("auto migrate database: %v", err)
-	}
 	return db
 }
 

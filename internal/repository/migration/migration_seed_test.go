@@ -320,6 +320,101 @@ func seedLegacyUsageIdentityTables(t *testing.T, dbPath string) {
 	}
 }
 
+func seedPerformanceIndexMigrationDatabase(t *testing.T, dbPath string) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(dbPath)), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open performance index migration database: %v", err)
+	}
+	defer closeOpenedDatabase(t, db)
+
+	statements := []string{
+		`CREATE TABLE usage_events (
+			id integer PRIMARY KEY AUTOINCREMENT,
+			event_key text,
+			api_group_key text,
+			provider text,
+			endpoint text,
+			auth_type text,
+			request_id text,
+			model text,
+			timestamp datetime,
+			source text,
+			auth_index text,
+			failed numeric,
+			latency_ms integer,
+			input_tokens integer,
+			output_tokens integer,
+			reasoning_tokens integer,
+			cached_tokens integer,
+			total_tokens integer,
+			created_at datetime
+		)`,
+		`CREATE UNIQUE INDEX uniq_usage_events_event_key ON usage_events(event_key)`,
+		`CREATE INDEX idx_usage_events_timestamp ON usage_events(timestamp)`,
+		`CREATE INDEX idx_usage_events_api_group_key ON usage_events(api_group_key)`,
+		`CREATE INDEX idx_usage_events_source ON usage_events(source)`,
+		`CREATE INDEX idx_usage_events_auth_index ON usage_events(auth_index)`,
+		`CREATE TABLE redis_usage_inboxes (
+			id integer PRIMARY KEY AUTOINCREMENT,
+			queue_key text NOT NULL,
+			message_hash text NOT NULL,
+			raw_message text NOT NULL,
+			status text NOT NULL,
+			attempt_count integer NOT NULL DEFAULT 0,
+			last_error text,
+			usage_event_key text,
+			popped_at datetime NOT NULL,
+			processed_at datetime,
+			created_at datetime,
+			updated_at datetime
+		)`,
+		`CREATE INDEX idx_redis_usage_inboxes_status ON redis_usage_inboxes(status)`,
+		`CREATE INDEX idx_redis_usage_inboxes_queue_key ON redis_usage_inboxes(queue_key)`,
+		`CREATE INDEX idx_redis_usage_inboxes_message_hash ON redis_usage_inboxes(message_hash)`,
+		`CREATE INDEX idx_redis_usage_inboxes_usage_event_key ON redis_usage_inboxes(usage_event_key)`,
+		`CREATE INDEX idx_redis_usage_inboxes_popped_at ON redis_usage_inboxes(popped_at)`,
+		`CREATE TABLE usage_identities (
+			id integer PRIMARY KEY AUTOINCREMENT,
+			name text,
+			auth_type integer,
+			auth_type_name text,
+			identity text,
+			type text,
+			provider text,
+			lookup_key text,
+			total_requests integer DEFAULT 0,
+			success_count integer DEFAULT 0,
+			failure_count integer DEFAULT 0,
+			input_tokens integer DEFAULT 0,
+			output_tokens integer DEFAULT 0,
+			reasoning_tokens integer DEFAULT 0,
+			cached_tokens integer DEFAULT 0,
+			total_tokens integer DEFAULT 0,
+			last_aggregated_usage_event_id integer DEFAULT 0,
+			first_used_at datetime,
+			last_used_at datetime,
+			stats_updated_at datetime,
+			is_deleted numeric DEFAULT false,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at datetime
+		)`,
+		`CREATE UNIQUE INDEX uniq_usage_identities_type_identity ON usage_identities(auth_type, identity)`,
+		`CREATE INDEX idx_usage_identities_auth_type ON usage_identities(auth_type)`,
+		`CREATE INDEX idx_usage_identities_auth_type_name ON usage_identities(auth_type_name)`,
+		`CREATE INDEX idx_usage_identities_identity ON usage_identities(identity)`,
+		`CREATE INDEX idx_usage_identities_is_deleted ON usage_identities(is_deleted)`,
+		`CREATE INDEX idx_usage_identities_last_aggregated_usage_event_id ON usage_identities(last_aggregated_usage_event_id)`,
+		`CREATE INDEX idx_usage_identities_deleted_at ON usage_identities(deleted_at)`,
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("seed performance index schema with %q: %v", statement, err)
+		}
+	}
+}
+
 func seedLegacyRedisUsageTables(t *testing.T, dbPath string) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(dbPath)), &gorm.Config{})

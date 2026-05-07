@@ -12,6 +12,7 @@ import (
 
 func TestOpenDatabaseDropsLegacySnapshotRunsTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedPerformanceIndexMigrationDatabase(t, dbPath)
 	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(dbPath)), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open legacy database: %v", err)

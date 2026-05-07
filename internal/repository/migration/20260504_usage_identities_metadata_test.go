@@ -72,6 +72,7 @@ func TestOpenDatabaseUsageIdentityMigratesLegacyMetadataAndDropsOldTables(t *tes
 
 func TestOpenDatabaseSkipsUsageIdentityMetadataMigrationWhenLegacyTablesAreMissing(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "no-legacy-identities.db")
+	seedPerformanceIndexMigrationDatabase(t, dbPath)
 
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)

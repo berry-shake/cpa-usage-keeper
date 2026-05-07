@@ -1,13 +1,16 @@
 package repository
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/models"
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -31,6 +34,28 @@ func TestOpenDatabaseAutoMigratesCoreTables(t *testing.T) {
 	}
 	if !db.Migrator().HasTable("redis_usage_inboxes") {
 		t.Fatal("expected redis_usage_inboxes table to exist")
+	}
+}
+
+func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigrations(t *testing.T) {
+	logs := captureRepositoryLogs(t)
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+
+	db, err := OpenDatabase(config.Config{SQLitePath: dbPath})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
+
+	var count int64
+	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
+		t.Fatalf("count schema migrations: %v", err)
+	}
+	if count != 13 {
+		t.Fatalf("expected fresh database to mark 13 migrations applied, got %d", count)
+	}
+	if strings.Contains(logs.String(), "schema migration started") {
+		t.Fatalf("expected fresh database creation not to run version migrations, got logs:\n%s", logs.String())
 	}
 }
 
@@ -191,4 +216,30 @@ func closeTestDatabase(t *testing.T, db *gorm.DB) {
 			t.Fatalf("close database: %v", err)
 		}
 	})
+}
+
+func captureRepositoryLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	previousOutput := logrus.StandardLogger().Out
+	previousFormatter := logrus.StandardLogger().Formatter
+	previousLevel := logrus.GetLevel()
+	logrus.SetOutput(&logs)
+	logrus.SetFormatter(&logrus.TextFormatter{DisableTimestamp: true})
+	logrus.SetLevel(logrus.InfoLevel)
+	t.Cleanup(func() {
+		logrus.SetOutput(previousOutput)
+		logrus.SetFormatter(previousFormatter)
+		logrus.SetLevel(previousLevel)
+	})
+	return &logs
+}
+
+func repositorySQLiteIndexExists(t *testing.T, db *gorm.DB, indexName string) bool {
+	t.Helper()
+	var count int64
+	if err := db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", indexName).Scan(&count).Error; err != nil {
+		t.Fatalf("check sqlite index %s: %v", indexName, err)
+	}
+	return count == 1
 }

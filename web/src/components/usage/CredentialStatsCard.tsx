@@ -84,6 +84,7 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
         models: buildCredentialModelRows(credential.models),
       };
     })
+    .filter((row) => row.total > 0)
     .sort((a, b) => b.total - a.total);
 }
 

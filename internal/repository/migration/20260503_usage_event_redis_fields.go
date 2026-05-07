@@ -10,6 +10,24 @@ import (
 )
 
 func addUsageEventRedisFieldsMigration(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&models.RedisUsageInbox{}) {
+		if err := tx.Exec(`CREATE TABLE redis_usage_inboxes (
+			id integer PRIMARY KEY AUTOINCREMENT,
+			queue_key text NOT NULL,
+			message_hash text NOT NULL,
+			raw_message text NOT NULL,
+			status text NOT NULL,
+			attempt_count integer NOT NULL DEFAULT 0,
+			last_error text,
+			usage_event_key text,
+			popped_at datetime NOT NULL,
+			processed_at datetime,
+			created_at datetime,
+			updated_at datetime
+		)`).Error; err != nil {
+			return fmt.Errorf("create redis_usage_inboxes table: %w", err)
+		}
+	}
 	if !tx.Migrator().HasTable(&models.UsageEvent{}) {
 		return nil
 	}
