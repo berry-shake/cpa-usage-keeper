@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 func TestWriterWriteDatabaseBacksUpSQLiteDatabase(t *testing.T) {
@@ -228,7 +228,7 @@ func TestCleanupIgnoresMissingDirectory(t *testing.T) {
 
 func openTestSQLiteDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}

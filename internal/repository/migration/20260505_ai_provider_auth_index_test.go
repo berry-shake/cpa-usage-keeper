@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/models"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 

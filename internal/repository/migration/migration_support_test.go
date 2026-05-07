@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"cpa-usage-keeper/internal/models"
+	"github.com/glebarez/sqlite"
 	"github.com/sirupsen/logrus"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -85,5 +85,5 @@ func testSQLiteDSN(path string) string {
 	if strings.Contains(trimmed, "?") {
 		return trimmed
 	}
-	return trimmed + "?_busy_timeout=5000&_foreign_keys=on"
+	return trimmed + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 }

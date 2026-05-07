@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"cpa-usage-keeper/internal/models"
+	"github.com/glebarez/sqlite"
 	"github.com/sirupsen/logrus"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 

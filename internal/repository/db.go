@@ -10,7 +10,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/models"
 	"cpa-usage-keeper/internal/repository/migration"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -73,7 +73,7 @@ func sqliteDSN(path string) string {
 	if strings.Contains(trimmed, "?") {
 		return trimmed
 	}
-	return trimmed + "?_busy_timeout=5000&_foreign_keys=on"
+	return trimmed + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 }
 
 func sqliteDatabaseFileExists(path string) (bool, error) {

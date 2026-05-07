@@ -158,26 +158,66 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter UsageQueryFilter) ([
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	query := applyUsageEventsListFilter(db.Model(&models.UsageEvent{}), filter)
-	query = query.Select(strings.Join([]string{
+	normalizedQuery := applyUsageEventsListFilter(db.Model(&models.UsageEvent{}), filter)
+	normalizedQuery = normalizedQuery.Select(strings.Join([]string{
 		"TRIM(source) AS source",
 		"TRIM(auth_index) AS auth_index",
 		"TRIM(model) AS model",
 		"failed",
-		"COUNT(*) AS request_count",
-		"SUM(input_tokens) AS input_tokens",
-		"SUM(output_tokens) AS output_tokens",
-		"SUM(reasoning_tokens) AS reasoning_tokens",
-		"SUM(cached_tokens) AS cached_tokens",
-		"SUM(total_tokens) AS total_tokens",
+		"input_tokens",
+		"output_tokens",
+		"reasoning_tokens",
+		"cached_tokens",
+		"total_tokens",
 	}, ", "))
-	query = query.Group("TRIM(source), TRIM(auth_index), TRIM(model), failed")
-	query = query.Order("request_count DESC, source ASC, auth_index ASC, model ASC, failed ASC")
 
-	var rows []UsageCredentialStatRecord
-	if err := query.Scan(&rows).Error; err != nil {
+	query := db.Table("(?) AS usage_event_stats", normalizedQuery)
+	query = query.Select(strings.Join([]string{
+		"model",
+		"failed AS failed_value",
+		"COUNT(*) AS request_count",
+		"SUM(input_tokens) AS input_token_sum",
+		"SUM(output_tokens) AS output_token_sum",
+		"SUM(reasoning_tokens) AS reasoning_token_sum",
+		"SUM(cached_tokens) AS cached_token_sum",
+		"SUM(total_tokens) AS total_token_sum",
+		"source",
+		"auth_index",
+	}, ", "))
+	query = query.Group("source, auth_index, model, failed")
+	query = query.Order("request_count DESC, source ASC, auth_index ASC, model ASC, failed_value ASC")
+
+	sqlRows, err := query.Rows()
+	if err != nil {
 		return nil, fmt.Errorf("load usage credential stats: %w", err)
 	}
+	defer sqlRows.Close()
+
+	rows := make([]UsageCredentialStatRecord, 0)
+	for sqlRows.Next() {
+		var failedValue int64
+		var row UsageCredentialStatRecord
+		if err := sqlRows.Scan(
+			&row.Model,
+			&failedValue,
+			&row.RequestCount,
+			&row.InputTokens,
+			&row.OutputTokens,
+			&row.ReasoningTokens,
+			&row.CachedTokens,
+			&row.TotalTokens,
+			&row.Source,
+			&row.AuthIndex,
+		); err != nil {
+			return nil, fmt.Errorf("scan usage credential stats: %w", err)
+		}
+		row.Failed = failedValue != 0
+		rows = append(rows, row)
+	}
+	if err := sqlRows.Err(); err != nil {
+		return nil, fmt.Errorf("scan usage credential stats: %w", err)
+	}
+
 	pricingByModel, err := loadPriceSettingsByModel(db)
 	if err != nil {
 		return nil, err

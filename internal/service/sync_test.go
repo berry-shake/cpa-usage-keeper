@@ -15,8 +15,8 @@ import (
 	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/models"
 	"cpa-usage-keeper/internal/repository"
+	"github.com/glebarez/sqlite"
 	"github.com/sirupsen/logrus"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )

@@ -3,15 +3,12 @@ package backup
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/mattn/go-sqlite3"
 )
 
 type Writer struct {
@@ -65,58 +62,16 @@ func (w *Writer) WriteDatabase(ctx context.Context, db *sql.DB, backupAt time.Ti
 }
 
 func copySQLiteDatabase(ctx context.Context, sourceDB *sql.DB, destPath string) error {
-	sourceConn, err := sourceDB.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("open source database connection: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	defer sourceConn.Close()
-
-	destDB, err := sql.Open("sqlite3", destPath)
-	if err != nil {
-		return fmt.Errorf("open backup database: %w", err)
+	if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove existing backup database: %w", err)
 	}
-	defer destDB.Close()
-	destConn, err := destDB.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("open backup database connection: %w", err)
+	if _, err := sourceDB.ExecContext(ctx, "VACUUM INTO ?", destPath); err != nil {
+		return fmt.Errorf("copy sqlite backup: %w", err)
 	}
-	defer destConn.Close()
-
-	return sourceConn.Raw(func(sourceDriverConn any) error {
-		sourceSQLite, ok := sourceDriverConn.(*sqlite3.SQLiteConn)
-		if !ok {
-			return fmt.Errorf("source database connection is not sqlite3")
-		}
-		return destConn.Raw(func(destDriverConn any) error {
-			destSQLite, ok := destDriverConn.(*sqlite3.SQLiteConn)
-			if !ok {
-				return fmt.Errorf("backup database connection is not sqlite3")
-			}
-			backup, err := destSQLite.Backup("main", sourceSQLite, "main")
-			if err != nil {
-				return fmt.Errorf("start sqlite backup: %w", err)
-			}
-			var backupErr error
-			for {
-				if err := ctx.Err(); err != nil {
-					backupErr = err
-					break
-				}
-				done, err := backup.Step(100)
-				if err != nil {
-					backupErr = fmt.Errorf("copy sqlite backup: %w", err)
-					break
-				}
-				if done {
-					break
-				}
-			}
-			if err := backup.Close(); err != nil {
-				backupErr = errors.Join(backupErr, fmt.Errorf("close sqlite backup: %w", err))
-			}
-			return backupErr
-		})
-	})
+	return nil
 }
 
 func (w *Writer) Cleanup(retentionDays int, now time.Time) (int, error) {
