@@ -1,28 +1,18 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS go-builder
-ARG TARGETOS
-ARG TARGETARCH
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
-COPY cmd/ ./cmd/
-COPY internal/ ./internal/
-COPY web/static.go ./web/static.go
-COPY web/dist ./web/dist
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/cpa-usage-keeper ./cmd/server/main.go
-
 FROM alpine:3.20
+ARG TARGETARCH
 WORKDIR /
 RUN apk add --no-cache ca-certificates tzdata su-exec \
     && addgroup -S app \
     && adduser -S -G app app \
     && mkdir -p /data \
     && chown -R app:app /data
-COPY --from=go-builder /out/cpa-usage-keeper /app/cpa-usage-keeper
+COPY bin/cpa-usage-keeper-${TARGETARCH} /app/cpa-usage-keeper
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
-    && chmod +x /usr/local/bin/docker-entrypoint.sh
+    && chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && chmod +x /app/cpa-usage-keeper
 VOLUME ["/data"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -q --spider "http://127.0.0.1:${APP_PORT:-8080}${APP_BASE_PATH:-}/healthz" || exit 1
