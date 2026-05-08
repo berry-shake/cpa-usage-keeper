@@ -20,7 +20,7 @@ const (
 	defaultRequestTimeout   = 10 * time.Second
 )
 
-var stableVersionPattern = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
+var stableVersionPattern = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)(?:-fork\.\d+)?$`)
 
 type Result struct {
 	CurrentVersion  string `json:"currentVersion"`

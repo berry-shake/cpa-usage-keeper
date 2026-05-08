@@ -19,6 +19,8 @@ func TestCompareStableVersions(t *testing.T) {
 		{name: "minor version handles two digits", left: "v1.10.0", right: "v1.2.9", want: 1, wantOK: true},
 		{name: "major version handles two digits", left: "v12.3.45", right: "v2.99.99", want: 1, wantOK: true},
 		{name: "same version", left: "v1.2.3", right: "v1.2.3", want: 0, wantOK: true},
+		{name: "fork tag compares by base version", left: "v1.2.3-fork.1", right: "v1.2.3", want: 0, wantOK: true},
+		{name: "fork tag detects upstream patch update", left: "v1.2.3-fork.1", right: "v1.2.4", want: -1, wantOK: true},
 		{name: "dev is not comparable", left: "dev", right: "v1.2.3", wantOK: false},
 		{name: "missing v prefix is not comparable", left: "1.2.3", right: "v1.2.3", wantOK: false},
 		{name: "prerelease is not comparable", left: "v1.2.3-beta", right: "v1.2.3", wantOK: false},
@@ -48,6 +50,7 @@ func TestIsStableVersion(t *testing.T) {
 	}{
 		{version: "v1.2.3", want: true},
 		{version: "v12.3.45", want: true},
+		{version: "v1.2.3-fork.1", want: true},
 		{version: "dev", want: false},
 		{version: "1.2.3", want: false},
 		{version: "v1.2", want: false},
@@ -60,6 +63,36 @@ func TestIsStableVersion(t *testing.T) {
 				t.Fatalf("IsStableVersion() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCheckerComparesForkVersionWithLatestRelease(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/Willxup/cpa-usage-keeper/releases/latest" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"v1.2.4"}`))
+	}))
+	defer server.Close()
+
+	checker := NewChecker("v1.2.3-fork.1", WithBaseURL(server.URL), WithHTTPClient(server.Client()))
+	result, err := checker.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+
+	if result.CurrentVersion != "v1.2.3-fork.1" {
+		t.Fatalf("CurrentVersion = %q, want v1.2.3-fork.1", result.CurrentVersion)
+	}
+	if result.LatestVersion != "v1.2.4" {
+		t.Fatalf("LatestVersion = %q, want v1.2.4", result.LatestVersion)
+	}
+	if !result.CanCompare {
+		t.Fatalf("CanCompare = false, want true")
+	}
+	if !result.UpdateAvailable {
+		t.Fatalf("UpdateAvailable = false, want true")
 	}
 }
 

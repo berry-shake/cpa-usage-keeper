@@ -96,11 +96,12 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           ASSET_ARCH: ${{ matrix.asset_arch }}
           BINARY_EXT: ${{ matrix.binary_ext }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p build
           output="build/cpa-usage-keeper_${GOOS}_${ASSET_ARCH}${BINARY_EXT}"
-          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -trimpath -ldflags "-s -w" -o "${output}" ./cmd/server/main.go
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -trimpath -ldflags "-s -w -X cpa-usage-keeper/internal/version.Version=${REF_NAME}" -o "${output}" ./cmd/server/main.go
           file "${output}"
 
       - name: Upload binary artifact
