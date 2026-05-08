@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchUsageEventFilterOptions, fetchUsageEvents, fetchUsageIdentities, syncRemotePricing, triggerSync } from './api';
+import { fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, syncRemotePricing, triggerSync } from './api';
 
 describe('fetchUsageEvents', () => {
   afterEach(() => {
@@ -7,21 +7,21 @@ describe('fetchUsageEvents', () => {
     vi.unstubAllGlobals();
   });
 
-  it('loads stable filter options without query params', async () => {
+  it('loads model filter options without query params', async () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ models: ['claude-sonnet'], sources: [{ value: 'source-a', label: 'Provider A' }] }),
+      json: async () => ({ models: ['claude-sonnet'] }),
     } as Response);
     const signal = new AbortController().signal;
 
-    const response = await fetchUsageEventFilterOptions(signal);
+    const response = await fetchUsageEventModelFilterOptions(signal);
 
     const [url, init] = fetchMock.mock.calls[0];
     const parsed = new URL(String(url), 'http://localhost');
 
     expect(response.models).toEqual(['claude-sonnet']);
-    expect(parsed.pathname).toBe('/api/v1/usage/events/filters');
+    expect(parsed.pathname).toBe('/api/v1/usage/events/filters/models');
     expect(parsed.search).toBe('');
     expect(parsed.searchParams.get('range')).toBeNull();
     expect(parsed.searchParams.get('start')).toBeNull();
@@ -31,6 +31,25 @@ describe('fetchUsageEvents', () => {
     expect(parsed.searchParams.get('model')).toBeNull();
     expect(parsed.searchParams.get('source')).toBeNull();
     expect(parsed.searchParams.get('result')).toBeNull();
+    expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
+  });
+
+  it('loads source filter options without query params', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ sources: [{ value: 'source-a', label: 'Provider A' }] }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    const response = await fetchUsageEventSourceFilterOptions(signal);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(response.sources).toEqual([{ value: 'source-a', label: 'Provider A' }]);
+    expect(parsed.pathname).toBe('/api/v1/usage/events/filters/sources');
+    expect(parsed.search).toBe('');
     expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
   });
 
@@ -153,5 +172,30 @@ describe('fetchUsageEvents', () => {
     expect(response.matched_count).toBe(1);
     expect(parsed.pathname).toBe('/api/v1/pricing/sync');
     expect(init).toMatchObject({ credentials: 'include', method: 'POST' });
+  });
+
+  it('loads update check status from the protected endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        currentVersion: 'v1.2.3',
+        latestVersion: 'v1.2.4',
+        updateAvailable: true,
+        canCompare: true,
+        message: 'new version available: v1.2.4',
+      }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    const response = await fetchUpdateCheck(signal);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(response.latestVersion).toBe('v1.2.4');
+    expect(response.updateAvailable).toBe(true);
+    expect(parsed.pathname).toBe('/api/v1/update/check');
+    expect(init).toMatchObject({ credentials: 'include', signal });
   });
 });

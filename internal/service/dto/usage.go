@@ -20,8 +20,6 @@ type UsageFilter struct {
 	Model     string
 	Source    string
 	AuthIndex string
-	AuthType  string
-	Provider  string
 	Result    string
 }
 
@@ -29,7 +27,6 @@ type UsageFilter struct {
 type UsageEventsPage struct {
 	Events     []UsageEventRecord
 	Models     []string
-	Sources    []string
 	TotalCount int64
 	Page       int
 	PageSize   int
@@ -38,8 +35,7 @@ type UsageEventsPage struct {
 
 // UsageEventFilterOptions 是 usage events 筛选项的服务层结果。
 type UsageEventFilterOptions struct {
-	Models  []string
-	Sources []string
+	Models []string
 }
 
 // UsageEventRecord 是单条 usage event 的服务层结果。

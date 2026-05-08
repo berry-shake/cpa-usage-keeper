@@ -1,4 +1,4 @@
-import type { AuthSessionResponse, PricingEntry, PricingResponse, PricingSyncResponse, StatusResponse, UsageAnalysisResponse, UsageCredentialsResponse, UsageEventFilterOptionsResponse, UsedModelsResponse, UsageIdentitiesResponse, UsageEventsResponse, UsageOverviewResponse } from './types'
+import type { AuthSessionResponse, PricingEntry, PricingResponse, PricingSyncResponse, StatusResponse, UpdateCheckResponse, UsageAnalysisResponse, UsageCredentialsResponse, UsageEventModelFilterOptionsResponse, UsageEventSourceFilterOptionsResponse, UsedModelsResponse, UsageIdentitiesResponse, UsageEventsResponse, UsageOverviewResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -96,10 +96,18 @@ export interface FetchUsageEventsOptions {
   result?: string
 }
 
-export async function fetchUsageEventFilterOptions(signal?: AbortSignal): Promise<UsageEventFilterOptionsResponse> {
-  const response = await apiFetch(apiPath('/usage/events/filters'), { signal, cache: 'no-store' })
+export async function fetchUsageEventModelFilterOptions(signal?: AbortSignal): Promise<UsageEventModelFilterOptionsResponse> {
+  const response = await apiFetch(apiPath('/usage/events/filters/models'), { signal, cache: 'no-store' })
   if (!response.ok) {
-    await parseApiError(response, `Failed to load usage event filters: ${response.status}`)
+    await parseApiError(response, `Failed to load usage event model filters: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUsageEventSourceFilterOptions(signal?: AbortSignal): Promise<UsageEventSourceFilterOptionsResponse> {
+  const response = await apiFetch(apiPath('/usage/events/filters/sources'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage event source filters: ${response.status}`)
   }
   return response.json()
 }
@@ -193,6 +201,14 @@ export async function fetchStatus(signal?: AbortSignal): Promise<StatusResponse>
   const response = await apiFetch(apiPath('/status'), { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load status: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUpdateCheck(signal?: AbortSignal): Promise<UpdateCheckResponse> {
+  const response = await apiFetch(apiPath('/update/check'), { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to check for updates: ${response.status}`)
   }
   return response.json()
 }

@@ -25,6 +25,7 @@ func (s *usageService) GetUsageWithFilter(_ context.Context, filter servicedto.U
 	})
 }
 
+// Usage 页面里的 Overview tab 只下传时间窗口，仓储层负责构建 overview 聚合。
 func (s *usageService) GetUsageOverview(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
 	overview, err := repository.BuildUsageOverviewWithFilter(s.db, repodto.UsageQueryFilter{
 		Range:     filter.Range,
@@ -95,6 +96,7 @@ func mapUsageOverviewSeries(series repodto.UsageOverviewSeriesRecord) servicedto
 	}
 }
 
+// Usage 页面里的 Request Event Log tab 下传分页和列表筛选条件。
 func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
 	page, err := repository.ListUsageEventsWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,
@@ -106,8 +108,6 @@ func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.Usag
 		Model:     filter.Model,
 		Source:    filter.Source,
 		AuthIndex: filter.AuthIndex,
-		AuthType:  filter.AuthType,
-		Provider:  filter.Provider,
 		Result:    filter.Result,
 	})
 	if err != nil {
@@ -133,9 +133,10 @@ func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.Usag
 			TotalTokens:     row.TotalTokens,
 		})
 	}
-	return &servicedto.UsageEventsPage{Events: result, Models: page.Models, Sources: page.Sources, TotalCount: page.TotalCount, Page: page.Page, PageSize: page.PageSize, TotalPages: page.TotalPages}, nil
+	return &servicedto.UsageEventsPage{Events: result, Models: page.Models, TotalCount: page.TotalCount, Page: page.Page, PageSize: page.PageSize, TotalPages: page.TotalPages}, nil
 }
 
+// Usage 页面里的 Request Event Log tab 的 model 筛选项只按当前时间窗口加载候选值。
 func (s *usageService) ListUsageEventFilterOptions(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	options, err := repository.ListUsageEventFilterOptionsWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,
@@ -144,7 +145,7 @@ func (s *usageService) ListUsageEventFilterOptions(_ context.Context, filter ser
 	if err != nil {
 		return nil, err
 	}
-	return &servicedto.UsageEventFilterOptions{Models: options.Models, Sources: options.Sources}, nil
+	return &servicedto.UsageEventFilterOptions{Models: options.Models}, nil
 }
 
 func (s *usageService) ListUsageCredentialStats(_ context.Context, filter servicedto.UsageFilter) ([]servicedto.UsageCredentialStat, error) {
@@ -175,6 +176,7 @@ func (s *usageService) ListUsageCredentialStats(_ context.Context, filter servic
 	return result, nil
 }
 
+// Usage 页面里的 Analysis tab 只下传时间窗口，仓储层负责按 API 和 model 聚合。
 func (s *usageService) GetUsageAnalysis(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
 	apiRows, modelRows, err := repository.ListUsageAnalysisWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,

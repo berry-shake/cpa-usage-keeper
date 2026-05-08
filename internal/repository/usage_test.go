@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"cpa-usage-keeper/internal/repository/dto"
 	"math"
 	"path/filepath"
 	"testing"
@@ -9,6 +8,7 @@ import (
 
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/repository/dto"
 	"gorm.io/gorm"
 )
 
@@ -145,31 +145,20 @@ func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
 	}
 	filter := dto.UsageQueryFilter{Model: "claude-sonnet", Source: "source-a", AuthIndex: "1", Result: "success"}
 
-	snapshot, err := BuildUsageSnapshotWithFilter(db, filter)
+	page, err := ListUsageEventsWithFilter(db, filter)
 	if err != nil {
-		t.Fatalf("BuildUsageSnapshotWithFilter returned error: %v", err)
+		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
-	if snapshot.TotalRequests != 1 || snapshot.SuccessCount != 1 || snapshot.FailureCount != 0 || snapshot.TotalTokens != 35 {
-		t.Fatalf("expected snapshot to include only matching successful event, got %+v", snapshot)
+	if page.TotalCount != 1 || len(page.Events) != 1 || page.Events[0].Model != "claude-sonnet" || page.Events[0].Source != "source-a" || page.Events[0].AuthIndex != "1" || page.Events[0].Failed {
+		t.Fatalf("expected event list to include only matching successful event, got %+v", page)
 	}
 
-	overview, err := BuildUsageOverviewWithFilter(db, filter)
+	credentialRows, err := ListUsageCredentialStatsWithFilter(db, filter)
 	if err != nil {
-		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
+		t.Fatalf("ListUsageCredentialStatsWithFilter returned error: %v", err)
 	}
-	if overview.Summary.RequestCount != 1 || overview.Summary.TokenCount != 35 {
-		t.Fatalf("expected overview to include only matching successful event, got %+v", overview.Summary)
-	}
-
-	apis, models, err := ListUsageAnalysisWithFilter(db, filter)
-	if err != nil {
-		t.Fatalf("ListUsageAnalysisWithFilter returned error: %v", err)
-	}
-	if len(apis) != 1 || apis[0].APIGroupKey != "provider-a" || apis[0].TotalRequests != 1 || apis[0].FailureCount != 0 {
-		t.Fatalf("expected analysis API stats to include only matching successful event, got %+v", apis)
-	}
-	if len(models) != 1 || models[0].Model != "claude-sonnet" || models[0].TotalRequests != 1 || models[0].FailureCount != 0 {
-		t.Fatalf("expected analysis model stats to include only matching successful event, got %+v", models)
+	if len(credentialRows) != 1 || credentialRows[0].Source != "source-a" || credentialRows[0].AuthIndex != "1" || credentialRows[0].Model != "claude-sonnet" || credentialRows[0].RequestCount != 1 || credentialRows[0].Failed {
+		t.Fatalf("expected credential stats to include only matching successful event, got %+v", credentialRows)
 	}
 }
 

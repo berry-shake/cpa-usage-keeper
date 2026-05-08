@@ -6,7 +6,6 @@ import "time"
 type UsageEventsPageRecord struct {
 	Events     []UsageEventRecord
 	Models     []string
-	Sources    []string
 	TotalCount int64
 	Page       int
 	PageSize   int
@@ -15,8 +14,7 @@ type UsageEventsPageRecord struct {
 
 // UsageEventFilterOptionsRecord 是 usage events 筛选项的仓储查询结果。
 type UsageEventFilterOptionsRecord struct {
-	Models  []string
-	Sources []string
+	Models []string
 }
 
 // UsageEventRecord 是单条 usage event 的查询结果。

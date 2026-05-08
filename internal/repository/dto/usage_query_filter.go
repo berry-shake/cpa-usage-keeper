@@ -14,8 +14,6 @@ type UsageQueryFilter struct {
 	Model     string
 	Source    string
 	AuthIndex string
-	AuthType  string
-	Provider  string
 	Result    string
 }
 

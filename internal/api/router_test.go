@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/poller"
+	"cpa-usage-keeper/internal/version"
 	"github.com/gin-gonic/gin"
 )
 
@@ -142,6 +143,44 @@ func TestStatusReturnsEmptyStateWithoutProvider(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	if body := resp.Body.String(); !contains(body, `"running":false`) || !contains(body, `"sync_running":false`) || !contains(body, `"timezone":`) {
+		t.Fatalf("unexpected response body: %s", body)
+	}
+}
+
+func TestStatusReturnsVersionAndUpdateCheckFlag(t *testing.T) {
+	previousVersion := version.Version
+	t.Cleanup(func() { version.Version = previousVersion })
+	version.Version = "v1.2.3"
+
+	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"version":"v1.2.3"`) || !contains(body, `"updateCheckEnabled":true`) {
+		t.Fatalf("unexpected response body: %s", body)
+	}
+}
+
+func TestStatusHidesUpdateCheckForDevVersion(t *testing.T) {
+	previousVersion := version.Version
+	t.Cleanup(func() { version.Version = previousVersion })
+	version.Version = "dev"
+
+	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"version":"dev"`) || !contains(body, `"updateCheckEnabled":false`) {
 		t.Fatalf("unexpected response body: %s", body)
 	}
 }
@@ -322,6 +361,38 @@ func TestRootStaticRouteInjectsEmptyBasePath(t *testing.T) {
 	}
 	if !contains(resp.Body.String(), `window.__APP_BASE_PATH__ = "";`) {
 		t.Fatalf("expected injected empty base path, got %s", resp.Body.String())
+	}
+}
+
+func TestStaticHTMLResponsesBypassCache(t *testing.T) {
+	staticFS := testStaticFS(t, map[string]string{
+		"index.html": `<html><head><script>window.__APP_BASE_PATH__ = "__APP_BASE_PATH__";</script></head><body>app</body></html>`,
+		"assets/app.js": "console.log('ok')",
+	})
+
+	router := NewRouter(staticFS, nil, nil, nil, AuthConfig{}, nil, "/cpa")
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/cpa/dashboard", nil)
+	router.ServeHTTP(resp, req)
+
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("expected HTML Cache-Control no-store, got %q", got)
+	}
+}
+
+func TestStaticAssetResponsesUseLongCache(t *testing.T) {
+	staticFS := testStaticFS(t, map[string]string{
+		"index.html": `<html><head><script>window.__APP_BASE_PATH__ = "__APP_BASE_PATH__";</script></head><body>app</body></html>`,
+		"assets/app.js": "console.log('ok')",
+	})
+
+	router := NewRouter(staticFS, nil, nil, nil, AuthConfig{}, nil, "/cpa")
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/cpa/assets/app.js", nil)
+	router.ServeHTTP(resp, req)
+
+	if got := resp.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("expected asset Cache-Control immutable cache, got %q", got)
 	}
 }
 

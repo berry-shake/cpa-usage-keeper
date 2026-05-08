@@ -17,7 +17,10 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY --from=web-builder /app/web/dist ./web/dist
 COPY web/static.go ./web/static.go
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/cpa-usage-keeper ./cmd/server/main.go
+ARG VERSION=dev
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+	-ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" \
+	-o /out/cpa-usage-keeper ./cmd/server/main.go
 
 FROM alpine:3.20
 WORKDIR /

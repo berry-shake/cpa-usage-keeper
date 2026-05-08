@@ -15,23 +15,23 @@ func BuildUsageSnapshot(db *gorm.DB) (*dto.StatisticsSnapshot, error) {
 	return BuildUsageSnapshotWithFilter(db, dto.UsageQueryFilter{})
 }
 
+// Request Event Log Tab：先按列表条件统计总数，再加载当前页和筛选项。
 func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageEventsPageRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	baseQuery := db.Model(&entities.UsageEvent{})
-	baseQuery = applyUsageEventsListFilter(baseQuery, filter)
+	// 第一步：应用列表筛选，统计分页总数。
+	baseQuery := queryUsageEvents(db)
+	baseQuery = applyUsageEventListQuery(baseQuery, filter)
 
 	var totalCount int64
 	if err := baseQuery.Count(&totalCount).Error; err != nil {
 		return nil, fmt.Errorf("count usage events: %w", err)
 	}
-	modelFacets, err := listUsageEventFacetValues(db, filter, "model")
-	if err != nil {
-		return nil, err
-	}
-	sources, err := listUsageEventFacetValues(db, filter, "source")
+
+	// 第二步：model 筛选项只跟随时间窗口，不跟随当前列表筛选。
+	modelOptions, err := listUsageEventModelFilterOptions(db, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.U
 		offset = 0
 	}
 
-	query := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter)
+	query := applyUsageEventListQuery(db.Model(&entities.UsageEvent{}), filter)
 	query = query.Order("timestamp DESC, id DESC").Limit(pageSize).Offset(offset)
 
 	var events []entities.UsageEvent
@@ -87,34 +87,38 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.U
 	if totalCount > 0 {
 		totalPages = int((totalCount + int64(pageSize) - 1) / int64(pageSize))
 	}
-	return &dto.UsageEventsPageRecord{Events: rows, Models: modelFacets, Sources: sources, TotalCount: totalCount, Page: page, PageSize: pageSize, TotalPages: totalPages}, nil
+	return &dto.UsageEventsPageRecord{Events: rows, Models: modelOptions, TotalCount: totalCount, Page: page, PageSize: pageSize, TotalPages: totalPages}, nil
 }
 
+// Request Event Log Filter Options：只按时间窗口收集 model 候选值。
 func ListUsageEventFilterOptionsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageEventFilterOptionsRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
-	models, err := listUsageEventFacetValues(db, filter, "model")
+	models, err := listUsageEventModelFilterOptions(db, filter)
 	if err != nil {
 		return nil, err
 	}
-	sources, err := listUsageEventFacetValues(db, filter, "source")
-	if err != nil {
-		return nil, err
-	}
-	return &dto.UsageEventFilterOptionsRecord{Models: models, Sources: sources}, nil
+	return &dto.UsageEventFilterOptionsRecord{Models: models}, nil
 }
 
-func listUsageEventFacetValues(db *gorm.DB, filter dto.UsageQueryFilter, column string) ([]string, error) {
-	query := applyUsageEventTimeFilter(db.Model(&entities.UsageEvent{}), filter)
+func listUsageEventModelFilterOptions(db *gorm.DB, filter dto.UsageQueryFilter) ([]string, error) {
+	// 第一步：model 候选值只来自 usage_events，并且只套用时间窗口。
+	query := applyUsageEventFilterOptionsQuery(queryUsageEvents(db), filter)
+
+	// 第二步：去重并排除空 model，保持下拉选项稳定排序。
 	var values []string
-	if err := query.Select("DISTINCT TRIM("+column+")").Where("TRIM("+column+") <> ''").Order("TRIM("+column+") ASC").Pluck(column, &values).Error; err != nil {
-		return nil, fmt.Errorf("load usage event %s facets: %w", column, err)
+	if err := query.Select("DISTINCT TRIM(model)").Where("TRIM(model) <> ''").Order("TRIM(model) ASC").Pluck("model", &values).Error; err != nil {
+		return nil, fmt.Errorf("load usage event model filter options: %w", err)
 	}
 	return values, nil
 }
 
-func applyUsageEventTimeFilter(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
+func queryUsageEvents(db *gorm.DB) *gorm.DB {
+	return db.Model(&entities.UsageEvent{})
+}
+
+func applyUsageQueryWindow(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
 	if filter.StartTime != nil {
 		query = query.Where("timestamp >= ?", filter.StartTime.UTC())
 	}
@@ -124,19 +128,30 @@ func applyUsageEventTimeFilter(query *gorm.DB, filter dto.UsageQueryFilter) *gor
 	return query
 }
 
-func applyUsageEventsListFilter(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
-	query = applyUsageEventTimeFilter(query, filter)
+// Overview Tab 第一步：只应用时间窗口，后续 Overview 专属条件也从这里加。
+func applyUsageOverviewQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
+	return applyUsageQueryWindow(query, filter)
+}
+
+// Analysis Tab 第一步：只应用时间窗口，避免 Request Event Log 的筛选污染聚合。
+func applyUsageAnalysisTabQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
+	return applyUsageQueryWindow(query, filter)
+}
+
+// Request Event Log 筛选项第一步：只应用时间窗口，不叠加当前列表筛选。
+func applyUsageEventFilterOptionsQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
+	return applyUsageQueryWindow(query, filter)
+}
+
+// Request Event Log 列表第一步：在时间窗口上叠加 model/source/auth_index/result。
+func applyUsageEventListQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
+	query = applyUsageQueryWindow(query, filter)
 	if model := strings.TrimSpace(filter.Model); model != "" {
 		query = query.Where("TRIM(model) = ?", model)
 	}
-	if authType := strings.TrimSpace(filter.AuthType); authType != "" {
-		query = query.Where("TRIM(auth_type) = ?", authType)
-	}
-	if provider := strings.TrimSpace(filter.Provider); provider != "" {
-		query = query.Where("TRIM(provider) = ?", provider)
-	}
 	if source := strings.TrimSpace(filter.Source); source != "" {
-		if authIndex := strings.TrimSpace(filter.AuthIndex); authIndex != "" && strings.TrimSpace(filter.AuthType) == "oauth" {
+		if authIndex := strings.TrimSpace(filter.AuthIndex); authIndex != "" {
+			// 第二步：API 层会把 Source 下拉转成 auth_index，这里兼容直接传 source 的仓储调用。
 			query = query.Where("(TRIM(auth_index) = ? OR TRIM(source) = ?)", authIndex, source)
 		} else {
 			query = query.Where("TRIM(source) = ?", source)
@@ -158,7 +173,7 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	normalizedQuery := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter)
+	normalizedQuery := applyUsageEventListQuery(db.Model(&entities.UsageEvent{}), filter)
 	normalizedQuery = normalizedQuery.Select(strings.Join([]string{
 		"TRIM(source) AS source",
 		"TRIM(auth_index) AS auth_index",
@@ -173,16 +188,16 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 
 	query := db.Table("(?) AS usage_event_stats", normalizedQuery)
 	query = query.Select(strings.Join([]string{
-		"model",
-		"failed AS failed_value",
 		"COUNT(*) AS request_count",
 		"SUM(input_tokens) AS input_token_sum",
 		"SUM(output_tokens) AS output_token_sum",
 		"SUM(reasoning_tokens) AS reasoning_token_sum",
 		"SUM(cached_tokens) AS cached_token_sum",
 		"SUM(total_tokens) AS total_token_sum",
+		"failed AS failed_value",
 		"source",
 		"auth_index",
+		"model",
 	}, ", "))
 	query = query.Group("source, auth_index, model, failed")
 	query = query.Order("request_count DESC, source ASC, auth_index ASC, model ASC, failed_value ASC")
@@ -198,16 +213,16 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 		var failedValue int64
 		var row dto.UsageCredentialStatRecord
 		if err := sqlRows.Scan(
-			&row.Model,
-			&failedValue,
 			&row.RequestCount,
 			&row.InputTokens,
 			&row.OutputTokens,
 			&row.ReasoningTokens,
 			&row.CachedTokens,
 			&row.TotalTokens,
+			&failedValue,
 			&row.Source,
 			&row.AuthIndex,
+			&row.Model,
 		); err != nil {
 			return nil, fmt.Errorf("scan usage credential stats: %w", err)
 		}
@@ -233,12 +248,13 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 	return rows, nil
 }
 
+// Analysis 第一步：按时间窗口做 API / model / API+model 聚合。
 func ListUsageAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dto.UsageAnalysisAPIStatRecord, []dto.UsageAnalysisModelStatRecord, error) {
 	if db == nil {
 		return nil, nil, fmt.Errorf("database is nil")
 	}
 
-	baseQuery := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter)
+	baseQuery := applyUsageAnalysisTabQuery(db.Model(&entities.UsageEvent{}), filter)
 
 	apiQuery := baseQuery.Session(&gorm.Session{})
 	apiQuery = apiQuery.Select(strings.Join([]string{
@@ -363,12 +379,13 @@ func ListUsageAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dt
 	return resultAPIs, modelRows, nil
 }
 
+// Snapshot 先读事件，再按时间窗口在内存里汇总。
 func BuildUsageSnapshotWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.StatisticsSnapshot, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	events, err := loadUsageEventsWithFilter(db, filter)
+	events, err := loadUsageOverviewEventsWithFilter(db, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -376,12 +393,13 @@ func BuildUsageSnapshotWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dt
 	return buildUsageSnapshotFromEvents(events), nil
 }
 
+// Overview 先读事件，再组合窗口、系列和价格信息。
 func BuildUsageOverviewWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageOverviewRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	events, err := loadUsageEventsWithFilter(db, filter)
+	events, err := loadUsageOverviewEventsWithFilter(db, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -426,8 +444,9 @@ func buildUsageOverviewFromEvents(events []entities.UsageEvent, filter dto.Usage
 	return overview
 }
 
-func loadUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]entities.UsageEvent, error) {
-	query := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter).Order("timestamp asc")
+// Overview 第二步：按时间窗口读事件，再交给内存汇总。
+func loadUsageOverviewEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]entities.UsageEvent, error) {
+	query := applyUsageOverviewQuery(db.Model(&entities.UsageEvent{}), filter).Order("timestamp asc")
 
 	var events []entities.UsageEvent
 	if err := query.Find(&events).Error; err != nil {

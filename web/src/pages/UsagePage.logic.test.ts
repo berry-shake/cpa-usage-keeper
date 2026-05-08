@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, shouldShowRangeControls, syncCpaData } from './UsagePage';
+import { buildCustomDateRangeQuery, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration, syncCpaData } from './UsagePage';
 import { ApiError } from '@/lib/api';
 import { filterUsageByWindow, type UsageFilterWindow } from '@/utils/usage';
 import type { StatusResponse, UsageSnapshot } from '@/lib/types';
@@ -92,6 +92,26 @@ describe('UsagePage Overview loading display', () => {
 
   it('shows loading before Overview data has loaded', () => {
     expect(getOverviewDisplayLoading({ loading: true, hasUsage: false })).toBe(true);
+  });
+});
+
+describe('UsagePage update check controls', () => {
+  it('hides the update button before status loads', () => {
+    expect(shouldShowUpdateCheckButton(null)).toBe(false);
+  });
+
+  it('hides the update button for dev builds', () => {
+    expect(shouldShowUpdateCheckButton({ updateCheckEnabled: false })).toBe(false);
+  });
+
+  it('shows the update button for release builds', () => {
+    expect(shouldShowUpdateCheckButton({ updateCheckEnabled: true })).toBe(true);
+  });
+
+  it('keeps failure toasts visible longer than success toasts', () => {
+    expect(getUpdateCheckToastDuration('success')).toBe(4_000);
+    expect(getUpdateCheckToastDuration('info')).toBe(4_000);
+    expect(getUpdateCheckToastDuration('error')).toBe(6_000);
   });
 });
 
@@ -311,7 +331,7 @@ describe('UsagePage Overview chart window', () => {
       filterWindow,
       fallbackEndMs: filterWindow.endMs ?? 0,
       resolvedRangeEndMs: Date.parse('2026-04-23T15:59:59.999Z'),
-    })).toBe(Date.parse('2026-04-23T15:59:59.999Z'));
+    })).toBe(Date.parse('2026-04-24T00:00:00.000Z'));
   });
 });
 

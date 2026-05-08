@@ -106,68 +106,38 @@ func TestListUsageEventsWithFilterAppliesModelSourceAndResultFilters(t *testing.
 	}
 }
 
-func TestListUsageEventsWithFilterAppliesProviderAuthTypeFilter(t *testing.T) {
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-provider-filter.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	events := []entities.UsageEvent{
-		{EventKey: "event-1", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), AuthType: "apikey", Provider: "OpenAI Mirror", Source: "sk-key-a", TotalTokens: 10},
-		{EventKey: "event-2", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), AuthType: "apikey", Provider: "OpenAI Mirror", Source: "sk-key-b", TotalTokens: 20},
-		{EventKey: "event-3", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), AuthType: "apikey", Provider: "Other Provider", Source: "sk-key-c", TotalTokens: 30},
-		{EventKey: "event-4", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC), AuthType: "oauth", Provider: "OpenAI Mirror", Source: "oauth-source", AuthIndex: "auth-1", TotalTokens: 40},
-	}
-	if _, _, err := InsertUsageEvents(db, events); err != nil {
-		t.Fatalf("InsertUsageEvents returned error: %v", err)
-	}
-
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthType: "apikey", Provider: "OpenAI Mirror", Page: 1, PageSize: 20})
-	if err != nil {
-		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
-	}
-	if page.TotalCount != 2 || len(page.Events) != 2 {
-		t.Fatalf("expected two matching provider events, got %+v", page)
-	}
-	for _, event := range page.Events {
-		if event.AuthType != "apikey" || event.Provider != "OpenAI Mirror" {
-			t.Fatalf("unexpected provider filtered event: %+v", event)
-		}
-	}
-}
-
-func TestListUsageEventsWithFilterAppliesAuthSourceOrAuthIndexFilter(t *testing.T) {
+func TestListUsageEventsWithFilterAppliesAuthIndexFilter(t *testing.T) {
 	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-auth-filter.db")})
 	if err != nil {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
 	events := []entities.UsageEvent{
-		{EventKey: "event-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), AuthType: "oauth", Source: "auth-1", AuthIndex: "1", TotalTokens: 10},
-		{EventKey: "event-2", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), AuthType: "oauth", Source: "source-alias", AuthIndex: "auth-1", TotalTokens: 20},
-		{EventKey: "event-3", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), AuthType: "oauth", Source: "other", AuthIndex: "other", TotalTokens: 30},
-		{EventKey: "event-4", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC), AuthType: "apikey", Source: "auth-1", AuthIndex: "auth-1", Provider: "Provider A", TotalTokens: 40},
+		{EventKey: "event-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "auth-1", AuthIndex: "auth-1", TotalTokens: 10},
+		{EventKey: "event-2", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-alias", AuthIndex: "auth-1", TotalTokens: 20},
+		{EventKey: "event-3", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), Source: "other", AuthIndex: "other", TotalTokens: 30},
+		{EventKey: "event-4", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC), Source: "auth-1", AuthIndex: "auth-1", Provider: "Provider A", TotalTokens: 40},
 	}
 	if _, _, err := InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthType: "oauth", Source: "auth-1", AuthIndex: "auth-1", Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Source: "auth-1", AuthIndex: "auth-1", Page: 1, PageSize: 20})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
-	if page.TotalCount != 2 || len(page.Events) != 2 {
-		t.Fatalf("expected two matching auth events, got %+v", page)
+	if page.TotalCount != 3 || len(page.Events) != 3 {
+		t.Fatalf("expected three matching auth events, got %+v", page)
 	}
 	for _, event := range page.Events {
-		if event.AuthType != "oauth" || (event.Source != "auth-1" && event.AuthIndex != "auth-1") {
+		if event.AuthIndex != "auth-1" {
 			t.Fatalf("unexpected auth filtered event: %+v", event)
 		}
 	}
 }
 
-func TestListUsageEventFilterOptionsWithFilterReturnsStableOptions(t *testing.T) {
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-facets.db")})
+func TestListUsageEventFilterOptionsWithFilterReturnsStableModels(t *testing.T) {
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-filter-options.db")})
 	if err != nil {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
@@ -187,9 +157,6 @@ func TestListUsageEventFilterOptionsWithFilterReturnsStableOptions(t *testing.T)
 	}
 	if len(options.Models) != 2 || options.Models[0] != "claude-sonnet" || options.Models[1] != "gpt-5" {
 		t.Fatalf("expected stable model options, got %+v", options.Models)
-	}
-	if len(options.Sources) != 2 || options.Sources[0] != "source-a" || options.Sources[1] != "source-b" {
-		t.Fatalf("expected stable source options, got %+v", options.Sources)
 	}
 }
 

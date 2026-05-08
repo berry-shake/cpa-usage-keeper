@@ -13,13 +13,11 @@ import (
 )
 
 type usageEventsResponse struct {
-	Events     []usageEventPayload       `json:"events"`
-	Models     []string                  `json:"models"`
-	Sources    []usageSourceFilterOption `json:"sources"`
-	TotalCount int64                     `json:"total_count"`
-	Page       int                       `json:"page"`
-	PageSize   int                       `json:"page_size"`
-	TotalPages int                       `json:"total_pages"`
+	Events     []usageEventPayload `json:"events"`
+	TotalCount int64               `json:"total_count"`
+	Page       int                 `json:"page"`
+	PageSize   int                 `json:"page_size"`
+	TotalPages int                 `json:"total_pages"`
 }
 
 type usageSourceFilterOption struct {
@@ -60,32 +58,27 @@ func registerUsageEventsRoute(
 	usageProvider service.UsageProvider,
 	usageIdentityProvider service.UsageIdentityProvider,
 ) {
-	router.GET("/usage/events/filters", func(c *gin.Context) {
-		if usageProvider == nil {
-			c.JSON(http.StatusOK, usageEventFilterOptionsResponse{Models: []string{}, Sources: []usageSourceFilterOption{}})
-			return
-		}
-
-		options, err := usageProvider.ListUsageEventFilterOptions(c.Request.Context(), servicedto.UsageFilter{})
+	router.GET("/usage/events/filters/models", func(c *gin.Context) {
+		models, err := loadUsageEventModelFilterOptions(c, usageProvider)
 		if err != nil {
-			writeInternalError(c, "list usage event filter options failed", err)
+			writeInternalError(c, "list usage event model filter options failed", err)
 			return
 		}
+		c.JSON(http.StatusOK, gin.H{"models": models})
+	})
 
-		identities, err := loadUsageResolutionData(c, usageIdentityProvider)
+	router.GET("/usage/events/filters/sources", func(c *gin.Context) {
+		sources, err := loadUsageEventSourceFilterOptions(c, usageIdentityProvider)
 		if err != nil {
-			writeInternalError(c, "load usage resolution data failed", err)
+			writeInternalError(c, "list usage event source filter options failed", err)
 			return
 		}
-		c.JSON(http.StatusOK, usageEventFilterOptionsResponse{
-			Models:  options.Models,
-			Sources: buildUsageSourceFilterOptions(options.Sources, identities),
-		})
+		c.JSON(http.StatusOK, gin.H{"sources": sources})
 	})
 
 	router.GET("/usage/events", func(c *gin.Context) {
 		if usageProvider == nil {
-			c.JSON(http.StatusOK, usageEventsResponse{Events: []usageEventPayload{}, Models: []string{}, Sources: []usageSourceFilterOption{}, Page: 1, PageSize: servicedto.DefaultUsageEventsLimit})
+			c.JSON(http.StatusOK, usageEventsResponse{Events: []usageEventPayload{}, Page: 1, PageSize: servicedto.DefaultUsageEventsLimit})
 			return
 		}
 
@@ -113,8 +106,6 @@ func registerUsageEventsRoute(
 		resolver := newUsageIdentityResolver(identities)
 		c.JSON(http.StatusOK, usageEventsResponse{
 			Events:     buildUsageEventsPayload(rows.Events, resolver),
-			Models:     rows.Models,
-			Sources:    buildUsageSourceFilterOptions(rows.Sources, identities),
 			TotalCount: rows.TotalCount,
 			Page:       rows.Page,
 			PageSize:   rows.PageSize,
@@ -123,6 +114,7 @@ func registerUsageEventsRoute(
 	})
 }
 
+// Source 下拉提交的是 usage identity，进入仓储前转换成 auth_index 查询。
 func applyUsageEventsSourceFilter(filter *servicedto.UsageFilter) error {
 	if filter == nil {
 		return nil
@@ -133,11 +125,10 @@ func applyUsageEventsSourceFilter(filter *servicedto.UsageFilter) error {
 	}
 	filter.AuthIndex = source
 	filter.Source = ""
-	filter.Provider = ""
-	filter.AuthType = ""
 	return nil
 }
 
+// 列表结果先按 auth_index 解析展示名，再组装前端需要的事件 payload。
 func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageIdentityResolver) []usageEventPayload {
 	if len(rows) == 0 {
 		return []usageEventPayload{}
@@ -183,7 +174,27 @@ func usageEventPublicSource(row servicedto.UsageEventRecord, identity resolvedUs
 	}
 }
 
-func buildUsageSourceFilterOptions(sources []string, identities []entities.UsageIdentity) []usageSourceFilterOption {
+func loadUsageEventModelFilterOptions(c *gin.Context, usageProvider service.UsageProvider) ([]string, error) {
+	if usageProvider == nil {
+		return []string{}, nil
+	}
+	options, err := usageProvider.ListUsageEventFilterOptions(c.Request.Context(), servicedto.UsageFilter{})
+	if err != nil {
+		return nil, err
+	}
+	return options.Models, nil
+}
+
+func loadUsageEventSourceFilterOptions(c *gin.Context, usageIdentityProvider service.UsageIdentityProvider) ([]usageSourceFilterOption, error) {
+	identities, err := loadUsageResolutionData(c, usageIdentityProvider)
+	if err != nil {
+		return nil, err
+	}
+	return buildUsageSourceFilterOptions(identities), nil
+}
+
+// Source 筛选项从活跃身份生成，避免把 usage_events.source 当成可选项暴露给页面。
+func buildUsageSourceFilterOptions(identities []entities.UsageIdentity) []usageSourceFilterOption {
 	if len(identities) == 0 {
 		return []usageSourceFilterOption{}
 	}

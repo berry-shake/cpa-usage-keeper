@@ -381,7 +381,7 @@ func TestUsageEventsPassesPaginationAndAuthIndexSourceFilter(t *testing.T) {
 	if provider.lastFilter.Page != 3 || provider.lastFilter.PageSize != 100 || provider.lastFilter.Offset != 200 {
 		t.Fatalf("expected pagination filter, got %+v", provider.lastFilter)
 	}
-	if provider.lastFilter.Model != "claude-sonnet" || provider.lastFilter.AuthIndex != "authidx-openai-main" || provider.lastFilter.AuthType != "" || provider.lastFilter.Provider != "" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
+	if provider.lastFilter.Model != "claude-sonnet" || provider.lastFilter.AuthIndex != "authidx-openai-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
 		t.Fatalf("expected source filter to be translated to auth_index only, got %+v", provider.lastFilter)
 	}
 	body := resp.Body.String()
@@ -401,21 +401,19 @@ func TestUsageEventsPassesAuthFileIdentitySourceFilterAsAuthIndex(t *testing.T) 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
-	if provider.lastFilter.AuthIndex != "auth-file-index" || provider.lastFilter.AuthType != "" || provider.lastFilter.Source != "" || provider.lastFilter.Provider != "" {
+	if provider.lastFilter.AuthIndex != "auth-file-index" || provider.lastFilter.Source != "" {
 		t.Fatalf("expected auth file identity source filter to use auth_index only, got %+v", provider.lastFilter)
 	}
 }
 
-func TestUsageEventsReturnsFilterOptions(t *testing.T) {
+func TestUsageEventsDoesNotReturnFilterOptions(t *testing.T) {
 	provider := &usageEventsStub{eventsPage: &servicedto.UsageEventsPage{
 		Events: []servicedto.UsageEventRecord{{
 			ID: 7, Timestamp: time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC), Model: "gpt-5", AuthType: "apikey", Provider: "Provider A", Source: "source-a", Failed: true,
 		}},
-		Models:     []string{"claude-sonnet", "gpt-5"},
-		Sources:    []string{"source-a", "source-b"},
 		TotalCount: 2, Page: 1, PageSize: 20, TotalPages: 1,
 	}}
-	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []entities.UsageIdentity{{ID: 1, Name: "Claude Main", Prefix: "Team Prefix", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-a", Type: "openai", Provider: "Provider A", TotalRequests: 1}, {ID: 2, Name: "Provider A", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-b", Type: "openai", Provider: "Provider A", TotalRequests: 1}, {ID: 3, Name: "Auth User", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "auth-1", Type: "claude", Provider: "Claude", TotalRequests: 1}, {ID: 9, Name: "Deleted Source", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-deleted", Type: "openai", Provider: "Provider A", TotalRequests: 99, IsDeleted: true}}})
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events", nil)
 	resp := httptest.NewRecorder()
 
@@ -425,27 +423,17 @@ func TestUsageEventsReturnsFilterOptions(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"models":["claude-sonnet","gpt-5"]`) {
-		t.Fatalf("expected model filter options, got %s", body)
-	}
-	if !contains(body, `"sources":[`) || !contains(body, `"value":"authidx-source-a"`) || !contains(body, `"label":"Claude Main"`) || !contains(body, `"displayName":"Claude Main(Team Prefix)"`) || !contains(body, `"value":"authidx-source-b"`) || !contains(body, `"label":"Provider A"`) || !contains(body, `"value":"auth-1"`) || !contains(body, `"label":"Auth User"`) {
-		t.Fatalf("expected identity source filter options with display names, got %s", body)
-	}
-	if contains(body, `"value":"auth:auth-1"`) || contains(body, `"value":"provider:Provider A"`) || contains(body, `"value":"provider:1"`) || contains(body, `"value":"provider:2"`) {
-		t.Fatalf("expected source filter values without prefixes, got %s", body)
-	}
-	if contains(body, `authidx-deleted`) || contains(body, `Deleted Source`) {
-		t.Fatalf("expected deleted source filter option to be omitted, got %s", body)
+	if contains(body, `"models":`) || contains(body, `"sources":`) {
+		t.Fatalf("expected events response to omit filter options, got %s", body)
 	}
 }
 
-func TestUsageEventFilterOptionsReturnsStableModelsAndSources(t *testing.T) {
+func TestUsageEventModelFilterOptionsReturnsStableModels(t *testing.T) {
 	provider := &usageEventsStub{eventFilterOptions: &servicedto.UsageEventFilterOptions{
-		Models:  []string{"claude-sonnet", "gpt-5"},
-		Sources: []string{"source-a", "source-b"},
+		Models: []string{"claude-sonnet", "gpt-5"},
 	}}
-	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []entities.UsageIdentity{{ID: 1, Name: "Claude Main", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-a", Type: "openai", Provider: "Provider A", TotalRequests: 3}, {ID: 2, Name: "Provider A", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-b", Type: "openai", Provider: "Provider A"}, {ID: 3, Name: "Auth User", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "auth-1", Type: "claude", Provider: "Claude", TotalRequests: 2}, {ID: 4, Name: "Zero Request User", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "auth-zero", Type: "claude", Provider: "Claude"}, {ID: 5, Name: "Zero Provider", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-zero", Type: "openai", Provider: "Zero Provider"}, {ID: 6, Name: "Deleted Source", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-deleted", Type: "openai", Provider: "Deleted Provider", TotalRequests: 5, IsDeleted: true}}})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/filters?range=24h&model=ignored&source=ignored&result=failed&page=3&page_size=20", nil)
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/filters/models?range=24h&model=ignored&source=ignored&result=failed&page=3&page_size=20", nil)
 	resp := httptest.NewRecorder()
 
 	router.ServeHTTP(resp, req)
@@ -454,17 +442,37 @@ func TestUsageEventFilterOptionsReturnsStableModelsAndSources(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	if provider.filterOptionCalls != 1 || provider.filterCalls != 0 {
-		t.Fatalf("expected filter options endpoint only, events=%d filterOptions=%d", provider.filterCalls, provider.filterOptionCalls)
+		t.Fatalf("expected model filter options endpoint only, events=%d filterOptions=%d", provider.filterCalls, provider.filterOptionCalls)
 	}
 	if provider.lastFilter.Range != "" || provider.lastFilter.StartTime != nil || provider.lastFilter.EndTime != nil || provider.lastFilter.Model != "" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "" || provider.lastFilter.Page != 0 || provider.lastFilter.PageSize != 0 {
-		t.Fatalf("expected filters endpoint to ignore query filters, got %+v", provider.lastFilter)
+		t.Fatalf("expected model filters endpoint to ignore query filters, got %+v", provider.lastFilter)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"models":["claude-sonnet","gpt-5"]`) {
+	if body != `{"models":["claude-sonnet","gpt-5"]}` {
 		t.Fatalf("expected stable model filter options, got %s", body)
 	}
+}
+
+func TestUsageEventSourceFilterOptionsReturnsIdentitySources(t *testing.T) {
+	provider := &usageEventsStub{}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []entities.UsageIdentity{{ID: 1, Name: "Claude Main", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-a", Type: "openai", Provider: "Provider A", TotalRequests: 3}, {ID: 2, Name: "Provider A", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-b", Type: "openai", Provider: "Provider A"}, {ID: 3, Name: "Auth User", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "auth-1", Type: "claude", Provider: "Claude", TotalRequests: 2}, {ID: 4, Name: "Zero Request User", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "auth-zero", Type: "claude", Provider: "Claude"}, {ID: 5, Name: "Zero Provider", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-zero", Type: "openai", Provider: "Zero Provider"}, {ID: 6, Name: "Deleted Source", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-deleted", Type: "openai", Provider: "Deleted Provider", TotalRequests: 5, IsDeleted: true}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/filters/sources?range=24h&model=ignored&source=ignored&result=failed&page=3&page_size=20", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	if provider.filterOptionCalls != 0 || provider.filterCalls != 0 {
+		t.Fatalf("expected source filter options endpoint to use identities only, events=%d filterOptions=%d", provider.filterCalls, provider.filterOptionCalls)
+	}
+	body := resp.Body.String()
 	if !contains(body, `"sources":[`) || !contains(body, `"value":"authidx-source-a"`) || !contains(body, `"label":"Claude Main"`) || !contains(body, `"displayName":"Claude Main"`) || !contains(body, `"value":"auth-1"`) || !contains(body, `"label":"Auth User"`) {
 		t.Fatalf("expected stable identity source filter options with display names, got %s", body)
+	}
+	if contains(body, `"models"`) {
+		t.Fatalf("expected source filter options endpoint not to return models, got %s", body)
 	}
 	if contains(body, `"value":"auth:auth-1"`) || contains(body, `"value":"provider:Provider A"`) || contains(body, `"value":"provider:1"`) || contains(body, `"value":"provider:2"`) {
 		t.Fatalf("expected source filter values without prefixes, got %s", body)
