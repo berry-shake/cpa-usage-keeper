@@ -6,21 +6,21 @@ import (
 	"strings"
 	"time"
 
-	"cpa-usage-keeper/internal/cpa"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/repository/dto"
 	"gorm.io/gorm"
 )
 
-func BuildUsageSnapshot(db *gorm.DB) (*cpa.StatisticsSnapshot, error) {
-	return BuildUsageSnapshotWithFilter(db, UsageQueryFilter{})
+func BuildUsageSnapshot(db *gorm.DB) (*dto.StatisticsSnapshot, error) {
+	return BuildUsageSnapshotWithFilter(db, dto.UsageQueryFilter{})
 }
 
-func ListUsageEventsWithFilter(db *gorm.DB, filter UsageQueryFilter) (*UsageEventsPageRecord, error) {
+func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageEventsPageRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	baseQuery := db.Model(&models.UsageEvent{})
+	baseQuery := db.Model(&entities.UsageEvent{})
 	baseQuery = applyUsageEventsListFilter(baseQuery, filter)
 
 	var totalCount int64
@@ -45,7 +45,7 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter UsageQueryFilter) (*UsageEven
 		pageSize = filter.Limit
 	}
 	if pageSize <= 0 {
-		pageSize = DefaultUsageEventsLimit
+		pageSize = dto.DefaultUsageEventsLimit
 	}
 	offset := filter.Offset
 	if offset <= 0 {
@@ -55,17 +55,17 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter UsageQueryFilter) (*UsageEven
 		offset = 0
 	}
 
-	query := applyUsageEventsListFilter(db.Model(&models.UsageEvent{}), filter)
+	query := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter)
 	query = query.Order("timestamp DESC, id DESC").Limit(pageSize).Offset(offset)
 
-	var events []models.UsageEvent
+	var events []entities.UsageEvent
 	if err := query.Find(&events).Error; err != nil {
 		return nil, fmt.Errorf("load usage events: %w", err)
 	}
 
-	rows := make([]UsageEventRecord, 0, len(events))
+	rows := make([]dto.UsageEventRecord, 0, len(events))
 	for _, event := range events {
-		rows = append(rows, UsageEventRecord{
+		rows = append(rows, dto.UsageEventRecord{
 			ID:              event.ID,
 			Timestamp:       event.Timestamp.UTC(),
 			APIGroupKey:     strings.TrimSpace(event.APIGroupKey),
@@ -87,10 +87,10 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter UsageQueryFilter) (*UsageEven
 	if totalCount > 0 {
 		totalPages = int((totalCount + int64(pageSize) - 1) / int64(pageSize))
 	}
-	return &UsageEventsPageRecord{Events: rows, Models: modelFacets, Sources: sources, TotalCount: totalCount, Page: page, PageSize: pageSize, TotalPages: totalPages}, nil
+	return &dto.UsageEventsPageRecord{Events: rows, Models: modelFacets, Sources: sources, TotalCount: totalCount, Page: page, PageSize: pageSize, TotalPages: totalPages}, nil
 }
 
-func ListUsageEventFilterOptionsWithFilter(db *gorm.DB, filter UsageQueryFilter) (*UsageEventFilterOptionsRecord, error) {
+func ListUsageEventFilterOptionsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageEventFilterOptionsRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
@@ -102,11 +102,11 @@ func ListUsageEventFilterOptionsWithFilter(db *gorm.DB, filter UsageQueryFilter)
 	if err != nil {
 		return nil, err
 	}
-	return &UsageEventFilterOptionsRecord{Models: models, Sources: sources}, nil
+	return &dto.UsageEventFilterOptionsRecord{Models: models, Sources: sources}, nil
 }
 
-func listUsageEventFacetValues(db *gorm.DB, filter UsageQueryFilter, column string) ([]string, error) {
-	query := applyUsageEventTimeFilter(db.Model(&models.UsageEvent{}), filter)
+func listUsageEventFacetValues(db *gorm.DB, filter dto.UsageQueryFilter, column string) ([]string, error) {
+	query := applyUsageEventTimeFilter(db.Model(&entities.UsageEvent{}), filter)
 	var values []string
 	if err := query.Select("DISTINCT TRIM("+column+")").Where("TRIM("+column+") <> ''").Order("TRIM("+column+") ASC").Pluck(column, &values).Error; err != nil {
 		return nil, fmt.Errorf("load usage event %s facets: %w", column, err)
@@ -114,7 +114,7 @@ func listUsageEventFacetValues(db *gorm.DB, filter UsageQueryFilter, column stri
 	return values, nil
 }
 
-func applyUsageEventTimeFilter(query *gorm.DB, filter UsageQueryFilter) *gorm.DB {
+func applyUsageEventTimeFilter(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
 	if filter.StartTime != nil {
 		query = query.Where("timestamp >= ?", filter.StartTime.UTC())
 	}
@@ -124,7 +124,7 @@ func applyUsageEventTimeFilter(query *gorm.DB, filter UsageQueryFilter) *gorm.DB
 	return query
 }
 
-func applyUsageEventsListFilter(query *gorm.DB, filter UsageQueryFilter) *gorm.DB {
+func applyUsageEventsListFilter(query *gorm.DB, filter dto.UsageQueryFilter) *gorm.DB {
 	query = applyUsageEventTimeFilter(query, filter)
 	if model := strings.TrimSpace(filter.Model); model != "" {
 		query = query.Where("TRIM(model) = ?", model)
@@ -153,12 +153,12 @@ func applyUsageEventsListFilter(query *gorm.DB, filter UsageQueryFilter) *gorm.D
 	return query
 }
 
-func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]UsageCredentialStatRecord, error) {
+func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dto.UsageCredentialStatRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	normalizedQuery := applyUsageEventsListFilter(db.Model(&models.UsageEvent{}), filter)
+	normalizedQuery := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter)
 	normalizedQuery = normalizedQuery.Select(strings.Join([]string{
 		"TRIM(source) AS source",
 		"TRIM(auth_index) AS auth_index",
@@ -193,10 +193,10 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter UsageQueryFilter) ([
 	}
 	defer sqlRows.Close()
 
-	rows := make([]UsageCredentialStatRecord, 0)
+	rows := make([]dto.UsageCredentialStatRecord, 0)
 	for sqlRows.Next() {
 		var failedValue int64
-		var row UsageCredentialStatRecord
+		var row dto.UsageCredentialStatRecord
 		if err := sqlRows.Scan(
 			&row.Model,
 			&failedValue,
@@ -233,12 +233,12 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter UsageQueryFilter) ([
 	return rows, nil
 }
 
-func ListUsageAnalysisWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]UsageAnalysisAPIStatRecord, []UsageAnalysisModelStatRecord, error) {
+func ListUsageAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dto.UsageAnalysisAPIStatRecord, []dto.UsageAnalysisModelStatRecord, error) {
 	if db == nil {
 		return nil, nil, fmt.Errorf("database is nil")
 	}
 
-	baseQuery := applyUsageEventsListFilter(db.Model(&models.UsageEvent{}), filter)
+	baseQuery := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter)
 
 	apiQuery := baseQuery.Session(&gorm.Session{})
 	apiQuery = apiQuery.Select(strings.Join([]string{
@@ -255,7 +255,7 @@ func ListUsageAnalysisWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]UsageA
 	apiQuery = apiQuery.Group("TRIM(api_group_key)")
 	apiQuery = apiQuery.Order("total_requests DESC, api_group_key ASC")
 
-	var apiRows []UsageAnalysisAPIStatRecord
+	var apiRows []dto.UsageAnalysisAPIStatRecord
 	if err := apiQuery.Scan(&apiRows).Error; err != nil {
 		return nil, nil, fmt.Errorf("load usage analysis api stats: %w", err)
 	}
@@ -277,7 +277,7 @@ func ListUsageAnalysisWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]UsageA
 	modelQuery = modelQuery.Group("TRIM(model)")
 	modelQuery = modelQuery.Order("total_requests DESC, model ASC")
 
-	var modelRows []UsageAnalysisModelStatRecord
+	var modelRows []dto.UsageAnalysisModelStatRecord
 	if err := modelQuery.Scan(&modelRows).Error; err != nil {
 		return nil, nil, fmt.Errorf("load usage analysis model stats: %w", err)
 	}
@@ -318,9 +318,9 @@ func ListUsageAnalysisWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]UsageA
 		return nil, nil, fmt.Errorf("load usage analysis api model stats: %w", err)
 	}
 
-	modelsByAPI := make(map[string][]UsageAnalysisModelStatRecord, len(apiRows))
+	modelsByAPI := make(map[string][]dto.UsageAnalysisModelStatRecord, len(apiRows))
 	for _, row := range apiModelRows {
-		modelsByAPI[row.APIGroupKey] = append(modelsByAPI[row.APIGroupKey], UsageAnalysisModelStatRecord{
+		modelsByAPI[row.APIGroupKey] = append(modelsByAPI[row.APIGroupKey], dto.UsageAnalysisModelStatRecord{
 			Model:              row.Model,
 			TotalRequests:      row.TotalRequests,
 			SuccessCount:       row.SuccessCount,
@@ -342,7 +342,7 @@ func ListUsageAnalysisWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]UsageA
 		return trimmed
 	}
 
-	resultAPIs := make([]UsageAnalysisAPIStatRecord, 0, len(apiRows))
+	resultAPIs := make([]dto.UsageAnalysisAPIStatRecord, 0, len(apiRows))
 	for _, row := range apiRows {
 		row.APIGroupKey = normalize(row.APIGroupKey)
 		row.DisplayName = row.APIGroupKey
@@ -363,7 +363,7 @@ func ListUsageAnalysisWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]UsageA
 	return resultAPIs, modelRows, nil
 }
 
-func BuildUsageSnapshotWithFilter(db *gorm.DB, filter UsageQueryFilter) (*cpa.StatisticsSnapshot, error) {
+func BuildUsageSnapshotWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.StatisticsSnapshot, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
@@ -376,7 +376,7 @@ func BuildUsageSnapshotWithFilter(db *gorm.DB, filter UsageQueryFilter) (*cpa.St
 	return buildUsageSnapshotFromEvents(events), nil
 }
 
-func BuildUsageOverviewWithFilter(db *gorm.DB, filter UsageQueryFilter) (*UsageOverviewRecord, error) {
+func BuildUsageOverviewWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.UsageOverviewRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
@@ -393,19 +393,19 @@ func BuildUsageOverviewWithFilter(db *gorm.DB, filter UsageQueryFilter) (*UsageO
 	return buildUsageOverviewFromEvents(events, filter, pricingByModel), nil
 }
 
-func buildUsageOverviewFromEvents(events []models.UsageEvent, filter UsageQueryFilter, pricingByModel map[string]models.ModelPriceSetting) *UsageOverviewRecord {
+func buildUsageOverviewFromEvents(events []entities.UsageEvent, filter dto.UsageQueryFilter, pricingByModel map[string]entities.ModelPriceSetting) *dto.UsageOverviewRecord {
 	windowMinutes := computeWindowMinutes(filter)
 	bucketByDay := shouldBucketUsageOverviewByDay(filter, windowMinutes)
 	latestHourlyStart := latestHourlySeriesStart(filter)
-	overview := &UsageOverviewRecord{
-		Usage: &cpa.StatisticsSnapshot{
-			APIs:           map[string]cpa.APISnapshot{},
+	overview := &dto.UsageOverviewRecord{
+		Usage: &dto.StatisticsSnapshot{
+			APIs:           map[string]dto.APISnapshot{},
 			RequestsByDay:  map[string]int64{},
 			RequestsByHour: map[string]int64{},
 			TokensByDay:    map[string]int64{},
 			TokensByHour:   map[string]int64{},
 		},
-		Summary: UsageOverviewSummaryRecord{
+		Summary: dto.UsageOverviewSummaryRecord{
 			WindowMinutes: windowMinutes,
 			CostAvailable: true,
 		},
@@ -426,19 +426,19 @@ func buildUsageOverviewFromEvents(events []models.UsageEvent, filter UsageQueryF
 	return overview
 }
 
-func loadUsageEventsWithFilter(db *gorm.DB, filter UsageQueryFilter) ([]models.UsageEvent, error) {
-	query := applyUsageEventsListFilter(db.Model(&models.UsageEvent{}), filter).Order("timestamp asc")
+func loadUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]entities.UsageEvent, error) {
+	query := applyUsageEventsListFilter(db.Model(&entities.UsageEvent{}), filter).Order("timestamp asc")
 
-	var events []models.UsageEvent
+	var events []entities.UsageEvent
 	if err := query.Find(&events).Error; err != nil {
 		return nil, fmt.Errorf("load usage events: %w", err)
 	}
 	return events, nil
 }
 
-func buildUsageSnapshotFromEvents(events []models.UsageEvent) *cpa.StatisticsSnapshot {
-	snapshot := &cpa.StatisticsSnapshot{
-		APIs:           map[string]cpa.APISnapshot{},
+func buildUsageSnapshotFromEvents(events []entities.UsageEvent) *dto.StatisticsSnapshot {
+	snapshot := &dto.StatisticsSnapshot{
+		APIs:           map[string]dto.APISnapshot{},
 		RequestsByDay:  map[string]int64{},
 		RequestsByHour: map[string]int64{},
 		TokensByDay:    map[string]int64{},
@@ -455,24 +455,24 @@ func buildUsageSnapshotFromEvents(events []models.UsageEvent) *cpa.StatisticsSna
 	return snapshot
 }
 
-func applyUsageEventToSnapshot(snapshot *cpa.StatisticsSnapshot, event models.UsageEvent, includeDetails bool) {
+func applyUsageEventToSnapshot(snapshot *dto.StatisticsSnapshot, event entities.UsageEvent, includeDetails bool) {
 	apiKey := normalizeUsageOverviewDimension(event.APIGroupKey)
 	modelName := normalizeUsageOverviewDimension(event.Model)
 
 	apiSnapshot := snapshot.APIs[apiKey]
 	if apiSnapshot.Models == nil {
-		apiSnapshot.Models = map[string]cpa.ModelSnapshot{}
+		apiSnapshot.Models = map[string]dto.ModelSnapshot{}
 	}
 
 	modelSnapshot := apiSnapshot.Models[modelName]
 	if includeDetails {
-		detail := cpa.RequestDetail{
+		detail := dto.RequestDetail{
 			Timestamp: event.Timestamp.UTC(),
 			LatencyMS: event.LatencyMS,
 			Source:    strings.TrimSpace(event.Source),
 			AuthIndex: strings.TrimSpace(event.AuthIndex),
 			Failed:    event.Failed,
-			Tokens: cpa.TokenStats{
+			Tokens: dto.TokenStats{
 				InputTokens:     event.InputTokens,
 				OutputTokens:    event.OutputTokens,
 				ReasoningTokens: event.ReasoningTokens,
@@ -509,7 +509,7 @@ func applyUsageEventToSnapshot(snapshot *cpa.StatisticsSnapshot, event models.Us
 	snapshot.APIs[apiKey] = apiSnapshot
 }
 
-func finalizeUsageSnapshot(snapshot *cpa.StatisticsSnapshot, includeDetails bool) {
+func finalizeUsageSnapshot(snapshot *dto.StatisticsSnapshot, includeDetails bool) {
 	if !includeDetails {
 		return
 	}
@@ -524,8 +524,8 @@ func finalizeUsageSnapshot(snapshot *cpa.StatisticsSnapshot, includeDetails bool
 	}
 }
 
-func newUsageOverviewSeriesRecord() UsageOverviewSeriesRecord {
-	return UsageOverviewSeriesRecord{
+func newUsageOverviewSeriesRecord() dto.UsageOverviewSeriesRecord {
+	return dto.UsageOverviewSeriesRecord{
 		Requests:        map[string]int64{},
 		Tokens:          map[string]int64{},
 		RPM:             map[string]float64{},
@@ -535,11 +535,11 @@ func newUsageOverviewSeriesRecord() UsageOverviewSeriesRecord {
 		OutputTokens:    map[string]int64{},
 		CachedTokens:    map[string]int64{},
 		ReasoningTokens: map[string]int64{},
-		Models:          map[string]UsageOverviewSeriesRecord{},
+		Models:          map[string]dto.UsageOverviewSeriesRecord{},
 	}
 }
 
-func applyUsageEventToOverviewSeries(series *UsageOverviewSeriesRecord, event models.UsageEvent, cost float64, bucketKey string, bucketMinutes int64) {
+func applyUsageEventToOverviewSeries(series *dto.UsageOverviewSeriesRecord, event entities.UsageEvent, cost float64, bucketKey string, bucketMinutes int64) {
 	series.Requests[bucketKey]++
 	series.Tokens[bucketKey] += event.TotalTokens
 	series.Cost[bucketKey] += cost
@@ -567,11 +567,11 @@ func applyUsageEventToOverviewSeries(series *UsageOverviewSeriesRecord, event mo
 	series.Models[modelName] = modelSeries
 }
 
-func usageEventRequiresPricing(event models.UsageEvent) bool {
+func usageEventRequiresPricing(event entities.UsageEvent) bool {
 	return event.InputTokens > 0 || event.OutputTokens > 0 || event.CachedTokens > 0
 }
 
-func applyUsageEventToOverview(overview *UsageOverviewRecord, event models.UsageEvent, bucketByDay bool, latestHourlyStart *time.Time, pricingByModel map[string]models.ModelPriceSetting) {
+func applyUsageEventToOverview(overview *dto.UsageOverviewRecord, event entities.UsageEvent, bucketByDay bool, latestHourlyStart *time.Time, pricingByModel map[string]entities.ModelPriceSetting) {
 	overview.Summary.CachedTokens += event.CachedTokens
 	overview.Summary.ReasoningTokens += event.ReasoningTokens
 	if event.Failed {
@@ -599,7 +599,7 @@ func applyUsageEventToOverview(overview *UsageOverviewRecord, event models.Usage
 	updateUsageOverviewHealthBlock(overview.Health.BlockDetails, event)
 }
 
-func finalizeUsageOverview(overview *UsageOverviewRecord, includeDetails bool) {
+func finalizeUsageOverview(overview *dto.UsageOverviewRecord, includeDetails bool) {
 	finalizeUsageSnapshot(overview.Usage, includeDetails)
 	overview.Summary.RequestCount = overview.Usage.TotalRequests
 	overview.Summary.TokenCount = overview.Usage.TotalTokens
@@ -620,23 +620,23 @@ func normalizeUsageOverviewDimension(value string) string {
 	return trimmed
 }
 
-func loadPriceSettingsByModel(db *gorm.DB) (map[string]models.ModelPriceSetting, error) {
+func loadPriceSettingsByModel(db *gorm.DB) (map[string]entities.ModelPriceSetting, error) {
 	settings, err := ListModelPriceSettings(db)
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]models.ModelPriceSetting, len(settings))
+	result := make(map[string]entities.ModelPriceSetting, len(settings))
 	for _, setting := range settings {
 		result[strings.TrimSpace(setting.Model)] = setting
 	}
 	return result, nil
 }
 
-func calculateUsageEventCost(event models.UsageEvent, pricing models.ModelPriceSetting) float64 {
+func calculateUsageEventCost(event entities.UsageEvent, pricing entities.ModelPriceSetting) float64 {
 	return calculateTokenCost(event.InputTokens, event.OutputTokens, event.CachedTokens, pricing)
 }
 
-func calculateTokenCost(inputTokens int64, completionTokens int64, cachedTokens int64, pricing models.ModelPriceSetting) float64 {
+func calculateTokenCost(inputTokens int64, completionTokens int64, cachedTokens int64, pricing entities.ModelPriceSetting) float64 {
 	if inputTokens < 0 {
 		inputTokens = 0
 	}
@@ -657,7 +657,7 @@ func calculateTokenCost(inputTokens int64, completionTokens int64, cachedTokens 
 
 const usageOverviewDailyBucketThresholdMinutes int64 = 7 * 24 * 60
 
-func computeWindowMinutes(filter UsageQueryFilter) int64 {
+func computeWindowMinutes(filter dto.UsageQueryFilter) int64 {
 	if filter.StartTime == nil || filter.EndTime == nil {
 		return 0
 	}
@@ -676,7 +676,7 @@ func computeWindowMinutes(filter UsageQueryFilter) int64 {
 	return minutes
 }
 
-func shouldBucketUsageOverviewByDay(filter UsageQueryFilter, windowMinutes int64) bool {
+func shouldBucketUsageOverviewByDay(filter dto.UsageQueryFilter, windowMinutes int64) bool {
 	if filter.Range == "all" || filter.Range == "7d" {
 		return true
 	}
@@ -690,7 +690,7 @@ func usageOverviewBucket(timestamp time.Time, byDay bool) (string, int64) {
 	return timestamp.UTC().Format("2006-01-02T15:00:00Z"), 60
 }
 
-func latestHourlySeriesStart(filter UsageQueryFilter) *time.Time {
+func latestHourlySeriesStart(filter dto.UsageQueryFilter) *time.Time {
 	if filter.EndTime == nil {
 		return nil
 	}
@@ -707,21 +707,21 @@ const (
 	usageOverviewHealthPresetSpan     = (usageOverviewHealthPresetWindow + time.Duration(usageOverviewHealthRows*usageOverviewHealthDefaultColumns) - 1) / time.Duration(usageOverviewHealthRows*usageOverviewHealthDefaultColumns)
 )
 
-func buildUsageOverviewHealth(filter UsageQueryFilter) UsageOverviewHealthRecord {
+func buildUsageOverviewHealth(filter dto.UsageQueryFilter) dto.UsageOverviewHealthRecord {
 	rows := usageOverviewHealthRows
 	columns, span := usageOverviewHealthGrid(filter)
 	totalBlocks := rows * columns
 	windowStart, windowEnd := usageOverviewHealthWindow(filter, totalBlocks, span)
-	blocks := make([]UsageOverviewHealthBlockRecord, totalBlocks)
+	blocks := make([]dto.UsageOverviewHealthBlockRecord, totalBlocks)
 	for index := range blocks {
 		startTime := windowStart.Add(time.Duration(index) * span)
-		blocks[index] = UsageOverviewHealthBlockRecord{
+		blocks[index] = dto.UsageOverviewHealthBlockRecord{
 			StartTime: startTime,
 			EndTime:   startTime.Add(span),
 			Rate:      -1,
 		}
 	}
-	return UsageOverviewHealthRecord{
+	return dto.UsageOverviewHealthRecord{
 		Rows:          rows,
 		Columns:       columns,
 		BucketSeconds: int64((span + time.Second - 1) / time.Second),
@@ -731,7 +731,7 @@ func buildUsageOverviewHealth(filter UsageQueryFilter) UsageOverviewHealthRecord
 	}
 }
 
-func usageOverviewHealthGrid(filter UsageQueryFilter) (int, time.Duration) {
+func usageOverviewHealthGrid(filter dto.UsageQueryFilter) (int, time.Duration) {
 	if isUsageOverviewShortHealthRange(filter.Range) {
 		return usageOverviewHealthDefaultColumns, usageOverviewHealthPresetSpan
 	}
@@ -747,7 +747,7 @@ func isUsageOverviewShortHealthRange(value string) bool {
 	}
 }
 
-func usageOverviewHealthWindow(filter UsageQueryFilter, totalBlocks int, span time.Duration) (time.Time, time.Time) {
+func usageOverviewHealthWindow(filter dto.UsageQueryFilter, totalBlocks int, span time.Duration) (time.Time, time.Time) {
 	end := time.Now().UTC()
 	if filter.EndTime != nil {
 		end = filter.EndTime.UTC()
@@ -760,7 +760,7 @@ func usageOverviewHealthWindow(filter UsageQueryFilter, totalBlocks int, span ti
 	return windowEnd.Add(-time.Duration(totalBlocks) * span), windowEnd
 }
 
-func updateUsageOverviewHealthBlock(blocks []UsageOverviewHealthBlockRecord, event models.UsageEvent) {
+func updateUsageOverviewHealthBlock(blocks []dto.UsageOverviewHealthBlockRecord, event entities.UsageEvent) {
 	timestamp := event.Timestamp.UTC()
 	for index := range blocks {
 		block := &blocks[index]

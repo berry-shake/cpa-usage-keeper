@@ -4,21 +4,21 @@ import (
 	"fmt"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
 func backfillUsageIdentityStatsMigration(tx *gorm.DB) error {
-	if !tx.Migrator().HasTable(&models.UsageIdentity{}) || !tx.Migrator().HasTable(&models.UsageEvent{}) {
+	if !tx.Migrator().HasTable(&entities.UsageIdentity{}) || !tx.Migrator().HasTable(&entities.UsageEvent{}) {
 		return nil
 	}
 	for _, column := range []string{"auth_type", "source", "auth_index"} {
-		if !tx.Migrator().HasColumn(&models.UsageEvent{}, column) {
+		if !tx.Migrator().HasColumn(&entities.UsageEvent{}, column) {
 			return nil
 		}
 	}
 
-	var identities []models.UsageIdentity
+	var identities []entities.UsageIdentity
 	if err := tx.Find(&identities).Error; err != nil {
 		return fmt.Errorf("list usage identities for stats backfill: %w", err)
 	}
@@ -45,16 +45,16 @@ func backfillUsageIdentityStatsMigration(tx *gorm.DB) error {
 			now := time.Now().UTC()
 			updates["stats_updated_at"] = now
 		}
-		if err := tx.Model(&models.UsageIdentity{}).Where("id = ?", identity.ID).Updates(updates).Error; err != nil {
+		if err := tx.Model(&entities.UsageIdentity{}).Where("id = ?", identity.ID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("backfill usage identity stats for %q: %w", identity.Identity, err)
 		}
 	}
 	return nil
 }
 
-func aggregateUsageIdentityFullStats(tx *gorm.DB, identity models.UsageIdentity) (usageIdentityStatsDelta, error) {
+func aggregateUsageIdentityFullStats(tx *gorm.DB, identity entities.UsageIdentity) (usageIdentityStatsDelta, error) {
 	var stats usageIdentityStatsDelta
-	query, ok := usageIdentityBackfillEventsQuery(tx.Model(&models.UsageEvent{}), identity)
+	query, ok := usageIdentityBackfillEventsQuery(tx.Model(&entities.UsageEvent{}), identity)
 	if !ok {
 		return stats, nil
 	}
@@ -75,16 +75,16 @@ func aggregateUsageIdentityFullStats(tx *gorm.DB, identity models.UsageIdentity)
 		return stats, nil
 	}
 
-	var firstEvent models.UsageEvent
-	firstQuery, _ := usageIdentityBackfillEventsQuery(tx.Model(&models.UsageEvent{}), identity)
+	var firstEvent entities.UsageEvent
+	firstQuery, _ := usageIdentityBackfillEventsQuery(tx.Model(&entities.UsageEvent{}), identity)
 	if err := firstQuery.Order("timestamp asc, id asc").First(&firstEvent).Error; err != nil {
 		return stats, fmt.Errorf("find first usage identity event for %q: %w", identity.Identity, err)
 	}
 	firstUsedAt := firstEvent.Timestamp
 	stats.FirstUsedAt = &firstUsedAt
 
-	var lastEvent models.UsageEvent
-	lastQuery, _ := usageIdentityBackfillEventsQuery(tx.Model(&models.UsageEvent{}), identity)
+	var lastEvent entities.UsageEvent
+	lastQuery, _ := usageIdentityBackfillEventsQuery(tx.Model(&entities.UsageEvent{}), identity)
 	if err := lastQuery.Order("timestamp desc, id desc").First(&lastEvent).Error; err != nil {
 		return stats, fmt.Errorf("find last usage identity event for %q: %w", identity.Identity, err)
 	}
@@ -93,11 +93,11 @@ func aggregateUsageIdentityFullStats(tx *gorm.DB, identity models.UsageIdentity)
 	return stats, nil
 }
 
-func usageIdentityBackfillEventsQuery(query *gorm.DB, identity models.UsageIdentity) (*gorm.DB, bool) {
+func usageIdentityBackfillEventsQuery(query *gorm.DB, identity entities.UsageIdentity) (*gorm.DB, bool) {
 	switch identity.AuthType {
-	case models.UsageIdentityAuthTypeAuthFile:
+	case entities.UsageIdentityAuthTypeAuthFile:
 		return query.Where("auth_index = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "oauth"), true
-	case models.UsageIdentityAuthTypeAIProvider:
+	case entities.UsageIdentityAuthTypeAIProvider:
 		return query.Where("source = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "apikey"), true
 	default:
 		return query, false

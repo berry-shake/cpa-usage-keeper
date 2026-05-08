@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
 func addUsageEventRedisFieldsMigration(tx *gorm.DB) error {
-	if !tx.Migrator().HasTable(&models.RedisUsageInbox{}) {
+	if !tx.Migrator().HasTable(&entities.RedisUsageInbox{}) {
 		if err := tx.Exec(`CREATE TABLE redis_usage_inboxes (
 			id integer PRIMARY KEY AUTOINCREMENT,
 			queue_key text NOT NULL,
@@ -28,7 +28,7 @@ func addUsageEventRedisFieldsMigration(tx *gorm.DB) error {
 			return fmt.Errorf("create redis_usage_inboxes table: %w", err)
 		}
 	}
-	if !tx.Migrator().HasTable(&models.UsageEvent{}) {
+	if !tx.Migrator().HasTable(&entities.UsageEvent{}) {
 		return nil
 	}
 	columns := []struct {
@@ -41,7 +41,7 @@ func addUsageEventRedisFieldsMigration(tx *gorm.DB) error {
 		{name: "request_id", sql: "ALTER TABLE usage_events ADD COLUMN request_id TEXT"},
 	}
 	for _, column := range columns {
-		if tx.Migrator().HasColumn(&models.UsageEvent{}, column.name) {
+		if tx.Migrator().HasColumn(&entities.UsageEvent{}, column.name) {
 			continue
 		}
 		if err := tx.Exec(column.sql).Error; err != nil {
@@ -59,16 +59,16 @@ type redisUsageBackfillPayload struct {
 }
 
 func backfillUsageEventRedisFieldsMigration(tx *gorm.DB) error {
-	if !tx.Migrator().HasTable(&models.UsageEvent{}) || !tx.Migrator().HasTable(&models.RedisUsageInbox{}) {
+	if !tx.Migrator().HasTable(&entities.UsageEvent{}) || !tx.Migrator().HasTable(&entities.RedisUsageInbox{}) {
 		return nil
 	}
 	for _, column := range []string{"provider", "endpoint", "auth_type", "request_id"} {
-		if !tx.Migrator().HasColumn(&models.UsageEvent{}, column) {
+		if !tx.Migrator().HasColumn(&entities.UsageEvent{}, column) {
 			return nil
 		}
 	}
 
-	var inboxRows []models.RedisUsageInbox
+	var inboxRows []entities.RedisUsageInbox
 	return tx.Where("status = ?", redisUsageInboxStatusProcessed).
 		Order("id asc").
 		FindInBatches(&inboxRows, 500, func(_ *gorm.DB, _ int) error {
@@ -100,7 +100,7 @@ func backfillUsageEventRedisFields(tx *gorm.DB, usageEventKey string, payload re
 		return nil
 	}
 
-	var event models.UsageEvent
+	var event entities.UsageEvent
 	result := tx.Where("event_key = ?", usageEventKey).Limit(1).Find(&event)
 	if result.Error != nil {
 		return fmt.Errorf("load usage event %q for redis backfill: %w", usageEventKey, result.Error)
@@ -128,7 +128,7 @@ func backfillUsageEventRedisFields(tx *gorm.DB, usageEventKey string, payload re
 	if len(updates) == 0 {
 		return nil
 	}
-	if err := tx.Model(&models.UsageEvent{}).Where("id = ?", event.ID).Updates(updates).Error; err != nil {
+	if err := tx.Model(&entities.UsageEvent{}).Where("id = ?", event.ID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("backfill usage event %q redis fields: %w", event.EventKey, err)
 	}
 	return nil

@@ -5,19 +5,19 @@ import (
 	"strings"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
 func migrateAIProviderIdentitiesToAuthIndexMigration(tx *gorm.DB) error {
-	if !tx.Migrator().HasTable(&models.UsageIdentity{}) || !tx.Migrator().HasTable(&models.UsageEvent{}) {
+	if !tx.Migrator().HasTable(&entities.UsageIdentity{}) || !tx.Migrator().HasTable(&entities.UsageEvent{}) {
 		return nil
 	}
-	if !tx.Migrator().HasColumn(&models.UsageIdentity{}, "lookup_key") {
+	if !tx.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		return nil
 	}
 	for _, column := range []string{"source", "provider", "auth_index", "auth_type"} {
-		if !tx.Migrator().HasColumn(&models.UsageEvent{}, column) {
+		if !tx.Migrator().HasColumn(&entities.UsageEvent{}, column) {
 			return nil
 		}
 	}
@@ -39,7 +39,7 @@ func migrateAIProviderIdentitiesToAuthIndexMigration(tx *gorm.DB) error {
 			return err
 		}
 		if len(authIndexes) != 1 {
-			if err := tx.Delete(&models.UsageIdentity{}, identity.ID).Error; err != nil {
+			if err := tx.Delete(&entities.UsageIdentity{}, identity.ID).Error; err != nil {
 				return fmt.Errorf("delete unmapped AI provider usage identity %q: %w", identity.Identity, err)
 			}
 			continue
@@ -82,7 +82,7 @@ func migrateAIProviderIdentityToAuthIndex(tx *gorm.DB, oldIdentity aiProviderIde
 	if lookupKey == "" {
 		lookupKey = strings.TrimSpace(oldIdentity.Identity)
 	}
-	var target models.UsageIdentity
+	var target entities.UsageIdentity
 	result := tx.Where("auth_type_name = ? AND identity = ? AND id <> ?", "apikey", targetIdentity, oldIdentity.ID).Limit(1).Find(&target)
 	if result.Error != nil {
 		return fmt.Errorf("load target AI provider usage identity %q: %w", targetIdentity, result.Error)
@@ -114,7 +114,7 @@ func migrateAIProviderIdentityToAuthIndex(tx *gorm.DB, oldIdentity aiProviderIde
 			WHERE id = ?`, lookupKey, oldIdentity.Name, authTypeName, oldIdentity.Type, oldIdentity.Provider, target.ID).Error; err != nil {
 			return fmt.Errorf("merge AI provider usage identity %q into %q: %w", oldIdentity.Identity, targetIdentity, err)
 		}
-		if err := tx.Delete(&models.UsageIdentity{}, oldIdentity.ID).Error; err != nil {
+		if err := tx.Delete(&entities.UsageIdentity{}, oldIdentity.ID).Error; err != nil {
 			return fmt.Errorf("delete merged AI provider usage identity %q: %w", oldIdentity.Identity, err)
 		}
 		return nil
@@ -143,7 +143,7 @@ func migrateAIProviderIdentityToAuthIndex(tx *gorm.DB, oldIdentity aiProviderIde
 }
 
 func backfillAIProviderUsageIdentityStatsByAuthIndex(tx *gorm.DB) error {
-	var identities []models.UsageIdentity
+	var identities []entities.UsageIdentity
 	if err := tx.Where("auth_type_name = ?", "apikey").Find(&identities).Error; err != nil {
 		return fmt.Errorf("list AI provider usage identities for auth-index stats backfill: %w", err)
 	}
@@ -178,9 +178,9 @@ func backfillAIProviderUsageIdentityStatsByAuthIndex(tx *gorm.DB) error {
 	return nil
 }
 
-func aggregateAIProviderUsageIdentityFullStatsByAuthIndex(tx *gorm.DB, identity models.UsageIdentity) (usageIdentityStatsDelta, error) {
+func aggregateAIProviderUsageIdentityFullStatsByAuthIndex(tx *gorm.DB, identity entities.UsageIdentity) (usageIdentityStatsDelta, error) {
 	var stats usageIdentityStatsDelta
-	query := tx.Model(&models.UsageEvent{}).Where("auth_index = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "apikey")
+	query := tx.Model(&entities.UsageEvent{}).Where("auth_index = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "apikey")
 	if err := query.Select(`
 		COUNT(*) AS total_requests,
 		COALESCE(SUM(CASE WHEN failed THEN 0 ELSE 1 END), 0) AS success_count,
@@ -198,15 +198,15 @@ func aggregateAIProviderUsageIdentityFullStatsByAuthIndex(tx *gorm.DB, identity 
 		return stats, nil
 	}
 
-	var firstEvent models.UsageEvent
-	if err := tx.Model(&models.UsageEvent{}).Where("auth_index = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "apikey").Order("timestamp asc, id asc").First(&firstEvent).Error; err != nil {
+	var firstEvent entities.UsageEvent
+	if err := tx.Model(&entities.UsageEvent{}).Where("auth_index = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "apikey").Order("timestamp asc, id asc").First(&firstEvent).Error; err != nil {
 		return stats, fmt.Errorf("find first AI provider usage identity event by auth-index for %q: %w", identity.Identity, err)
 	}
 	firstUsedAt := firstEvent.Timestamp
 	stats.FirstUsedAt = &firstUsedAt
 
-	var lastEvent models.UsageEvent
-	if err := tx.Model(&models.UsageEvent{}).Where("auth_index = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "apikey").Order("timestamp desc, id desc").First(&lastEvent).Error; err != nil {
+	var lastEvent entities.UsageEvent
+	if err := tx.Model(&entities.UsageEvent{}).Where("auth_index = ? AND (auth_type = ? OR TRIM(COALESCE(auth_type, '')) = '')", identity.Identity, "apikey").Order("timestamp desc, id desc").First(&lastEvent).Error; err != nil {
 		return stats, fmt.Errorf("find last AI provider usage identity event by auth-index for %q: %w", identity.Identity, err)
 	}
 	lastUsedAt := lastEvent.Timestamp

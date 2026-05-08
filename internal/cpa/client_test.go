@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"cpa-usage-keeper/internal/cpa/dto/response"
 )
 
 func TestFetchExternalAPIKeysSendsBearerTokenAndParsesExternalKeys(t *testing.T) {
@@ -36,6 +38,45 @@ func TestFetchExternalAPIKeysSendsBearerTokenAndParsesExternalKeys(t *testing.T)
 	}
 	if len(result.Payload.ExternalAPIKeys) != 3 || result.Payload.ExternalAPIKeys[2] != "normal-api-key" {
 		t.Fatalf("unexpected external API keys payload: %#v", result.Payload)
+	}
+}
+
+func TestFetchAuthFilesParsesCodexIDTokenFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != cpaManagementAuthFilesEndpoint {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
+			t.Fatalf("expected management Authorization header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"files":[{"auth_index":"codex-auth","type":"codex","id_token":{"chatgpt_account_id":"acct_123","chatgpt_subscription_active_start":"2026-05-01T00:00:00Z","chatgpt_subscription_active_until":"2026-06-01T00:00:00Z","plan_type":"team"}}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.FetchAuthFiles(context.Background())
+	if err != nil {
+		t.Fatalf("FetchAuthFiles returned error: %v", err)
+	}
+	if len(result.Payload.Files) != 1 {
+		t.Fatalf("expected one auth file, got %#v", result.Payload.Files)
+	}
+	file := result.Payload.Files[0]
+	if file.IDToken == nil {
+		t.Fatalf("expected id_token to decode, got %+v", file)
+	}
+	if file.IDToken.AccountID == nil || *file.IDToken.AccountID != "acct_123" {
+		t.Fatalf("expected account id to decode, got %+v", file.IDToken)
+	}
+	if file.IDToken.ActiveStart == nil || !file.IDToken.ActiveStart.Equal(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("expected active start to decode, got %+v", file.IDToken.ActiveStart)
+	}
+	if file.IDToken.ActiveUntil == nil || !file.IDToken.ActiveUntil.Equal(time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("expected active until to decode, got %+v", file.IDToken.ActiveUntil)
+	}
+	if file.IDToken.PlanType == nil || *file.IDToken.PlanType != "team" {
+		t.Fatalf("expected plan type to decode, got %+v", file.IDToken.PlanType)
 	}
 }
 
@@ -209,13 +250,13 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     string
-		fetch    func(context.Context, *Client) (*ProviderKeyConfigResult, error)
+		fetch    func(context.Context, *Client) (*response.ProviderKeyConfigResult, error)
 		response string
 	}{
 		{
 			name: "gemini",
 			path: cpaManagementGeminiAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchGeminiAPIKeys(ctx)
 			},
 			response: `[{"apiKey":"gemini-key","prefix":"gemini-prefix","name":"Gemini","auth-index":"gemini-auth-index"}]`,
@@ -223,7 +264,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 		{
 			name: "claude",
 			path: cpaManagementClaudeAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchClaudeAPIKeys(ctx)
 			},
 			response: `[{"api-key":"claude-key","prefix":"claude-prefix","name":"Claude","auth_index":"claude-auth-index"}]`,
@@ -231,7 +272,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 		{
 			name: "codex",
 			path: cpaManagementCodexAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchCodexAPIKeys(ctx)
 			},
 			response: `[{"key":"codex-key","prefix":"codex-prefix","name":"Codex","authIndex":"codex-auth-index"}]`,
@@ -239,7 +280,7 @@ func TestProviderMetadataFetchersUseDedicatedEndpoints(t *testing.T) {
 		{
 			name: "vertex",
 			path: cpaManagementVertexAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchVertexAPIKeys(ctx)
 			},
 			response: `[{"apiKey":"vertex-key","prefix":"vertex-prefix","name":"Vertex","auth-index":"vertex-auth-index"}]`,
@@ -278,13 +319,13 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     string
-		fetch    func(context.Context, *Client) (*ProviderKeyConfigResult, error)
+		fetch    func(context.Context, *Client) (*response.ProviderKeyConfigResult, error)
 		response string
 	}{
 		{
 			name: "gemini",
 			path: cpaManagementGeminiAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchGeminiAPIKeys(ctx)
 			},
 			response: `{"gemini-api-key":[{"apiKey":"gemini-key","prefix":"gemini-prefix","name":"Gemini","auth-index":"gemini-auth-index"}]}`,
@@ -292,7 +333,7 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 		{
 			name: "claude",
 			path: cpaManagementClaudeAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchClaudeAPIKeys(ctx)
 			},
 			response: `{"claude-api-key":[{"api-key":"claude-key","prefix":"claude-prefix","name":"Claude","auth_index":"claude-auth-index"}]}`,
@@ -300,7 +341,7 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 		{
 			name: "codex",
 			path: cpaManagementCodexAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchCodexAPIKeys(ctx)
 			},
 			response: `{"codex-api-key":[{"key":"codex-key","prefix":"codex-prefix","name":"Codex","authIndex":"codex-auth-index"}]}`,
@@ -308,7 +349,7 @@ func TestProviderMetadataFetchersParseWrappedEndpointResponses(t *testing.T) {
 		{
 			name: "vertex",
 			path: cpaManagementVertexAPIKeyEndpoint,
-			fetch: func(ctx context.Context, client *Client) (*ProviderKeyConfigResult, error) {
+			fetch: func(ctx context.Context, client *Client) (*response.ProviderKeyConfigResult, error) {
 				return client.FetchVertexAPIKeys(ctx)
 			},
 			response: `{"vertex-api-key":[{"apiKey":"vertex-key","prefix":"vertex-prefix","name":"Vertex","auth-index":"vertex-auth-index"}]}`,
@@ -353,6 +394,25 @@ func TestFetchOpenAICompatibilityParsesWrappedEndpointResponse(t *testing.T) {
 	}
 	if len(result.Payload) != 1 || result.Payload[0].Name != "custom-openai" || result.Payload[0].Prefix != "custom" || len(result.Payload[0].APIKeyEntries) != 1 || result.Payload[0].APIKeyEntries[0].APIKey != "custom-key" || result.Payload[0].APIKeyEntries[0].AuthIndex != "custom-auth-index" {
 		t.Fatalf("unexpected wrapped openai compatibility payload: %#v", result.Payload)
+	}
+}
+
+func TestFetchOpenAICompatibilityKeepsLegacyKeyAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != cpaManagementOpenAICompatibilityEndpoint {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"openai-compatibility":[{"id":"legacy-openai","api-key-entries":[{"key":"legacy-key","auth_index":"legacy-auth-index"}]}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.FetchOpenAICompatibility(context.Background())
+	if err != nil {
+		t.Fatalf("FetchOpenAICompatibility returned error: %v", err)
+	}
+	if len(result.Payload) != 1 || len(result.Payload[0].APIKeyEntries) != 1 || result.Payload[0].APIKeyEntries[0].APIKey != "legacy-key" || result.Payload[0].APIKeyEntries[0].AuthIndex != "legacy-auth-index" {
+		t.Fatalf("unexpected legacy openai compatibility payload: %#v", result.Payload)
 	}
 }
 

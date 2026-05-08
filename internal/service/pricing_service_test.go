@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/cpa"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/cpa/dto/models"
+	"cpa-usage-keeper/internal/cpa/dto/response"
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -21,7 +23,7 @@ func TestPricingServiceRejectsUnusedModel(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
 	service := NewPricingService(db)
 
-	_, err := service.UpdatePricing(context.Background(), UpdatePricingInput{
+	_, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -34,7 +36,7 @@ func TestPricingServiceRejectsUnusedModel(t *testing.T) {
 
 func TestPricingServiceStoresPricingForUsedModel(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "evt-1",
 		Model:       "claude-sonnet",
 		Timestamp:   time.Unix(1, 0),
@@ -44,7 +46,7 @@ func TestPricingServiceStoresPricingForUsedModel(t *testing.T) {
 	}
 
 	service := NewPricingService(db)
-	setting, err := service.UpdatePricing(context.Background(), UpdatePricingInput{
+	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -68,7 +70,7 @@ func TestPricingServiceStoresPricingForUsedModel(t *testing.T) {
 
 func TestPricingServiceListsModelsFromCPAWhenAvailable(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "evt-local",
 		Model:       "local-model",
 		Timestamp:   time.Unix(1, 0),
@@ -78,7 +80,7 @@ func TestPricingServiceListsModelsFromCPAWhenAvailable(t *testing.T) {
 	}
 	logs := captureDebugLogs(t)
 
-	service := NewPricingService(db, stubModelsFetcher{result: &cpa.ModelsResult{Payload: cpa.ModelsResponse{Data: []cpa.ModelInfo{
+	service := NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
 		{ID: " zeta-model "},
 		{ID: "alpha-model"},
 		{ID: "zeta-model"},
@@ -100,7 +102,7 @@ func TestPricingServiceListsModelsFromCPAWhenAvailable(t *testing.T) {
 
 func TestPricingServiceFallsBackToLocalModelsWhenCPAFetchFails(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "evt-local",
 		Model:       "local-model",
 		Timestamp:   time.Unix(1, 0),
@@ -132,7 +134,7 @@ func TestPricingServiceFallsBackToLocalModelsWhenCPAFetchFails(t *testing.T) {
 
 func TestPricingServiceReturnsEmptyCPAListWithoutFallback(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "evt-local",
 		Model:       "local-model",
 		Timestamp:   time.Unix(1, 0),
@@ -141,7 +143,7 @@ func TestPricingServiceReturnsEmptyCPAListWithoutFallback(t *testing.T) {
 		t.Fatalf("insert usage event: %v", err)
 	}
 
-	service := NewPricingService(db, stubModelsFetcher{result: &cpa.ModelsResult{Payload: cpa.ModelsResponse{Data: []cpa.ModelInfo{{ID: " "}}}}})
+	service := NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: " "}}}}})
 	modelsList, err := service.ListUsedModels(context.Background())
 	if err != nil {
 		t.Fatalf("list models: %v", err)
@@ -153,9 +155,9 @@ func TestPricingServiceReturnsEmptyCPAListWithoutFallback(t *testing.T) {
 
 func TestPricingServiceAllowsPricingForCPAModelWithoutUsage(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	service := NewPricingService(db, stubModelsFetcher{result: &cpa.ModelsResult{Payload: cpa.ModelsResponse{Data: []cpa.ModelInfo{{ID: "claude-opus"}}}}})
+	service := NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "claude-opus"}}}}})
 
-	setting, err := service.UpdatePricing(context.Background(), UpdatePricingInput{
+	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "claude-opus",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -171,7 +173,7 @@ func TestPricingServiceAllowsPricingForCPAModelWithoutUsage(t *testing.T) {
 
 func TestPricingServiceRejectsLocalOnlyModelWhenCPAFetchSucceeds(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "evt-local",
 		Model:       "local-model",
 		Timestamp:   time.Unix(1, 0),
@@ -179,9 +181,9 @@ func TestPricingServiceRejectsLocalOnlyModelWhenCPAFetchSucceeds(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("insert usage event: %v", err)
 	}
-	service := NewPricingService(db, stubModelsFetcher{result: &cpa.ModelsResult{Payload: cpa.ModelsResponse{Data: []cpa.ModelInfo{{ID: "cpa-model"}}}}})
+	service := NewPricingService(db, stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{{ID: "cpa-model"}}}}})
 
-	_, err := service.UpdatePricing(context.Background(), UpdatePricingInput{
+	_, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "local-model",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -194,7 +196,7 @@ func TestPricingServiceRejectsLocalOnlyModelWhenCPAFetchSucceeds(t *testing.T) {
 
 func TestPricingServiceValidatesWithLocalModelsWhenCPAFetchFails(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "evt-local",
 		Model:       "local-model",
 		Timestamp:   time.Unix(1, 0),
@@ -204,7 +206,7 @@ func TestPricingServiceValidatesWithLocalModelsWhenCPAFetchFails(t *testing.T) {
 	}
 	service := NewPricingService(db, stubModelsFetcher{err: errors.New("cpa unavailable")})
 
-	setting, err := service.UpdatePricing(context.Background(), UpdatePricingInput{
+	setting, err := service.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 		Model:                "local-model",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -278,7 +280,7 @@ func TestMatchRemoteModelPricesUsesAliases(t *testing.T) {
 
 func TestPricingServiceSyncRemotePricingUpsertsMatchedUsedModels(t *testing.T) {
 	db := openPricingServiceTestDatabase(t)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "evt-1", Model: "claude-sonnet", Timestamp: time.Unix(1, 0), APIGroupKey: "provider-a"},
 		{EventKey: "evt-2", Model: "missing-model", Timestamp: time.Unix(2, 0), APIGroupKey: "provider-a"},
 	}); err != nil {
@@ -326,11 +328,11 @@ func TestPricingServiceSyncRemotePricingUpsertsMatchedUsedModels(t *testing.T) {
 }
 
 type stubModelsFetcher struct {
-	result *cpa.ModelsResult
+	result *response.ModelsResult
 	err    error
 }
 
-func (s stubModelsFetcher) FetchModels(context.Context) (*cpa.ModelsResult, error) {
+func (s stubModelsFetcher) FetchModels(context.Context) (*response.ModelsResult, error) {
 	return s.result, s.err
 }
 

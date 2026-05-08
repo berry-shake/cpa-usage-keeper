@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/service"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/gin-gonic/gin"
 )
 
@@ -83,7 +84,7 @@ func registerUsageCredentialsRoute(
 	})
 }
 
-func buildUsageCredentialsPayload(rows []service.UsageCredentialStat, resolver usageSourceResolver) []usageCredentialPayload {
+func buildUsageCredentialsPayload(rows []servicedto.UsageCredentialStat, resolver usageSourceResolver) []usageCredentialPayload {
 	if len(rows) == 0 {
 		return []usageCredentialPayload{}
 	}
@@ -143,7 +144,7 @@ func buildUsageCredentialsPayload(rows []service.UsageCredentialStat, resolver u
 	return result
 }
 
-func applyUsageCredentialPayloadRow(payload *usageCredentialPayload, row service.UsageCredentialStat) {
+func applyUsageCredentialPayloadRow(payload *usageCredentialPayload, row servicedto.UsageCredentialStat) {
 	if row.Failed {
 		payload.FailureCount += row.RequestCount
 	} else {
@@ -161,7 +162,7 @@ func applyUsageCredentialPayloadRow(payload *usageCredentialPayload, row service
 	}
 }
 
-func applyUsageCredentialModelPayloadRow(model *usageCredentialModelPayload, row service.UsageCredentialStat) {
+func applyUsageCredentialModelPayloadRow(model *usageCredentialModelPayload, row servicedto.UsageCredentialStat) {
 	if row.Failed {
 		model.FailureCount += row.RequestCount
 	} else {

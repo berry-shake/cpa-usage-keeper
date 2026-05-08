@@ -1516,15 +1516,30 @@
 .credentialType {
   display: inline-flex;
   align-items: center;
-  margin-left: 6px;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: $radius-full;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.4;
+  letter-spacing: 0.01em;
   color: var(--text-secondary);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.requestEventsDeletedTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: $radius-full;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  color: var(--danger-badge-text, #991b1b);
+  background: var(--danger-badge-bg, #fee2e2);
+  border: 1px solid var(--danger-badge-border, #fca5a5);
   vertical-align: middle;
 }
 
@@ -2162,6 +2177,31 @@
   font-size: 11px;
   max-width: 180px;
   word-break: break-all;
+}
+
+.requestEventsSourceCell {
+  min-width: 150px;
+}
+
+.requestEventsSourceStack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  max-width: 100%;
+}
+
+.requestEventsSourceValue {
+  color: var(--text-primary);
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.requestEventsSourceTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
 }
 
 .requestEventsResultSuccess {

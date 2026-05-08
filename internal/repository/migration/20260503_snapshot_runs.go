@@ -3,7 +3,7 @@ package migration
 import (
 	"fmt"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
@@ -23,10 +23,10 @@ func dropLegacySnapshotRunColumnsMigration(tx *gorm.DB) error {
 			return fmt.Errorf("drop legacy snapshot_run_id index %s: %w", indexName, err)
 		}
 	}
-	if err := dropColumnIfExists(tx, &models.UsageEvent{}, "snapshot_run_id", "usage_events"); err != nil {
+	if err := dropColumnIfExists(tx, &entities.UsageEvent{}, "snapshot_run_id", "usage_events"); err != nil {
 		return err
 	}
-	if err := dropColumnIfExists(tx, &models.RedisUsageInbox{}, "snapshot_run_id", "redis_usage_inboxes"); err != nil {
+	if err := dropColumnIfExists(tx, &entities.RedisUsageInbox{}, "snapshot_run_id", "redis_usage_inboxes"); err != nil {
 		return err
 	}
 	return nil

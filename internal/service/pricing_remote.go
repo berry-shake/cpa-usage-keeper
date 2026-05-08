@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 )
 
 const (
@@ -43,7 +43,7 @@ type RemotePricingSyncResult struct {
 	MatchedCount    int
 	UpdatedCount    int
 	UnmatchedModels []string
-	Pricing         []models.ModelPriceSetting
+	Pricing         []entities.ModelPriceSetting
 	SyncedAt        time.Time
 }
 

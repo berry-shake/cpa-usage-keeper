@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -47,10 +47,10 @@ func TestOpenDatabaseDropsLegacySnapshotRunIDColumns(t *testing.T) {
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	if db.Migrator().HasColumn(&models.UsageEvent{}, "snapshot_run_id") {
+	if db.Migrator().HasColumn(&entities.UsageEvent{}, "snapshot_run_id") {
 		t.Fatal("expected usage_events.snapshot_run_id to be dropped")
 	}
-	if db.Migrator().HasColumn(&models.RedisUsageInbox{}, "snapshot_run_id") {
+	if db.Migrator().HasColumn(&entities.RedisUsageInbox{}, "snapshot_run_id") {
 		t.Fatal("expected redis_usage_inboxes.snapshot_run_id to be dropped")
 	}
 	var oldIndexCount int64

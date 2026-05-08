@@ -1,12 +1,13 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 )
 
 func TestListUsageEventsWithFilterAppliesTimeBoundsAndPagination(t *testing.T) {
@@ -16,7 +17,7 @@ func TestListUsageEventsWithFilterAppliesTimeBoundsAndPagination(t *testing.T) {
 	}
 	closeTestDatabase(t, db)
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "1", TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-b", AuthIndex: "2", TotalTokens: 20},
 		{EventKey: "event-3", APIGroupKey: "provider-b", Model: "claude-opus", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), Source: "source-c", AuthIndex: "3", TotalTokens: 30},
@@ -27,7 +28,7 @@ func TestListUsageEventsWithFilterAppliesTimeBoundsAndPagination(t *testing.T) {
 
 	start := time.Date(2026, 4, 16, 9, 30, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC)
-	page, err := ListUsageEventsWithFilter(db, UsageQueryFilter{StartTime: &start, EndTime: &end, Page: 1, PageSize: 1})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{StartTime: &start, EndTime: &end, Page: 1, PageSize: 1})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestListUsageEventsWithFilterPagesByTimestampAndID(t *testing.T) {
 	}
 	closeTestDatabase(t, db)
 	timestamp := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: timestamp, Source: "source-a", AuthIndex: "1", TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: timestamp, Source: "source-b", AuthIndex: "2", TotalTokens: 20},
 		{EventKey: "event-3", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: timestamp.Add(-time.Hour), Source: "source-c", AuthIndex: "3", TotalTokens: 30},
@@ -58,11 +59,11 @@ func TestListUsageEventsWithFilterPagesByTimestampAndID(t *testing.T) {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	firstPage, err := ListUsageEventsWithFilter(db, UsageQueryFilter{Page: 1, PageSize: 1})
+	firstPage, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 1})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
-	secondPage, err := ListUsageEventsWithFilter(db, UsageQueryFilter{Page: 2, PageSize: 1})
+	secondPage, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 2, PageSize: 1})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestListUsageEventsWithFilterAppliesModelSourceAndResultFilters(t *testing.
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", Failed: false, TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-a", Failed: true, TotalTokens: 20},
 		{EventKey: "event-3", APIGroupKey: "provider-b", Model: "claude-opus", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), Source: "source-a", Failed: false, TotalTokens: 30},
@@ -93,7 +94,7 @@ func TestListUsageEventsWithFilterAppliesModelSourceAndResultFilters(t *testing.
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, UsageQueryFilter{Page: 1, PageSize: 20, Model: "claude-sonnet", Source: "source-a", Result: "success"})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 20, Model: "claude-sonnet", Source: "source-a", Result: "success"})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestListUsageEventsWithFilterAppliesProviderAuthTypeFilter(t *testing.T) {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), AuthType: "apikey", Provider: "OpenAI Mirror", Source: "sk-key-a", TotalTokens: 10},
 		{EventKey: "event-2", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), AuthType: "apikey", Provider: "OpenAI Mirror", Source: "sk-key-b", TotalTokens: 20},
 		{EventKey: "event-3", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), AuthType: "apikey", Provider: "Other Provider", Source: "sk-key-c", TotalTokens: 30},
@@ -121,7 +122,7 @@ func TestListUsageEventsWithFilterAppliesProviderAuthTypeFilter(t *testing.T) {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, UsageQueryFilter{AuthType: "apikey", Provider: "OpenAI Mirror", Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthType: "apikey", Provider: "OpenAI Mirror", Page: 1, PageSize: 20})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -141,7 +142,7 @@ func TestListUsageEventsWithFilterAppliesAuthSourceOrAuthIndexFilter(t *testing.
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), AuthType: "oauth", Source: "auth-1", AuthIndex: "1", TotalTokens: 10},
 		{EventKey: "event-2", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), AuthType: "oauth", Source: "source-alias", AuthIndex: "auth-1", TotalTokens: 20},
 		{EventKey: "event-3", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), AuthType: "oauth", Source: "other", AuthIndex: "other", TotalTokens: 30},
@@ -151,7 +152,7 @@ func TestListUsageEventsWithFilterAppliesAuthSourceOrAuthIndexFilter(t *testing.
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, UsageQueryFilter{AuthType: "oauth", Source: "auth-1", AuthIndex: "auth-1", Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthType: "oauth", Source: "auth-1", AuthIndex: "auth-1", Page: 1, PageSize: 20})
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestListUsageEventFilterOptionsWithFilterReturnsStableOptions(t *testing.T)
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", Failed: false, TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-b", Failed: true, TotalTokens: 20},
 		{EventKey: "event-3", APIGroupKey: "provider-b", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), Source: "source-a", Failed: false, TotalTokens: 30},
@@ -180,7 +181,7 @@ func TestListUsageEventFilterOptionsWithFilterReturnsStableOptions(t *testing.T)
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	options, err := ListUsageEventFilterOptionsWithFilter(db, UsageQueryFilter{Result: "success"})
+	options, err := ListUsageEventFilterOptionsWithFilter(db, dto.UsageQueryFilter{Result: "success"})
 	if err != nil {
 		t.Fatalf("ListUsageEventFilterOptionsWithFilter returned error: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestListUsageAnalysisWithFilterAggregatesApisAndModels(t *testing.T) {
 	}
 	closeTestDatabase(t, db)
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{
 			EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet",
 			Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Failed: false, LatencyMS: 100,
@@ -222,7 +223,7 @@ func TestListUsageAnalysisWithFilterAggregatesApisAndModels(t *testing.T) {
 
 	start := time.Date(2026, 4, 16, 9, 30, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 11, 30, 0, 0, time.UTC)
-	apiRows, modelRows, err := ListUsageAnalysisWithFilter(db, UsageQueryFilter{StartTime: &start, EndTime: &end})
+	apiRows, modelRows, err := ListUsageAnalysisWithFilter(db, dto.UsageQueryFilter{StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("ListUsageAnalysisWithFilter returned error: %v", err)
 	}
@@ -235,7 +236,7 @@ func TestListUsageAnalysisWithFilterAggregatesApisAndModels(t *testing.T) {
 	if apiRows[0].APIGroupKey != "provider-a" || apiRows[0].TotalRequests != 1 || apiRows[0].FailureCount != 1 || apiRows[0].TotalTokens != 25 {
 		t.Fatalf("unexpected first api row: %+v", apiRows[0])
 	}
-	modelByName := map[string]UsageAnalysisModelStatRecord{}
+	modelByName := map[string]dto.UsageAnalysisModelStatRecord{}
 	for _, row := range modelRows {
 		modelByName[row.Model] = row
 	}

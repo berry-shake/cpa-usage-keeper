@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -16,7 +16,7 @@ func TestOpenDatabaseBackfillsUsageEventRedisFieldsByUsageEventKey(t *testing.T)
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	var event models.UsageEvent
+	var event entities.UsageEvent
 	if err := db.Where("event_key = ?", "legacy-canonical-key").First(&event).Error; err != nil {
 		t.Fatalf("load usage event: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestOpenDatabaseBackfillsUsageEventRedisFieldsByRawRequestIDFallback(t *tes
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	var event models.UsageEvent
+	var event entities.UsageEvent
 	if err := db.Where("event_key = ?", "req-fallback").First(&event).Error; err != nil {
 		t.Fatalf("load fallback usage event: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestOpenDatabaseBackfillsUsageEventRedisFieldsByRawRequestIDWhenUsageEventK
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	var event models.UsageEvent
+	var event entities.UsageEvent
 	if err := db.Where("event_key = ?", "req-blank-fallback").First(&event).Error; err != nil {
 		t.Fatalf("load blank fallback usage event: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestOpenDatabaseBackfillsUsageEventRedisFieldsByRawRequestIDWhenUsageEventK
 		t.Fatalf("expected blank usage_event_key to fall back by raw request_id, got %+v", event)
 	}
 
-	var emptyEvent models.UsageEvent
+	var emptyEvent entities.UsageEvent
 	if err := db.Where("event_key = ?", "").First(&emptyEvent).Error; err != nil {
 		t.Fatalf("load empty-key usage event: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestOpenDatabaseBackfillDoesNotOverwriteExistingUsageEventFields(t *testing
 	db = openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	var event models.UsageEvent
+	var event entities.UsageEvent
 	if err := db.Where("event_key = ?", "existing-key").First(&event).Error; err != nil {
 		t.Fatalf("load existing usage event: %v", err)
 	}

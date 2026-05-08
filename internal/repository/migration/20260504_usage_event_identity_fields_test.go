@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -28,7 +28,7 @@ func TestOpenDatabaseBackfillsUsageEventIdentityFieldsFromUsageIdentities(t *tes
 	db = openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	var legacyProvider models.UsageEvent
+	var legacyProvider entities.UsageEvent
 	if err := db.Where("event_key = ?", "legacy-apikey").First(&legacyProvider).Error; err != nil {
 		t.Fatalf("load legacy provider event: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestOpenDatabaseBackfillsUsageEventIdentityFieldsFromUsageIdentities(t *tes
 		t.Fatalf("expected legacy provider event identity fields to be backfilled, got %+v", legacyProvider)
 	}
 
-	var legacyOAuth models.UsageEvent
+	var legacyOAuth entities.UsageEvent
 	if err := db.Where("event_key = ?", "legacy-oauth").First(&legacyOAuth).Error; err != nil {
 		t.Fatalf("load legacy oauth event: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestOpenDatabaseBackfillsUsageEventIdentityFieldsFromUsageIdentities(t *tes
 		t.Fatalf("expected legacy oauth event auth_type to be backfilled, got %+v", legacyOAuth)
 	}
 
-	var existingProvider models.UsageEvent
+	var existingProvider entities.UsageEvent
 	if err := db.Where("event_key = ?", "apikey-success").First(&existingProvider).Error; err != nil {
 		t.Fatalf("load existing provider event: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestOpenDatabaseBackfillsUsageEventIdentityFieldsFromUsageIdentities(t *tes
 	}
 
 	var providerFilterCount int64
-	if err := db.Model(&models.UsageEvent{}).Where("auth_type = ? AND provider = ?", "apikey", "Claude API").Count(&providerFilterCount).Error; err != nil {
+	if err := db.Model(&entities.UsageEvent{}).Where("auth_type = ? AND provider = ?", "apikey", "Claude API").Count(&providerFilterCount).Error; err != nil {
 		t.Fatalf("count provider-filtered usage events: %v", err)
 	}
 	if providerFilterCount != 1 {

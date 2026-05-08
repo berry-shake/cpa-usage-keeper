@@ -91,7 +91,6 @@ export interface UsageDetailRecord {
   source_raw?: string;
   source_display?: string;
   source_type?: string;
-  source_key?: string;
   auth_index: string;
   failed: boolean;
   latency_ms: number;
@@ -930,7 +929,6 @@ export function buildUsageFromDetails(details: UsageDetailRecord[]): UsagePayloa
       source_raw: detail.source_raw ?? '',
       source_display: detail.source_display ?? '',
       source_type: detail.source_type ?? '',
-      source_key: detail.source_key ?? '',
       auth_index: detail.auth_index ?? '',
       failed: detail.failed === true,
       tokens: {

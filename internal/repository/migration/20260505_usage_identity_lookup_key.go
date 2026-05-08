@@ -3,15 +3,15 @@ package migration
 import (
 	"fmt"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
 func addUsageIdentityLookupKeyMigration(tx *gorm.DB) error {
-	if !tx.Migrator().HasTable(&models.UsageIdentity{}) {
+	if !tx.Migrator().HasTable(&entities.UsageIdentity{}) {
 		return nil
 	}
-	if !tx.Migrator().HasColumn(&models.UsageIdentity{}, "lookup_key") {
+	if !tx.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		if err := tx.Exec("ALTER TABLE usage_identities ADD COLUMN lookup_key TEXT").Error; err != nil {
 			return fmt.Errorf("add usage_identities.lookup_key column: %w", err)
 		}

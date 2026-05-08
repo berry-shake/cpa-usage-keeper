@@ -1,12 +1,15 @@
-package repository
+package dto
 
 import (
 	"time"
 
-	"cpa-usage-keeper/internal/cpa"
+	repodto "cpa-usage-keeper/internal/repository/dto"
 )
 
-type UsageQueryFilter struct {
+const DefaultUsageEventsLimit = 100
+
+// UsageFilter 是服务层的 usage 查询条件。
+type UsageFilter struct {
 	Range     string
 	StartTime *time.Time
 	EndTime   *time.Time
@@ -22,9 +25,8 @@ type UsageQueryFilter struct {
 	Result    string
 }
 
-const DefaultUsageEventsLimit = 100
-
-type UsageEventsPageRecord struct {
+// UsageEventsPage 是 usage events 列表的服务层结果。
+type UsageEventsPage struct {
 	Events     []UsageEventRecord
 	Models     []string
 	Sources    []string
@@ -34,11 +36,13 @@ type UsageEventsPageRecord struct {
 	TotalPages int
 }
 
-type UsageEventFilterOptionsRecord struct {
+// UsageEventFilterOptions 是 usage events 筛选项的服务层结果。
+type UsageEventFilterOptions struct {
 	Models  []string
 	Sources []string
 }
 
+// UsageEventRecord 是单条 usage event 的服务层结果。
 type UsageEventRecord struct {
 	ID              uint
 	Timestamp       time.Time
@@ -57,7 +61,8 @@ type UsageEventRecord struct {
 	TotalTokens     int64
 }
 
-type UsageCredentialStatRecord struct {
+// UsageCredentialStat 是按凭证和模型聚合的服务层 usage 统计结果。
+type UsageCredentialStat struct {
 	Source          string
 	AuthIndex       string
 	Model           string
@@ -72,35 +77,44 @@ type UsageCredentialStatRecord struct {
 	CostAvailable   bool
 }
 
-type UsageAnalysisModelStatRecord struct {
+// UsageAnalysisModelStat 是按模型聚合的分析结果。
+type UsageAnalysisModelStat struct {
 	Model              string
 	TotalRequests      int64
 	SuccessCount       int64
 	FailureCount       int64
+	TotalTokens        int64
 	InputTokens        int64
 	OutputTokens       int64
 	ReasoningTokens    int64
 	CachedTokens       int64
-	TotalTokens        int64
 	TotalLatencyMS     int64
 	LatencySampleCount int64
 }
 
-type UsageAnalysisAPIStatRecord struct {
-	APIGroupKey     string
+// UsageAnalysisAPIStat 是按 API 聚合的分析结果。
+type UsageAnalysisAPIStat struct {
+	APIKey          string
 	DisplayName     string
 	TotalRequests   int64
 	SuccessCount    int64
 	FailureCount    int64
+	TotalTokens     int64
 	InputTokens     int64
 	OutputTokens    int64
 	ReasoningTokens int64
 	CachedTokens    int64
-	TotalTokens     int64
-	Models          []UsageAnalysisModelStatRecord `gorm:"-"`
+	Models          []UsageAnalysisModelStat
 }
 
-type UsageOverviewSummaryRecord struct {
+// UsageAnalysisSnapshot 是 analysis 的服务层结果。
+type UsageAnalysisSnapshot struct {
+	APIs   []UsageAnalysisAPIStat
+	Models []UsageAnalysisModelStat
+}
+
+// UsageOverviewSummary 是 overview summary 的服务层结果。
+type UsageOverviewSummary struct {
 	RequestCount    int64
 	TokenCount      int64
 	WindowMinutes   int64
@@ -112,7 +126,8 @@ type UsageOverviewSummaryRecord struct {
 	ReasoningTokens int64
 }
 
-type UsageOverviewSeriesRecord struct {
+// UsageOverviewSeries 是 overview series 的服务层结果。
+type UsageOverviewSeries struct {
 	Requests        map[string]int64
 	Tokens          map[string]int64
 	RPM             map[string]float64
@@ -122,10 +137,11 @@ type UsageOverviewSeriesRecord struct {
 	OutputTokens    map[string]int64
 	CachedTokens    map[string]int64
 	ReasoningTokens map[string]int64
-	Models          map[string]UsageOverviewSeriesRecord
+	Models          map[string]UsageOverviewSeries
 }
 
-type UsageOverviewHealthBlockRecord struct {
+// UsageOverviewHealthBlock 是 overview health 的单个时间块。
+type UsageOverviewHealthBlock struct {
 	StartTime time.Time
 	EndTime   time.Time
 	Success   int64
@@ -133,7 +149,8 @@ type UsageOverviewHealthBlockRecord struct {
 	Rate      float64
 }
 
-type UsageOverviewHealthRecord struct {
+// UsageOverviewHealth 是 overview health 的聚合结果。
+type UsageOverviewHealth struct {
 	TotalSuccess  int64
 	TotalFailure  int64
 	SuccessRate   float64
@@ -142,14 +159,15 @@ type UsageOverviewHealthRecord struct {
 	BucketSeconds int64
 	WindowStart   time.Time
 	WindowEnd     time.Time
-	BlockDetails  []UsageOverviewHealthBlockRecord
+	BlockDetails  []UsageOverviewHealthBlock
 }
 
-type UsageOverviewRecord struct {
-	Usage        *cpa.StatisticsSnapshot
-	Summary      UsageOverviewSummaryRecord
-	Series       UsageOverviewSeriesRecord
-	HourlySeries UsageOverviewSeriesRecord
-	DailySeries  UsageOverviewSeriesRecord
-	Health       UsageOverviewHealthRecord
+// UsageOverviewSnapshot 是 overview 的服务层结果。
+type UsageOverviewSnapshot struct {
+	Usage        *repodto.StatisticsSnapshot
+	Summary      UsageOverviewSummary
+	Series       UsageOverviewSeries
+	HourlySeries UsageOverviewSeries
+	DailySeries  UsageOverviewSeries
+	Health       UsageOverviewHealth
 }

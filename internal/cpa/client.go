@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
+	"cpa-usage-keeper/internal/cpa/dto/response"
 )
 
 type Client struct {
@@ -83,8 +86,8 @@ func NewClient(baseURL, managementKey string, timeout time.Duration, tlsSkipVeri
 	}
 }
 
-func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*ExternalAPIKeysResult, error) {
-	result := &ExternalAPIKeysResult{}
+func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*response.ExternalAPIKeysResult, error) {
+	result := &response.ExternalAPIKeysResult{}
 	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementExternalAPIKeysEndpoint, &result.Payload, "external api keys")
 	result.StatusCode = statusCode
 	result.Body = body
@@ -94,8 +97,8 @@ func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*ExternalAPIKeysResu
 	return result, nil
 }
 
-func (c *Client) FetchUsageQueue(ctx context.Context, count int) (*UsageQueueResult, error) {
-	result := &UsageQueueResult{}
+func (c *Client) FetchUsageQueue(ctx context.Context, count int) (*response.UsageQueueResult, error) {
+	result := &response.UsageQueueResult{}
 	if count <= 0 {
 		return result, fmt.Errorf("usage queue count must be positive")
 	}
@@ -109,17 +112,17 @@ func (c *Client) FetchUsageQueue(ctx context.Context, count int) (*UsageQueueRes
 	return result, nil
 }
 
-func (c *Client) FetchModels(ctx context.Context) (*ModelsResult, error) {
+func (c *Client) FetchModels(ctx context.Context) (*response.ModelsResult, error) {
 	externalAPIKeys, err := c.FetchExternalAPIKeys(ctx)
 	if err != nil {
-		return &ModelsResult{}, err
+		return &response.ModelsResult{}, err
 	}
 	externalAPIKey := firstNonEmptyString(externalAPIKeys.Payload.ExternalAPIKeys)
 	if externalAPIKey == "" {
-		return &ModelsResult{}, fmt.Errorf("cpa external api keys are required")
+		return &response.ModelsResult{}, fmt.Errorf("cpa external api keys are required")
 	}
 
-	result := &ModelsResult{}
+	result := &response.ModelsResult{}
 	statusCode, body, err := c.doJSONRequest(ctx, cpaModelsEndpoint, &result.Payload, "models", func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+externalAPIKey)
 	})
@@ -131,8 +134,8 @@ func (c *Client) FetchModels(ctx context.Context) (*ModelsResult, error) {
 	return result, nil
 }
 
-func (c *Client) FetchAuthFiles(ctx context.Context) (*AuthFilesResult, error) {
-	result := &AuthFilesResult{}
+func (c *Client) FetchAuthFiles(ctx context.Context) (*response.AuthFilesResult, error) {
+	result := &response.AuthFilesResult{}
 	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementAuthFilesEndpoint, &result.Payload, "auth files")
 	result.StatusCode = statusCode
 	result.Body = body
@@ -142,24 +145,24 @@ func (c *Client) FetchAuthFiles(ctx context.Context) (*AuthFilesResult, error) {
 	return result, nil
 }
 
-func (c *Client) FetchGeminiAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) FetchGeminiAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementGeminiAPIKeyEndpoint, "gemini-api-key", "gemini api keys")
 }
 
-func (c *Client) FetchClaudeAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) FetchClaudeAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementClaudeAPIKeyEndpoint, "claude-api-key", "claude api keys")
 }
 
-func (c *Client) FetchCodexAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) FetchCodexAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementCodexAPIKeyEndpoint, "codex-api-key", "codex api keys")
 }
 
-func (c *Client) FetchVertexAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) FetchVertexAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementVertexAPIKeyEndpoint, "vertex-api-key", "vertex api keys")
 }
 
-func (c *Client) fetchProviderKeyConfig(ctx context.Context, path string, payloadKey string, kind string) (*ProviderKeyConfigResult, error) {
-	result := &ProviderKeyConfigResult{}
+func (c *Client) fetchProviderKeyConfig(ctx context.Context, path string, payloadKey string, kind string) (*response.ProviderKeyConfigResult, error) {
+	result := &response.ProviderKeyConfigResult{}
 	var raw json.RawMessage
 	statusCode, body, err := c.doManagementJSONRequest(ctx, path, &raw, kind)
 	result.StatusCode = statusCode
@@ -175,8 +178,8 @@ func (c *Client) fetchProviderKeyConfig(ctx context.Context, path string, payloa
 	return result, nil
 }
 
-func (c *Client) FetchOpenAICompatibility(ctx context.Context) (*OpenAICompatibilityResult, error) {
-	result := &OpenAICompatibilityResult{}
+func (c *Client) FetchOpenAICompatibility(ctx context.Context) (*response.OpenAICompatibilityResult, error) {
+	result := &response.OpenAICompatibilityResult{}
 	var raw json.RawMessage
 	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementOpenAICompatibilityEndpoint, &raw, "openai compatibility")
 	result.StatusCode = statusCode
@@ -192,8 +195,8 @@ func (c *Client) FetchOpenAICompatibility(ctx context.Context) (*OpenAICompatibi
 	return result, nil
 }
 
-func decodeProviderKeyConfigPayload(raw json.RawMessage, payloadKey string) ([]ProviderKeyConfig, error) {
-	var direct []ProviderKeyConfig
+func decodeProviderKeyConfigPayload(raw json.RawMessage, payloadKey string) ([]providerconfig.ProviderKeyConfig, error) {
+	var direct []providerconfig.ProviderKeyConfig
 	if err := json.Unmarshal(raw, &direct); err == nil {
 		return direct, nil
 	}
@@ -211,8 +214,8 @@ func decodeProviderKeyConfigPayload(raw json.RawMessage, payloadKey string) ([]P
 	return direct, nil
 }
 
-func decodeOpenAICompatibilityPayload(raw json.RawMessage, payloadKey string) ([]OpenAICompatibilityConfig, error) {
-	var direct []OpenAICompatibilityConfig
+func decodeOpenAICompatibilityPayload(raw json.RawMessage, payloadKey string) ([]providerconfig.OpenAICompatibilityConfig, error) {
+	var direct []providerconfig.OpenAICompatibilityConfig
 	if err := json.Unmarshal(raw, &direct); err == nil {
 		return direct, nil
 	}

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -76,21 +76,21 @@ func seedAIProviderAuthIndexMigrationDatabase(t *testing.T, dbPath string) {
 	now := time.Date(2026, 5, 5, 7, 0, 0, 0, time.UTC)
 	identityRows := []struct {
 		name         string
-		authType     models.UsageIdentityAuthType
+		authType     entities.UsageIdentityAuthType
 		authTypeName string
 		identity     string
 		typeName     string
 		provider     string
 		totalTokens  int64
 	}{
-		{name: "Claude", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-claude-old", typeName: "claude", provider: "Claude", totalTokens: 999},
-		{name: "Gemini", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-duplicate", typeName: "gemini", provider: "Gemini", totalTokens: 888},
-		{name: "", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "authidx-existing", typeName: "", provider: "", totalTokens: 777},
-		{name: "Free", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-ambiguous", typeName: "openai", provider: "Free", totalTokens: 666},
-		{name: "Claude", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-provider-mismatch", typeName: "claude", provider: "Claude", totalTokens: 555},
-		{name: "Claude", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-no-events", typeName: "claude", provider: "Claude", totalTokens: 444},
-		{name: "OAuth User", authType: models.UsageIdentityAuthTypeAuthFile, authTypeName: "oauth", identity: "auth-file-index", typeName: "claude", provider: "Claude", totalTokens: 333},
-		{name: "Non API Key", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "oauth", identity: "non-apikey-identity", typeName: "claude", provider: "Claude", totalTokens: 222},
+		{name: "Claude", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-claude-old", typeName: "claude", provider: "Claude", totalTokens: 999},
+		{name: "Gemini", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-duplicate", typeName: "gemini", provider: "Gemini", totalTokens: 888},
+		{name: "", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "authidx-existing", typeName: "", provider: "", totalTokens: 777},
+		{name: "Free", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-ambiguous", typeName: "openai", provider: "Free", totalTokens: 666},
+		{name: "Claude", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-provider-mismatch", typeName: "claude", provider: "Claude", totalTokens: 555},
+		{name: "Claude", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-no-events", typeName: "claude", provider: "Claude", totalTokens: 444},
+		{name: "OAuth User", authType: entities.UsageIdentityAuthTypeAuthFile, authTypeName: "oauth", identity: "auth-file-index", typeName: "claude", provider: "Claude", totalTokens: 333},
+		{name: "Non API Key", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "oauth", identity: "non-apikey-identity", typeName: "claude", provider: "Claude", totalTokens: 222},
 	}
 	for _, row := range identityRows {
 		if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider, total_requests, success_count, total_tokens, last_aggregated_usage_event_id, created_at, updated_at)
@@ -192,16 +192,16 @@ func seedPrefixGeneratedUsageIdentities(t *testing.T, dbPath string) {
 	}
 
 	now := time.Date(2026, 5, 4, 8, 0, 0, 0, time.UTC)
-	rows := []models.UsageIdentity{
-		{Name: "Claude Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-key", Type: "claude", Provider: "Claude Team", TotalRequests: 1, SuccessCount: 1, TotalTokens: 30, LastAggregatedUsageEventID: 1, CreatedAt: now, UpdatedAt: now},
-		{Name: "Claude Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-unused-key", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Gemini Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini", Type: "gemini", Provider: "Gemini Team", TotalRequests: 2, SuccessCount: 2, TotalTokens: 40, LastAggregatedUsageEventID: 2, CreatedAt: now, UpdatedAt: now},
-		{Name: "Claude Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Codex Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "codex", Type: "codex", Provider: "Codex Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Vertex Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "vertex", Type: "vertex", Provider: "Vertex Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "OpenAI Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "openai", Type: "openai", Provider: "OpenAI Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Gemini Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini-unused-key", Type: "gemini", Provider: "Gemini Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Custom OpenAI", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "https://proxy.internal/v1", Type: "openai", Provider: "Custom OpenAI", CreatedAt: now, UpdatedAt: now},
+	rows := []entities.UsageIdentity{
+		{Name: "Claude Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-key", Type: "claude", Provider: "Claude Team", TotalRequests: 1, SuccessCount: 1, TotalTokens: 30, LastAggregatedUsageEventID: 1, CreatedAt: now, UpdatedAt: now},
+		{Name: "Claude Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-unused-key", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Gemini Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini", Type: "gemini", Provider: "Gemini Team", TotalRequests: 2, SuccessCount: 2, TotalTokens: 40, LastAggregatedUsageEventID: 2, CreatedAt: now, UpdatedAt: now},
+		{Name: "Claude Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Codex Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "codex", Type: "codex", Provider: "Codex Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Vertex Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "vertex", Type: "vertex", Provider: "Vertex Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "OpenAI Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "openai", Type: "openai", Provider: "OpenAI Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Gemini Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini-unused-key", Type: "gemini", Provider: "Gemini Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Custom OpenAI", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "https://proxy.internal/v1", Type: "openai", Provider: "Custom OpenAI", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, row := range rows {
 		if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider, total_requests, success_count, total_tokens, last_aggregated_usage_event_id, created_at, updated_at)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"cpa-usage-keeper/internal/service"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
 var presetUsageRangeDurations = map[string]time.Duration{
@@ -27,10 +27,10 @@ var allowedUsageEventsPageSizes = map[int]struct{}{
 	1000: {},
 }
 
-func parseUsageTimeFilterQuery(req *http.Request, anchor time.Time) (service.UsageFilter, error) {
+func parseUsageTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
 	filter, err := parseUsageFilterQuery(req, anchor)
 	if err != nil {
-		return service.UsageFilter{}, err
+		return servicedto.UsageFilter{}, err
 	}
 	filter.Limit = 0
 	filter.Page = 0
@@ -53,9 +53,9 @@ func parseCustomUsageRangeBoundary(value string, endOfDay bool) (time.Time, erro
 	return time.Parse(time.RFC3339, value)
 }
 
-func parseUsageFilterQuery(req *http.Request, anchor time.Time) (service.UsageFilter, error) {
+func parseUsageFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
 	if req == nil {
-		return service.UsageFilter{}, nil
+		return servicedto.UsageFilter{}, nil
 	}
 
 	rangeValue := strings.TrimSpace(req.URL.Query().Get("range"))
@@ -63,12 +63,12 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (service.UsageFi
 		rangeValue = "all"
 	}
 
-	filter := service.UsageFilter{Range: rangeValue, Limit: service.DefaultUsageEventsLimit, Page: 1, PageSize: service.DefaultUsageEventsLimit}
+	filter := servicedto.UsageFilter{Range: rangeValue, Limit: servicedto.DefaultUsageEventsLimit, Page: 1, PageSize: servicedto.DefaultUsageEventsLimit}
 	query := req.URL.Query()
 	if pageValue := strings.TrimSpace(query.Get("page")); pageValue != "" {
 		page, err := strconv.Atoi(pageValue)
 		if err != nil || page < 1 {
-			return service.UsageFilter{}, fmt.Errorf("invalid page %q", pageValue)
+			return servicedto.UsageFilter{}, fmt.Errorf("invalid page %q", pageValue)
 		}
 		filter.Page = page
 	}
@@ -79,10 +79,10 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (service.UsageFi
 	if pageSizeValue != "" {
 		pageSize, err := strconv.Atoi(pageSizeValue)
 		if err != nil {
-			return service.UsageFilter{}, fmt.Errorf("invalid page_size %q", pageSizeValue)
+			return servicedto.UsageFilter{}, fmt.Errorf("invalid page_size %q", pageSizeValue)
 		}
 		if _, ok := allowedUsageEventsPageSizes[pageSize]; !ok {
-			return service.UsageFilter{}, fmt.Errorf("invalid page_size %q", pageSizeValue)
+			return servicedto.UsageFilter{}, fmt.Errorf("invalid page_size %q", pageSizeValue)
 		}
 		filter.PageSize = pageSize
 		filter.Limit = pageSize
@@ -93,7 +93,7 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (service.UsageFi
 	filter.AuthIndex = strings.TrimSpace(query.Get("auth_index"))
 	filter.Result = strings.TrimSpace(query.Get("result"))
 	if filter.Result != "" && filter.Result != "success" && filter.Result != "failed" {
-		return service.UsageFilter{}, fmt.Errorf("invalid result %q", filter.Result)
+		return servicedto.UsageFilter{}, fmt.Errorf("invalid result %q", filter.Result)
 	}
 	switch rangeValue {
 	case "all":
@@ -110,20 +110,20 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (service.UsageFi
 		startValue := strings.TrimSpace(req.URL.Query().Get("start"))
 		endValue := strings.TrimSpace(req.URL.Query().Get("end"))
 		if startValue == "" || endValue == "" {
-			return service.UsageFilter{}, fmt.Errorf("custom range requires start and end")
+			return servicedto.UsageFilter{}, fmt.Errorf("custom range requires start and end")
 		}
 		startTime, err := parseCustomUsageRangeBoundary(startValue, false)
 		if err != nil {
-			return service.UsageFilter{}, fmt.Errorf("invalid start: %w", err)
+			return servicedto.UsageFilter{}, fmt.Errorf("invalid start: %w", err)
 		}
 		endTime, err := parseCustomUsageRangeBoundary(endValue, true)
 		if err != nil {
-			return service.UsageFilter{}, fmt.Errorf("invalid end: %w", err)
+			return servicedto.UsageFilter{}, fmt.Errorf("invalid end: %w", err)
 		}
 		startTime = startTime.UTC()
 		endTime = endTime.UTC()
 		if startTime.After(endTime) {
-			return service.UsageFilter{}, fmt.Errorf("custom range start must be before end")
+			return servicedto.UsageFilter{}, fmt.Errorf("custom range start must be before end")
 		}
 		filter.StartTime = &startTime
 		filter.EndTime = &endTime
@@ -131,7 +131,7 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (service.UsageFi
 	default:
 		duration, ok := presetUsageRangeDurations[rangeValue]
 		if !ok {
-			return service.UsageFilter{}, fmt.Errorf("unsupported usage range %q", rangeValue)
+			return servicedto.UsageFilter{}, fmt.Errorf("unsupported usage range %q", rangeValue)
 		}
 		endTime := anchor.UTC()
 		startTime := endTime.Add(-duration)

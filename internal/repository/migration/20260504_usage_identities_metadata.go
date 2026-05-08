@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
@@ -25,7 +25,7 @@ func migrateUsageIdentitiesMetadataMigration(tx *gorm.DB) error {
 				provider = excluded.provider,
 				is_deleted = excluded.is_deleted,
 				deleted_at = excluded.deleted_at,
-				updated_at = excluded.updated_at`, models.UsageIdentityAuthTypeAuthFile, "oauth", now, now).Error; err != nil {
+				updated_at = excluded.updated_at`, entities.UsageIdentityAuthTypeAuthFile, "oauth", now, now).Error; err != nil {
 			return fmt.Errorf("migrate auth_files to usage_identities: %w", err)
 		}
 	}
@@ -43,7 +43,7 @@ func migrateUsageIdentitiesMetadataMigration(tx *gorm.DB) error {
 				provider = excluded.provider,
 				is_deleted = excluded.is_deleted,
 				deleted_at = excluded.deleted_at,
-				updated_at = excluded.updated_at`, models.UsageIdentityAuthTypeAIProvider, "apikey", now, now).Error; err != nil {
+				updated_at = excluded.updated_at`, entities.UsageIdentityAuthTypeAIProvider, "apikey", now, now).Error; err != nil {
 			return fmt.Errorf("migrate provider_metadata to usage_identities: %w", err)
 		}
 	}

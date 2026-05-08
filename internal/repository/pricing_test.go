@@ -1,19 +1,20 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
 func TestListUsedModelsReturnsDistinctSortedModels(t *testing.T) {
 	db := openPricingTestDatabase(t)
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "1", Model: "claude-sonnet", Timestamp: time.Unix(1, 0)},
 		{EventKey: "2", Model: "claude-haiku", Timestamp: time.Unix(2, 0)},
 		{EventKey: "3", Model: "claude-sonnet", Timestamp: time.Unix(3, 0)},
@@ -34,7 +35,7 @@ func TestListUsedModelsReturnsDistinctSortedModels(t *testing.T) {
 func TestUpsertModelPriceSettingCreatesAndUpdatesRow(t *testing.T) {
 	db := openPricingTestDatabase(t)
 
-	created, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+	created, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -47,7 +48,7 @@ func TestUpsertModelPriceSettingCreatesAndUpdatesRow(t *testing.T) {
 		t.Fatalf("unexpected created setting: %#v", created)
 	}
 
-	updated, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+	updated, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     4,
 		CompletionPricePer1M: 16,

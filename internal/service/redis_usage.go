@@ -7,19 +7,19 @@ import (
 	"strings"
 	"time"
 
-	"cpa-usage-keeper/internal/cpa"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/repository/dto"
 )
 
 type RedisQueue interface {
 	PopUsage(ctx context.Context) ([]string, error)
 }
 
-func DecodeRedisUsageMessage(message string, fetchedAt time.Time) (models.UsageEvent, json.RawMessage, error) {
+func DecodeRedisUsageMessage(message string, fetchedAt time.Time) (entities.UsageEvent, json.RawMessage, error) {
 	raw := json.RawMessage(message)
 	var payload queuedUsageDetail
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return models.UsageEvent{}, nil, fmt.Errorf("decode redis usage message: %w", err)
+		return entities.UsageEvent{}, nil, fmt.Errorf("decode redis usage message: %w", err)
 	}
 	return payload.toUsageEvent(fetchedAt), raw, nil
 }
@@ -29,10 +29,11 @@ type queuedUsageDetail struct {
 	LatencyMS int64          `json:"latency_ms"`
 	Source    string         `json:"source"`
 	AuthIndex string         `json:"auth_index"`
-	Tokens    cpa.TokenStats `json:"tokens"`
+	Tokens    dto.TokenStats `json:"tokens"`
 	Failed    bool           `json:"failed"`
 	Provider  string         `json:"provider"`
 	Model     string         `json:"model"`
+	Alias     *string        `json:"alias"`
 	Endpoint  string         `json:"endpoint"`
 	AuthType  string         `json:"auth_type"`
 	APIKey    string         `json:"api_key"`
@@ -47,7 +48,18 @@ func normalizeRedisAuthType(value string) string {
 	return trimmed
 }
 
-func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) models.UsageEvent {
+func trimRedisOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) entities.UsageEvent {
 	tokens := normalizeTokens(d.Tokens)
 	apiGroupKey := firstNonEmpty(d.APIKey, d.Provider, d.Endpoint, "unknown")
 	model := firstNonEmpty(d.Model, "unknown")
@@ -61,7 +73,7 @@ func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) models.UsageEvent {
 	if eventKey == "" {
 		eventKey = BuildEventKey(apiGroupKey, model, timestamp, source, authIndex, d.Failed, tokens)
 	}
-	return models.UsageEvent{
+	return entities.UsageEvent{
 		EventKey:        eventKey,
 		APIGroupKey:     apiGroupKey,
 		Provider:        strings.TrimSpace(d.Provider),
@@ -69,6 +81,7 @@ func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) models.UsageEvent {
 		AuthType:        normalizeRedisAuthType(d.AuthType),
 		RequestID:       strings.TrimSpace(d.RequestID),
 		Model:           model,
+		ModelAlias:      trimRedisOptionalString(d.Alias),
 		Timestamp:       timestamp,
 		Source:          source,
 		AuthIndex:       authIndex,

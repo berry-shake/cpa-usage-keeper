@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 )
 
 func TestOpenDatabaseUsageIdentityMigrationsAreIdempotent(t *testing.T) {
@@ -16,25 +16,25 @@ func TestOpenDatabaseUsageIdentityMigrationsAreIdempotent(t *testing.T) {
 	db = openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	var identities []models.UsageIdentity
+	var identities []entities.UsageIdentity
 	if err := db.Order("auth_type asc, identity asc").Find(&identities).Error; err != nil {
 		t.Fatalf("load usage identities after reopen: %v", err)
 	}
 	if len(identities) != 2 {
 		t.Fatalf("expected unmatched AI provider raw identities to stay deleted after reopen, got %d: %+v", len(identities), identities)
 	}
-	oauth := findUsageIdentity(t, identities, models.UsageIdentityAuthTypeAuthFile, "auth-1")
+	oauth := findUsageIdentity(t, identities, entities.UsageIdentityAuthTypeAuthFile, "auth-1")
 	if oauth.TotalRequests != 3 || oauth.TotalTokens != 90 || oauth.LastAggregatedUsageEventID != 3 {
 		t.Fatalf("expected oauth stats not to double-add after reopen, got %+v", oauth)
 	}
-	if countUsageIdentities(t, db, models.UsageIdentityAuthTypeAIProvider, "api-source-1") != 0 {
+	if countUsageIdentities(t, db, entities.UsageIdentityAuthTypeAIProvider, "api-source-1") != 0 {
 		t.Fatal("expected unmatched active provider raw identity to stay deleted after reopen")
 	}
-	deletedOAuth := findUsageIdentity(t, identities, models.UsageIdentityAuthTypeAuthFile, "auth-deleted")
+	deletedOAuth := findUsageIdentity(t, identities, entities.UsageIdentityAuthTypeAuthFile, "auth-deleted")
 	if !deletedOAuth.IsDeleted || deletedOAuth.TotalRequests != 1 || deletedOAuth.TotalTokens != 100 || deletedOAuth.LastAggregatedUsageEventID != 6 {
 		t.Fatalf("expected deleted oauth stats not to double-add after reopen, got %+v", deletedOAuth)
 	}
-	if countUsageIdentities(t, db, models.UsageIdentityAuthTypeAIProvider, "api-deleted") != 0 {
+	if countUsageIdentities(t, db, entities.UsageIdentityAuthTypeAIProvider, "api-deleted") != 0 {
 		t.Fatal("expected unmatched deleted provider raw identity to stay deleted after reopen")
 	}
 

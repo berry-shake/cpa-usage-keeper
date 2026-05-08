@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"math"
 	"path/filepath"
 	"reflect"
@@ -8,7 +9,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 )
 
 func withRepositoryTestLocation(t *testing.T, name string) {
@@ -29,7 +30,7 @@ func TestBuildUsageSnapshotWithFilterAppliesTimeBounds(t *testing.T) {
 	}
 	closeTestDatabase(t, db)
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "1", TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-b", AuthIndex: "2", TotalTokens: 20},
 		{EventKey: "event-3", APIGroupKey: "provider-b", Model: "claude-opus", Timestamp: time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC), Source: "source-c", AuthIndex: "3", TotalTokens: 30},
@@ -40,7 +41,7 @@ func TestBuildUsageSnapshotWithFilterAppliesTimeBounds(t *testing.T) {
 
 	start := time.Date(2026, 4, 16, 9, 30, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 0, time.UTC)
-	snapshot, err := BuildUsageSnapshotWithFilter(db, UsageQueryFilter{StartTime: &start, EndTime: &end})
+	snapshot, err := BuildUsageSnapshotWithFilter(db, dto.UsageQueryFilter{StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageSnapshotWithFilter returned error: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestBuildUsageOverviewWithFilterComputesSummaryAndSeries(t *testing.T) {
 	}
 	closeTestDatabase(t, db)
 
-	if _, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -78,7 +79,7 @@ func TestBuildUsageOverviewWithFilterComputesSummaryAndSeries(t *testing.T) {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{
 			EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet",
 			Timestamp: time.Date(2026, 4, 16, 9, 15, 0, 0, time.UTC), Failed: false,
@@ -101,7 +102,7 @@ func TestBuildUsageOverviewWithFilterComputesSummaryAndSeries(t *testing.T) {
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 17, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: "7d", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "7d", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestBuildUsageOverviewWithFilterComputesSummaryAndSeries(t *testing.T) {
 }
 
 func TestBuildUsageOverviewFromEventsBuildsSnapshotAndOverviewInOnePass(t *testing.T) {
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{
 			EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet",
 			Timestamp: time.Date(2026, 4, 16, 9, 15, 0, 0, time.UTC), Failed: false,
@@ -212,8 +213,8 @@ func TestBuildUsageOverviewFromEventsBuildsSnapshotAndOverviewInOnePass(t *testi
 	}
 	filterStart := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	filterEnd := time.Date(2026, 4, 16, 23, 59, 59, 999000000, time.UTC)
-	filter := UsageQueryFilter{Range: "24h", StartTime: &filterStart, EndTime: &filterEnd}
-	pricingByModel := map[string]models.ModelPriceSetting{
+	filter := dto.UsageQueryFilter{Range: "24h", StartTime: &filterStart, EndTime: &filterEnd}
+	pricingByModel := map[string]entities.ModelPriceSetting{
 		"claude-sonnet": {
 			Model:                "claude-sonnet",
 			PromptPricePer1M:     3,
@@ -281,7 +282,7 @@ func TestBuildUsageOverviewWithFilterBuilds24hHealthGridFor24hRange(t *testing.T
 	}
 	closeTestDatabase(t, db)
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-success", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 17, 9, 31, 0, 0, time.UTC), Failed: false, TotalTokens: 10},
 		{EventKey: "event-failed", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 17, 23, 59, 0, 0, time.UTC), Failed: true, TotalTokens: 20},
 	}
@@ -291,7 +292,7 @@ func TestBuildUsageOverviewWithFilterBuilds24hHealthGridFor24hRange(t *testing.T
 
 	start := time.Date(2026, 4, 17, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 17, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -307,8 +308,8 @@ func TestBuildUsageOverviewWithFilterBuilds24hHealthGridFor24hRange(t *testing.T
 		t.Fatalf("expected 24h service health grid, got %d blocks", len(overview.Health.BlockDetails))
 	}
 
-	var successBlock *UsageOverviewHealthBlockRecord
-	var failedBlock *UsageOverviewHealthBlockRecord
+	var successBlock *dto.UsageOverviewHealthBlockRecord
+	var failedBlock *dto.UsageOverviewHealthBlockRecord
 	for index := range overview.Health.BlockDetails {
 		block := &overview.Health.BlockDetails[index]
 		if block.Success == 1 {
@@ -327,14 +328,14 @@ func TestBuildUsageOverviewWithFilterBuilds24hHealthGridFor24hRange(t *testing.T
 }
 
 func TestCalculateUsageEventCostDoesNotDoubleChargeReasoningTokens(t *testing.T) {
-	event := models.UsageEvent{
+	event := entities.UsageEvent{
 		InputTokens:     1_000_000,
 		OutputTokens:    2_000_000,
 		ReasoningTokens: 3_000_000,
 		CachedTokens:    400_000,
 		TotalTokens:     6_400_000,
 	}
-	pricing := models.ModelPriceSetting{
+	pricing := entities.ModelPriceSetting{
 		PromptPricePer1M:     10,
 		CompletionPricePer1M: 20,
 		CachePricePer1M:      1,
@@ -354,7 +355,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *
 	}
 	closeTestDatabase(t, db)
 
-	if _, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "priced-model",
 		PromptPricePer1M:     1,
 		CompletionPricePer1M: 0,
@@ -363,7 +364,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{
 			EventKey: "event-priced", APIGroupKey: "provider-a", Model: "priced-model",
 			Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), TotalTokens: 1_000_000,
@@ -381,7 +382,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -401,7 +402,7 @@ func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveN
 	}
 	closeTestDatabase(t, db)
 
-	if _, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "priced-model",
 		PromptPricePer1M:     1,
 		CompletionPricePer1M: 0,
@@ -410,7 +411,7 @@ func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveN
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{
 			EventKey: "event-priced", APIGroupKey: "provider-a", Model: "priced-model",
 			Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), TotalTokens: 1_000_000,
@@ -427,7 +428,7 @@ func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveN
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -447,7 +448,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostWithoutPricing(t *tes
 	}
 	closeTestDatabase(t, db)
 
-	events := []models.UsageEvent{{
+	events := []entities.UsageEvent{{
 		EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet",
 		Timestamp: time.Date(2026, 4, 16, 9, 15, 0, 0, time.UTC), TotalTokens: 1800,
 		InputTokens: 1000, OutputTokens: 500, CachedTokens: 200,
@@ -458,7 +459,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostWithoutPricing(t *tes
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -506,7 +507,7 @@ func TestBuildUsageOverviewWithFilterUsesExactPresetWindowMinutes(t *testing.T) 
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			event := models.UsageEvent{
+			event := entities.UsageEvent{
 				EventKey:        "event-" + tc.rangeName,
 				APIGroupKey:     "provider-a",
 				Model:           "claude-sonnet",
@@ -516,11 +517,11 @@ func TestBuildUsageOverviewWithFilterUsesExactPresetWindowMinutes(t *testing.T) 
 				OutputTokens:    15,
 				ReasoningTokens: 0,
 			}
-			if _, _, err := InsertUsageEvents(db, []models.UsageEvent{event}); err != nil {
+			if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{event}); err != nil {
 				t.Fatalf("InsertUsageEvents returned error: %v", err)
 			}
 
-			overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: tc.rangeName, StartTime: &tc.start, EndTime: &tc.end})
+			overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: tc.rangeName, StartTime: &tc.start, EndTime: &tc.end})
 			if err != nil {
 				t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 			}
@@ -546,7 +547,7 @@ func TestBuildUsageOverviewWithFilterBuildsLatestHourlySeriesForLongRanges(t *te
 	}
 	closeTestDatabase(t, db)
 
-	if _, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     1,
 		CompletionPricePer1M: 0,
@@ -555,7 +556,7 @@ func TestBuildUsageOverviewWithFilterBuildsLatestHourlySeriesForLongRanges(t *te
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-old", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 17, 8, 0, 0, 0, time.UTC), TotalTokens: 1_000_000, InputTokens: 1_000_000},
 		{EventKey: "event-latest-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 23, 22, 15, 0, 0, time.UTC), TotalTokens: 2_000_000, InputTokens: 2_000_000, OutputTokens: 5, CachedTokens: 7, ReasoningTokens: 11},
 		{EventKey: "event-latest-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 23, 23, 45, 0, 0, time.UTC), TotalTokens: 3_000_000, InputTokens: 3_000_000, OutputTokens: 13, CachedTokens: 17, ReasoningTokens: 19},
@@ -566,7 +567,7 @@ func TestBuildUsageOverviewWithFilterBuildsLatestHourlySeriesForLongRanges(t *te
 
 	start := time.Date(2026, 4, 17, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 23, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: "7d", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "7d", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -599,7 +600,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyBucketsForLongCustomRanges(t *test
 	}
 	closeTestDatabase(t, db)
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 20, 8, 0, 0, 0, time.UTC), TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 26, 18, 0, 0, 0, time.UTC), TotalTokens: 20},
 	}
@@ -609,7 +610,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyBucketsForLongCustomRanges(t *test
 
 	start := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 26, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}

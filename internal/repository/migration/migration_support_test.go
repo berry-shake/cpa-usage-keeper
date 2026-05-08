@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"github.com/glebarez/sqlite"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
-func findUsageIdentity(t *testing.T, identities []models.UsageIdentity, authType models.UsageIdentityAuthType, identity string) models.UsageIdentity {
+func findUsageIdentity(t *testing.T, identities []entities.UsageIdentity, authType entities.UsageIdentityAuthType, identity string) entities.UsageIdentity {
 	t.Helper()
 	for _, usageIdentity := range identities {
 		if usageIdentity.AuthType == authType && usageIdentity.Identity == identity {
@@ -19,22 +19,22 @@ func findUsageIdentity(t *testing.T, identities []models.UsageIdentity, authType
 		}
 	}
 	t.Fatalf("usage identity auth_type=%d identity=%q not found in %+v", authType, identity, identities)
-	return models.UsageIdentity{}
+	return entities.UsageIdentity{}
 }
 
-func loadUsageIdentity(t *testing.T, db *gorm.DB, authType models.UsageIdentityAuthType, identity string) models.UsageIdentity {
+func loadUsageIdentity(t *testing.T, db *gorm.DB, authType entities.UsageIdentityAuthType, identity string) entities.UsageIdentity {
 	t.Helper()
-	var usageIdentity models.UsageIdentity
+	var usageIdentity entities.UsageIdentity
 	if err := db.Where("auth_type = ? AND identity = ?", authType, identity).First(&usageIdentity).Error; err != nil {
 		t.Fatalf("load usage identity auth_type=%d identity=%q: %v", authType, identity, err)
 	}
 	return usageIdentity
 }
 
-func countUsageIdentities(t *testing.T, db *gorm.DB, authType models.UsageIdentityAuthType, identity string) int64 {
+func countUsageIdentities(t *testing.T, db *gorm.DB, authType entities.UsageIdentityAuthType, identity string) int64 {
 	t.Helper()
 	var count int64
-	if err := db.Model(&models.UsageIdentity{}).Where("auth_type = ? AND identity = ?", authType, identity).Count(&count).Error; err != nil {
+	if err := db.Model(&entities.UsageIdentity{}).Where("auth_type = ? AND identity = ?", authType, identity).Count(&count).Error; err != nil {
 		t.Fatalf("count usage identity auth_type=%d identity=%q: %v", authType, identity, err)
 	}
 	return count

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 )
 
 func TestOpenDatabaseUsageIdentityMigratesLegacyMetadataAndDropsOldTables(t *testing.T) {
@@ -15,7 +15,7 @@ func TestOpenDatabaseUsageIdentityMigratesLegacyMetadataAndDropsOldTables(t *tes
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	if !db.Migrator().HasTable(&models.UsageIdentity{}) {
+	if !db.Migrator().HasTable(&entities.UsageIdentity{}) {
 		t.Fatal("expected usage_identities table to exist")
 	}
 	if db.Migrator().HasTable("auth_files") {
@@ -25,7 +25,7 @@ func TestOpenDatabaseUsageIdentityMigratesLegacyMetadataAndDropsOldTables(t *tes
 		t.Fatal("expected provider_metadata table to be dropped")
 	}
 
-	var identities []models.UsageIdentity
+	var identities []entities.UsageIdentity
 	if err := db.Order("auth_type asc, identity asc").Find(&identities).Error; err != nil {
 		t.Fatalf("load usage identities: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestOpenDatabaseUsageIdentityMigratesLegacyMetadataAndDropsOldTables(t *tes
 		t.Fatalf("expected unmatched AI provider raw identities to be deleted, got %d: %+v", len(identities), identities)
 	}
 
-	oauth := findUsageIdentity(t, identities, models.UsageIdentityAuthTypeAuthFile, "auth-1")
+	oauth := findUsageIdentity(t, identities, entities.UsageIdentityAuthTypeAuthFile, "auth-1")
 	if oauth.Name != "person@example.com" || oauth.AuthTypeName != "oauth" || oauth.Type != "claude" || oauth.Provider != "claude" {
 		t.Fatalf("unexpected oauth identity mapping: %+v", oauth)
 	}
@@ -53,11 +53,11 @@ func TestOpenDatabaseUsageIdentityMigratesLegacyMetadataAndDropsOldTables(t *tes
 		t.Fatalf("expected oauth last aggregated usage event id 3, got %d", oauth.LastAggregatedUsageEventID)
 	}
 
-	if countUsageIdentities(t, db, models.UsageIdentityAuthTypeAIProvider, "api-source-1") != 0 {
+	if countUsageIdentities(t, db, entities.UsageIdentityAuthTypeAIProvider, "api-source-1") != 0 {
 		t.Fatal("expected unmatched active provider raw identity to be deleted")
 	}
 
-	deletedOAuth := findUsageIdentity(t, identities, models.UsageIdentityAuthTypeAuthFile, "auth-deleted")
+	deletedOAuth := findUsageIdentity(t, identities, entities.UsageIdentityAuthTypeAuthFile, "auth-deleted")
 	if !deletedOAuth.IsDeleted || deletedOAuth.DeletedAt == nil || !deletedOAuth.DeletedAt.Equal(time.Date(2026, 5, 4, 7, 30, 0, 0, time.UTC)) {
 		t.Fatalf("expected deleted auth file state to be preserved, got %+v", deletedOAuth)
 	}
@@ -65,7 +65,7 @@ func TestOpenDatabaseUsageIdentityMigratesLegacyMetadataAndDropsOldTables(t *tes
 		t.Fatalf("expected deleted auth file usage stats to be backfilled, got %+v", deletedOAuth)
 	}
 
-	if countUsageIdentities(t, db, models.UsageIdentityAuthTypeAIProvider, "api-deleted") != 0 {
+	if countUsageIdentities(t, db, entities.UsageIdentityAuthTypeAIProvider, "api-deleted") != 0 {
 		t.Fatal("expected unmatched deleted provider raw identity to be deleted")
 	}
 }
@@ -77,11 +77,11 @@ func TestOpenDatabaseSkipsUsageIdentityMetadataMigrationWhenLegacyTablesAreMissi
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	if !db.Migrator().HasTable(&models.UsageIdentity{}) {
+	if !db.Migrator().HasTable(&entities.UsageIdentity{}) {
 		t.Fatal("expected usage_identities table to exist")
 	}
 	var count int64
-	if err := db.Model(&models.UsageIdentity{}).Count(&count).Error; err != nil {
+	if err := db.Model(&entities.UsageIdentity{}).Count(&count).Error; err != nil {
 		t.Fatalf("count usage identities: %v", err)
 	}
 	if count != 0 {

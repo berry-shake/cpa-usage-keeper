@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,16 +9,12 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository/migration"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-type StorageCleanupResult struct {
-	RedisInbox RedisUsageInboxCleanupResult
-}
 
 func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 	databaseExists, err := sqliteDatabaseFileExists(cfg.SQLitePath)
@@ -52,7 +49,7 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 	if !databaseExists || !hasTables {
-		if err := db.AutoMigrate(models.All()...); err != nil {
+		if err := db.AutoMigrate(entities.All()...); err != nil {
 			return nil, fmt.Errorf("auto migrate fresh database: %w", err)
 		}
 		if err := migration.MarkAllAsApplied(db); err != nil {
@@ -102,7 +99,7 @@ func sqliteDatabaseHasTables(db *gorm.DB) (bool, error) {
 	return count > 0, nil
 }
 
-func InsertUsageEvents(db *gorm.DB, events []models.UsageEvent) (int, int, error) {
+func InsertUsageEvents(db *gorm.DB, events []entities.UsageEvent) (int, int, error) {
 	if db == nil {
 		return 0, 0, fmt.Errorf("database is nil")
 	}
@@ -113,8 +110,8 @@ func InsertUsageEvents(db *gorm.DB, events []models.UsageEvent) (int, int, error
 	inserted := 0
 
 	// 按仓储默认批次拆分写入，避免单条 INSERT 的 SQLite 变量数量过多。
-	for start := 0; start < len(events); start += defaultRepositoryInsertBatchSize {
-		end := min(start+defaultRepositoryInsertBatchSize, len(events))
+	for start := 0; start < len(events); start += insertBatchSize(entities.UsageEvent{}) {
+		end := min(start+insertBatchSize(entities.UsageEvent{}), len(events))
 		batch := events[start:end]
 
 		// 每批仍按 event_key 去重，保持原有重复事件忽略语义。
@@ -134,15 +131,15 @@ func InsertUsageEvents(db *gorm.DB, events []models.UsageEvent) (int, int, error
 
 // CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox，最后执行 VACUUM。
 // VACUUM 必须在删除完成后单独执行，任何一步失败都会停止后续步骤并把已完成部分的结果返回给上层日志。
-func CleanupStorage(db *gorm.DB, now time.Time) (StorageCleanupResult, error) {
+func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error) {
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {
-		return StorageCleanupResult{RedisInbox: redisResult}, err
+		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
 	if err := db.Exec("VACUUM").Error; err != nil {
-		return StorageCleanupResult{RedisInbox: redisResult}, err
+		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
-	return StorageCleanupResult{RedisInbox: redisResult}, nil
+	return dto.StorageCleanupResult{RedisInbox: redisResult}, nil
 }
 
 func Vacuum(db *gorm.DB) error {

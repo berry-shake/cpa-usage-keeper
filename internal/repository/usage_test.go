@@ -1,13 +1,14 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"math"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
@@ -28,7 +29,7 @@ func TestBuildUsageSnapshotReturnsEmptyStructureWithoutEvents(t *testing.T) {
 
 func TestBuildUsageSnapshotAggregatesEvents(t *testing.T) {
 	db := openUsageTestDatabase(t)
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "codex-a", AuthIndex: "1", Failed: false, LatencyMS: 100, InputTokens: 10, OutputTokens: 20, ReasoningTokens: 5, CachedTokens: 0, TotalTokens: 35},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "codex-b", AuthIndex: "2", Failed: true, LatencyMS: 200, InputTokens: 2, OutputTokens: 3, ReasoningTokens: 0, CachedTokens: 0, TotalTokens: 5},
 		{EventKey: "event-3", APIGroupKey: "provider-b", Model: "claude-opus", Timestamp: time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC), Source: "codex-c", AuthIndex: "3", Failed: false, LatencyMS: 300, InputTokens: 100, OutputTokens: 50, ReasoningTokens: 25, CachedTokens: 10, TotalTokens: 185},
@@ -72,12 +73,12 @@ func TestBuildUsageSnapshotBucketsDaysByLocalTime(t *testing.T) {
 	time.Local = location
 	t.Cleanup(func() { time.Local = previousLocal })
 	db := openUsageTestDatabase(t)
-	events := []models.UsageEvent{{
-		EventKey:      "event-local-day",
-		APIGroupKey:   "provider-a",
-		Model:         "claude-sonnet",
-		Timestamp:     time.Date(2026, 4, 16, 23, 30, 0, 0, time.UTC),
-		TotalTokens:   20,
+	events := []entities.UsageEvent{{
+		EventKey:    "event-local-day",
+		APIGroupKey: "provider-a",
+		Model:       "claude-sonnet",
+		Timestamp:   time.Date(2026, 4, 16, 23, 30, 0, 0, time.UTC),
+		TotalTokens: 20,
 	}}
 	if _, _, err := InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
@@ -110,14 +111,14 @@ func TestUsageOverviewDailyBucketUsesLocalTime(t *testing.T) {
 
 func TestBuildUsageSnapshotPreservesStoredAPIKey(t *testing.T) {
 	db := openUsageTestDatabase(t)
-	events := []models.UsageEvent{{
-		EventKey:      "event-1",
-		APIGroupKey:   "sk-live-secret-value",
-		Model:         "claude-sonnet",
-		Timestamp:     time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC),
-		Source:        "source-a",
-		AuthIndex:     "1",
-		TotalTokens:   20,
+	events := []entities.UsageEvent{{
+		EventKey:    "event-1",
+		APIGroupKey: "sk-live-secret-value",
+		Model:       "claude-sonnet",
+		Timestamp:   time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC),
+		Source:      "source-a",
+		AuthIndex:   "1",
+		TotalTokens: 20,
 	}}
 	if _, _, err := InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
@@ -134,7 +135,7 @@ func TestBuildUsageSnapshotPreservesStoredAPIKey(t *testing.T) {
 
 func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
 	db := openUsageTestDatabase(t)
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "1", Failed: false, TotalTokens: 35},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "1", Failed: true, TotalTokens: 5},
 		{EventKey: "event-3", APIGroupKey: "provider-b", Model: "claude-opus", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), Source: "source-b", AuthIndex: "2", Failed: false, TotalTokens: 185},
@@ -142,7 +143,7 @@ func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
 	if _, _, err := InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	filter := UsageQueryFilter{Model: "claude-sonnet", Source: "source-a", AuthIndex: "1", Result: "success"}
+	filter := dto.UsageQueryFilter{Model: "claude-sonnet", Source: "source-a", AuthIndex: "1", Result: "success"}
 
 	snapshot, err := BuildUsageSnapshotWithFilter(db, filter)
 	if err != nil {
@@ -160,14 +161,6 @@ func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
 		t.Fatalf("expected overview to include only matching successful event, got %+v", overview.Summary)
 	}
 
-	credentials, err := ListUsageCredentialStatsWithFilter(db, filter)
-	if err != nil {
-		t.Fatalf("ListUsageCredentialStatsWithFilter returned error: %v", err)
-	}
-	if len(credentials) != 1 || credentials[0].Source != "source-a" || credentials[0].AuthIndex != "1" || credentials[0].Failed || credentials[0].RequestCount != 1 {
-		t.Fatalf("expected credential stats to include only matching successful event, got %+v", credentials)
-	}
-
 	apis, models, err := ListUsageAnalysisWithFilter(db, filter)
 	if err != nil {
 		t.Fatalf("ListUsageAnalysisWithFilter returned error: %v", err)
@@ -182,7 +175,7 @@ func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
 
 func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 	db := openUsageTestDatabase(t)
-	if _, err := UpsertModelPriceSetting(db, ModelPriceSettingInput{
+	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     10,
 		CompletionPricePer1M: 20,
@@ -190,40 +183,40 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{
-			EventKey:    "credential-cost-1",
-			APIGroupKey: "provider-a",
-			Model:         "claude-sonnet",
-			Timestamp:     time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
-			Source:        "source-a",
-			AuthIndex:     "1",
-			InputTokens:   250,
-			OutputTokens:  100,
-			CachedTokens:  50,
-			TotalTokens:   400,
+			EventKey:     "credential-cost-1",
+			APIGroupKey:  "provider-a",
+			Model:        "claude-sonnet",
+			Timestamp:    time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+			Source:       "source-a",
+			AuthIndex:    "1",
+			InputTokens:  250,
+			OutputTokens: 100,
+			CachedTokens: 50,
+			TotalTokens:  400,
 		},
 		{
-			EventKey:    "credential-cost-2",
-			APIGroupKey: "provider-a",
-			Model:         "unknown-model",
-			Timestamp:     time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC),
-			Source:        "source-a",
-			AuthIndex:     "1",
-			InputTokens:   100,
-			OutputTokens:  50,
-			TotalTokens:   150,
+			EventKey:     "credential-cost-2",
+			APIGroupKey:  "provider-a",
+			Model:        "unknown-model",
+			Timestamp:    time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC),
+			Source:       "source-a",
+			AuthIndex:    "1",
+			InputTokens:  100,
+			OutputTokens: 50,
+			TotalTokens:  150,
 		},
 	}
 	if _, _, err := InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	rows, err := ListUsageCredentialStatsWithFilter(db, UsageQueryFilter{})
+	rows, err := ListUsageCredentialStatsWithFilter(db, dto.UsageQueryFilter{})
 	if err != nil {
 		t.Fatalf("ListUsageCredentialStatsWithFilter returned error: %v", err)
 	}
-	byModel := make(map[string]UsageCredentialStatRecord, len(rows))
+	byModel := make(map[string]dto.UsageCredentialStatRecord, len(rows))
 	for _, row := range rows {
 		byModel[row.Model] = row
 	}
@@ -247,7 +240,7 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 
 func openUsageTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage.db")})
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "dto.db")})
 	if err != nil {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}

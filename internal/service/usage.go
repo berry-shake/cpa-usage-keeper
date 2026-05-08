@@ -3,8 +3,9 @@ package service
 import (
 	"context"
 
-	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/repository"
+	repodto "cpa-usage-keeper/internal/repository/dto"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"gorm.io/gorm"
 )
 
@@ -16,16 +17,16 @@ func NewUsageService(db *gorm.DB) UsageProvider {
 	return &usageService{db: db}
 }
 
-func (s *usageService) GetUsageWithFilter(_ context.Context, filter UsageFilter) (*cpa.StatisticsSnapshot, error) {
-	return repository.BuildUsageSnapshotWithFilter(s.db, repository.UsageQueryFilter{
+func (s *usageService) GetUsageWithFilter(_ context.Context, filter servicedto.UsageFilter) (*repodto.StatisticsSnapshot, error) {
+	return repository.BuildUsageSnapshotWithFilter(s.db, repodto.UsageQueryFilter{
 		Range:     filter.Range,
 		StartTime: filter.StartTime,
 		EndTime:   filter.EndTime,
 	})
 }
 
-func (s *usageService) GetUsageOverview(_ context.Context, filter UsageFilter) (*UsageOverviewSnapshot, error) {
-	overview, err := repository.BuildUsageOverviewWithFilter(s.db, repository.UsageQueryFilter{
+func (s *usageService) GetUsageOverview(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
+	overview, err := repository.BuildUsageOverviewWithFilter(s.db, repodto.UsageQueryFilter{
 		Range:     filter.Range,
 		StartTime: filter.StartTime,
 		EndTime:   filter.EndTime,
@@ -33,9 +34,9 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter UsageFilter) (
 	if err != nil {
 		return nil, err
 	}
-	return &UsageOverviewSnapshot{
+	return &servicedto.UsageOverviewSnapshot{
 		Usage: overview.Usage,
-		Summary: UsageOverviewSummary{
+		Summary: servicedto.UsageOverviewSummary{
 			RequestCount:    overview.Summary.RequestCount,
 			TokenCount:      overview.Summary.TokenCount,
 			WindowMinutes:   overview.Summary.WindowMinutes,
@@ -49,7 +50,7 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter UsageFilter) (
 		Series:       mapUsageOverviewSeries(overview.Series),
 		HourlySeries: mapUsageOverviewSeries(overview.HourlySeries),
 		DailySeries:  mapUsageOverviewSeries(overview.DailySeries),
-		Health: UsageOverviewHealth{
+		Health: servicedto.UsageOverviewHealth{
 			TotalSuccess:  overview.Health.TotalSuccess,
 			TotalFailure:  overview.Health.TotalFailure,
 			SuccessRate:   overview.Health.SuccessRate,
@@ -58,10 +59,10 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter UsageFilter) (
 			BucketSeconds: overview.Health.BucketSeconds,
 			WindowStart:   overview.Health.WindowStart,
 			WindowEnd:     overview.Health.WindowEnd,
-			BlockDetails: func() []UsageOverviewHealthBlock {
-				blocks := make([]UsageOverviewHealthBlock, 0, len(overview.Health.BlockDetails))
+			BlockDetails: func() []servicedto.UsageOverviewHealthBlock {
+				blocks := make([]servicedto.UsageOverviewHealthBlock, 0, len(overview.Health.BlockDetails))
 				for _, block := range overview.Health.BlockDetails {
-					blocks = append(blocks, UsageOverviewHealthBlock{
+					blocks = append(blocks, servicedto.UsageOverviewHealthBlock{
 						StartTime: block.StartTime,
 						EndTime:   block.EndTime,
 						Success:   block.Success,
@@ -75,12 +76,12 @@ func (s *usageService) GetUsageOverview(_ context.Context, filter UsageFilter) (
 	}, nil
 }
 
-func mapUsageOverviewSeries(series repository.UsageOverviewSeriesRecord) UsageOverviewSeries {
-	models := make(map[string]UsageOverviewSeries, len(series.Models))
+func mapUsageOverviewSeries(series repodto.UsageOverviewSeriesRecord) servicedto.UsageOverviewSeries {
+	models := make(map[string]servicedto.UsageOverviewSeries, len(series.Models))
 	for model, modelSeries := range series.Models {
 		models[model] = mapUsageOverviewSeries(modelSeries)
 	}
-	return UsageOverviewSeries{
+	return servicedto.UsageOverviewSeries{
 		Requests:        series.Requests,
 		Tokens:          series.Tokens,
 		RPM:             series.RPM,
@@ -94,8 +95,8 @@ func mapUsageOverviewSeries(series repository.UsageOverviewSeriesRecord) UsageOv
 	}
 }
 
-func (s *usageService) ListUsageEvents(_ context.Context, filter UsageFilter) (*UsageEventsPage, error) {
-	page, err := repository.ListUsageEventsWithFilter(s.db, repository.UsageQueryFilter{
+func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
+	page, err := repository.ListUsageEventsWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,
 		EndTime:   filter.EndTime,
 		Limit:     filter.Limit,
@@ -112,9 +113,9 @@ func (s *usageService) ListUsageEvents(_ context.Context, filter UsageFilter) (*
 	if err != nil {
 		return nil, err
 	}
-	result := make([]UsageEventRecord, 0, len(page.Events))
+	result := make([]servicedto.UsageEventRecord, 0, len(page.Events))
 	for _, row := range page.Events {
-		result = append(result, UsageEventRecord{
+		result = append(result, servicedto.UsageEventRecord{
 			ID:              row.ID,
 			Timestamp:       row.Timestamp,
 			APIGroupKey:     row.APIGroupKey,
@@ -132,31 +133,31 @@ func (s *usageService) ListUsageEvents(_ context.Context, filter UsageFilter) (*
 			TotalTokens:     row.TotalTokens,
 		})
 	}
-	return &UsageEventsPage{Events: result, Models: page.Models, Sources: page.Sources, TotalCount: page.TotalCount, Page: page.Page, PageSize: page.PageSize, TotalPages: page.TotalPages}, nil
+	return &servicedto.UsageEventsPage{Events: result, Models: page.Models, Sources: page.Sources, TotalCount: page.TotalCount, Page: page.Page, PageSize: page.PageSize, TotalPages: page.TotalPages}, nil
 }
 
-func (s *usageService) ListUsageEventFilterOptions(_ context.Context, filter UsageFilter) (*UsageEventFilterOptions, error) {
-	options, err := repository.ListUsageEventFilterOptionsWithFilter(s.db, repository.UsageQueryFilter{
+func (s *usageService) ListUsageEventFilterOptions(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
+	options, err := repository.ListUsageEventFilterOptionsWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,
 		EndTime:   filter.EndTime,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &UsageEventFilterOptions{Models: options.Models, Sources: options.Sources}, nil
+	return &servicedto.UsageEventFilterOptions{Models: options.Models, Sources: options.Sources}, nil
 }
 
-func (s *usageService) ListUsageCredentialStats(_ context.Context, filter UsageFilter) ([]UsageCredentialStat, error) {
-	rows, err := repository.ListUsageCredentialStatsWithFilter(s.db, repository.UsageQueryFilter{
+func (s *usageService) ListUsageCredentialStats(_ context.Context, filter servicedto.UsageFilter) ([]servicedto.UsageCredentialStat, error) {
+	rows, err := repository.ListUsageCredentialStatsWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,
 		EndTime:   filter.EndTime,
 	})
 	if err != nil {
 		return nil, err
 	}
-	result := make([]UsageCredentialStat, 0, len(rows))
+	result := make([]servicedto.UsageCredentialStat, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, UsageCredentialStat{
+		result = append(result, servicedto.UsageCredentialStat{
 			Source:          row.Source,
 			AuthIndex:       row.AuthIndex,
 			Model:           row.Model,
@@ -174,8 +175,8 @@ func (s *usageService) ListUsageCredentialStats(_ context.Context, filter UsageF
 	return result, nil
 }
 
-func (s *usageService) GetUsageAnalysis(_ context.Context, filter UsageFilter) (*UsageAnalysisSnapshot, error) {
-	apiRows, modelRows, err := repository.ListUsageAnalysisWithFilter(s.db, repository.UsageQueryFilter{
+func (s *usageService) GetUsageAnalysis(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
+	apiRows, modelRows, err := repository.ListUsageAnalysisWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,
 		EndTime:   filter.EndTime,
 	})
@@ -183,11 +184,11 @@ func (s *usageService) GetUsageAnalysis(_ context.Context, filter UsageFilter) (
 		return nil, err
 	}
 
-	apis := make([]UsageAnalysisAPIStat, 0, len(apiRows))
+	apis := make([]servicedto.UsageAnalysisAPIStat, 0, len(apiRows))
 	for _, row := range apiRows {
-		models := make([]UsageAnalysisModelStat, 0, len(row.Models))
+		models := make([]servicedto.UsageAnalysisModelStat, 0, len(row.Models))
 		for _, model := range row.Models {
-			models = append(models, UsageAnalysisModelStat{
+			models = append(models, servicedto.UsageAnalysisModelStat{
 				Model:              model.Model,
 				TotalRequests:      model.TotalRequests,
 				SuccessCount:       model.SuccessCount,
@@ -201,7 +202,7 @@ func (s *usageService) GetUsageAnalysis(_ context.Context, filter UsageFilter) (
 				LatencySampleCount: model.LatencySampleCount,
 			})
 		}
-		apis = append(apis, UsageAnalysisAPIStat{
+		apis = append(apis, servicedto.UsageAnalysisAPIStat{
 			APIKey:          row.APIGroupKey,
 			DisplayName:     row.DisplayName,
 			TotalRequests:   row.TotalRequests,
@@ -216,9 +217,9 @@ func (s *usageService) GetUsageAnalysis(_ context.Context, filter UsageFilter) (
 		})
 	}
 
-	models := make([]UsageAnalysisModelStat, 0, len(modelRows))
+	models := make([]servicedto.UsageAnalysisModelStat, 0, len(modelRows))
 	for _, row := range modelRows {
-		models = append(models, UsageAnalysisModelStat{
+		models = append(models, servicedto.UsageAnalysisModelStat{
 			Model:              row.Model,
 			TotalRequests:      row.TotalRequests,
 			SuccessCount:       row.SuccessCount,
@@ -233,5 +234,5 @@ func (s *usageService) GetUsageAnalysis(_ context.Context, filter UsageFilter) (
 		})
 	}
 
-	return &UsageAnalysisSnapshot{APIs: apis, Models: models}, nil
+	return &servicedto.UsageAnalysisSnapshot{APIs: apis, Models: models}, nil
 }

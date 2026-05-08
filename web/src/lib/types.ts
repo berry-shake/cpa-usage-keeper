@@ -27,7 +27,6 @@ export interface UsageDetail {
   source_raw?: string
   source_display?: string
   source_type?: string
-  source_key?: string
   auth_index: string
   failed: boolean
   tokens: UsageTokenStats
@@ -134,8 +133,8 @@ export interface UsageEvent {
   source: string
   source_raw?: string
   source_type?: string
-  source_key?: string
   auth_index?: string
+  isDelete?: boolean
   failed: boolean
   latency_ms: number
   tokens: UsageEventTokens
@@ -144,6 +143,7 @@ export interface UsageEvent {
 export interface UsageSourceFilterOption {
   value: string
   label: string
+  displayName?: string
 }
 
 export interface UsageEventsResponse {
@@ -201,6 +201,7 @@ export type UsageIdentityAuthType = 1 | 2
 export interface UsageIdentity {
   id: number
   name: string
+  displayName?: string
   auth_type: UsageIdentityAuthType
   auth_type_name: string
   identity: string

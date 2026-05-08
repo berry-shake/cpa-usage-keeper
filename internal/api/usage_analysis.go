@@ -6,6 +6,7 @@ import (
 
 	"cpa-usage-keeper/internal/redact"
 	"cpa-usage-keeper/internal/service"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/gin-gonic/gin"
 )
 
@@ -65,7 +66,7 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 	})
 }
 
-func buildUsageAnalysisPayload(snapshot *service.UsageAnalysisSnapshot) usageAnalysisResponse {
+func buildUsageAnalysisPayload(snapshot *servicedto.UsageAnalysisSnapshot) usageAnalysisResponse {
 	if snapshot == nil {
 		return usageAnalysisResponse{APIs: []usageAnalysisAPIPayload{}, Models: []usageAnalysisModelPayload{}}
 	}

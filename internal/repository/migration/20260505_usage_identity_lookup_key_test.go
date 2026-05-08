@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -66,11 +66,11 @@ func TestOpenDatabaseAddsUsageIdentityLookupKeyToExistingTable(t *testing.T) {
 		t.Fatalf("create legacy usage_identities table: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider)
-		VALUES (?, ?, ?, ?, ?, ?)`, "Claude", models.UsageIdentityAuthTypeAIProvider, "apikey", "sk-legacy", "claude", "Claude").Error; err != nil {
+		VALUES (?, ?, ?, ?, ?, ?)`, "Claude", entities.UsageIdentityAuthTypeAIProvider, "apikey", "sk-legacy", "claude", "Claude").Error; err != nil {
 		t.Fatalf("seed legacy apikey usage identity: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider)
-		VALUES (?, ?, ?, ?, ?, ?)`, "OAuth", models.UsageIdentityAuthTypeAuthFile, "oauth", "auth-index", "claude", "Claude").Error; err != nil {
+		VALUES (?, ?, ?, ?, ?, ?)`, "OAuth", entities.UsageIdentityAuthTypeAuthFile, "oauth", "auth-index", "claude", "Claude").Error; err != nil {
 		t.Fatalf("seed legacy oauth usage identity: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO usage_events (event_key, api_group_key, provider, endpoint, auth_type, request_id, model, timestamp, source, auth_index, failed, latency_ms, input_tokens, output_tokens, total_tokens, created_at)
@@ -82,7 +82,7 @@ func TestOpenDatabaseAddsUsageIdentityLookupKeyToExistingTable(t *testing.T) {
 	db = openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	if !db.Migrator().HasColumn(&models.UsageIdentity{}, "lookup_key") {
+	if !db.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		t.Fatal("expected usage_identities.lookup_key column to be added")
 	}
 	var count int64
@@ -93,7 +93,7 @@ func TestOpenDatabaseAddsUsageIdentityLookupKeyToExistingTable(t *testing.T) {
 		t.Fatalf("expected lookup_key migration to be recorded once, got %d", count)
 	}
 
-	var apikey models.UsageIdentity
+	var apikey entities.UsageIdentity
 	if err := db.Where("identity = ?", "auth-index-legacy").First(&apikey).Error; err != nil {
 		t.Fatalf("load migrated apikey identity: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestOpenDatabaseAddsUsageIdentityLookupKeyToExistingTable(t *testing.T) {
 		t.Fatalf("expected migrated apikey lookup_key to be preserved, got %+v", apikey)
 	}
 
-	var oauth models.UsageIdentity
+	var oauth entities.UsageIdentity
 	if err := db.Where("identity = ?", "auth-index").First(&oauth).Error; err != nil {
 		t.Fatalf("load migrated oauth identity: %v", err)
 	}

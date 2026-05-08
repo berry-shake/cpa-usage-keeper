@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/service"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/gin-gonic/gin"
 )
 
@@ -167,7 +168,7 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 		return
 	}
 
-	setting, err := pricingProvider.UpdatePricing(c.Request.Context(), service.UpdatePricingInput{
+	setting, err := pricingProvider.UpdatePricing(c.Request.Context(), servicedto.UpdatePricingInput{
 		Model:                model,
 		PromptPricePer1M:     request.PromptPricePer1M,
 		CompletionPricePer1M: request.CompletionPricePer1M,

@@ -1,13 +1,14 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"crypto/sha256"
 	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
 
@@ -22,27 +23,16 @@ const (
 	redisUsageInboxMaxProcessAttempts = 5
 )
 
-type RedisInboxInsert struct {
-	QueueKey   string
-	RawMessage string
-	PoppedAt   time.Time
-}
-
-type RedisUsageInboxCleanupResult struct {
-	ProcessedDeleted int64
-	FailedDeleted    int64
-}
-
-func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []RedisInboxInsert) ([]models.RedisUsageInbox, error) {
+func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []dto.RedisInboxInsert) ([]entities.RedisUsageInbox, error) {
 	if len(inputs) == 0 {
 		return nil, nil
 	}
 
-	rows := make([]models.RedisUsageInbox, 0, len(inputs))
+	rows := make([]entities.RedisUsageInbox, 0, len(inputs))
 	// 先把 Redis 原始消息转换成 inbox 行，后续落库只处理标准化后的模型数据。
 	for _, input := range inputs {
 		hash := sha256.Sum256([]byte(input.RawMessage))
-		rows = append(rows, models.RedisUsageInbox{
+		rows = append(rows, entities.RedisUsageInbox{
 			QueueKey:     strings.TrimSpace(input.QueueKey),
 			MessageHash:  fmt.Sprintf("%x", hash),
 			RawMessage:   input.RawMessage,
@@ -54,7 +44,7 @@ func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []RedisInboxInsert) ([]mo
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		// Redis 拉取批次仍由配置控制；这里只把数据库写入拆成安全大小。
-		return tx.CreateInBatches(&rows, defaultRepositoryInsertBatchSize).Error
+		return tx.CreateInBatches(&rows, insertBatchSize(entities.RedisUsageInbox{})).Error
 	}); err != nil {
 		return nil, err
 	}
@@ -62,7 +52,7 @@ func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []RedisInboxInsert) ([]mo
 }
 
 func MarkRedisUsageInboxProcessed(db *gorm.DB, id uint, eventKey string, processedAt time.Time) error {
-	return db.Model(&models.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
+	return db.Model(&entities.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
 		"status":          RedisUsageInboxStatusProcessed,
 		"usage_event_key": eventKey,
 		"processed_at":    processedAt.UTC(),
@@ -75,7 +65,7 @@ func MarkRedisUsageInboxDecodeFailed(db *gorm.DB, id uint, decodeErr error) erro
 }
 
 func MarkRedisUsageInboxProcessFailed(db *gorm.DB, id uint, processErr error) error {
-	return db.Model(&models.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
+	return db.Model(&entities.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
 		"status": gorm.Expr(
 			"CASE WHEN attempt_count + ? >= ? THEN ? ELSE ? END",
 			1,
@@ -89,24 +79,24 @@ func MarkRedisUsageInboxProcessFailed(db *gorm.DB, id uint, processErr error) er
 }
 
 // ListProcessableRedisUsageInbox 返回待处理和可重试的数据，不返回已解码失败或已丢弃的数据。
-func ListProcessableRedisUsageInbox(db *gorm.DB, limit int) ([]models.RedisUsageInbox, error) {
+func ListProcessableRedisUsageInbox(db *gorm.DB, limit int) ([]entities.RedisUsageInbox, error) {
 	query := db.Where("status = ? OR status = ?", RedisUsageInboxStatusPending, RedisUsageInboxStatusProcessFailed).Order("id asc")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
-	var rows []models.RedisUsageInbox
+	var rows []entities.RedisUsageInbox
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-func ListPendingRedisUsageInbox(db *gorm.DB, limit int) ([]models.RedisUsageInbox, error) {
+func ListPendingRedisUsageInbox(db *gorm.DB, limit int) ([]entities.RedisUsageInbox, error) {
 	query := db.Where("status = ?", RedisUsageInboxStatusPending).Order("id asc")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
-	var rows []models.RedisUsageInbox
+	var rows []entities.RedisUsageInbox
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -115,20 +105,20 @@ func ListPendingRedisUsageInbox(db *gorm.DB, limit int) ([]models.RedisUsageInbo
 
 // CleanupRedisUsageInbox 清理已完成和失败的 Redis inbox 原始消息，pending 数据永远不在这里删除。
 // processed 保留到下一个本地日开始后才清理；decode_failed/process_failed/discarded 保留 7 天便于排查。
-func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (RedisUsageInboxCleanupResult, error) {
+func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (dto.RedisUsageInboxCleanupResult, error) {
 	localNow := now.In(time.Local)
 	localDayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)
 	processedCutoff := localDayStart.UTC()
 	failedCutoff := now.UTC().AddDate(0, 0, -7)
-	result := RedisUsageInboxCleanupResult{}
+	result := dto.RedisUsageInboxCleanupResult{}
 
-	processedDelete := db.Where("status = ? AND processed_at IS NOT NULL AND processed_at < ?", RedisUsageInboxStatusProcessed, processedCutoff).Delete(&models.RedisUsageInbox{})
+	processedDelete := db.Where("status = ? AND processed_at IS NOT NULL AND processed_at < ?", RedisUsageInboxStatusProcessed, processedCutoff).Delete(&entities.RedisUsageInbox{})
 	if processedDelete.Error != nil {
 		return result, processedDelete.Error
 	}
 	result.ProcessedDeleted = processedDelete.RowsAffected
 
-	failedDelete := db.Where("status IN ? AND updated_at < ?", []string{RedisUsageInboxStatusDecodeFailed, RedisUsageInboxStatusProcessFailed, RedisUsageInboxStatusDiscarded}, failedCutoff).Delete(&models.RedisUsageInbox{})
+	failedDelete := db.Where("status IN ? AND updated_at < ?", []string{RedisUsageInboxStatusDecodeFailed, RedisUsageInboxStatusProcessFailed, RedisUsageInboxStatusDiscarded}, failedCutoff).Delete(&entities.RedisUsageInbox{})
 	if failedDelete.Error != nil {
 		return result, failedDelete.Error
 	}
@@ -138,7 +128,7 @@ func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (RedisUsageInboxCleanupR
 }
 
 func markRedisUsageInboxFailed(db *gorm.DB, id uint, status string, err error) error {
-	return db.Model(&models.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
+	return db.Model(&entities.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
 		"status":        status,
 		"attempt_count": gorm.Expr("attempt_count + ?", 1),
 		"last_error":    boundedRedisUsageInboxError(err),

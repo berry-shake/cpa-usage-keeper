@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"github.com/glebarez/sqlite"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -31,6 +31,8 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260505_add_usage_identity_lookup_key",
 		"20260505_migrate_ai_provider_identities_to_auth_index",
 		"20260506_add_usage_performance_indexes",
+		"20260507_add_usage_identity_metadata_fields",
+		"20260508_add_usage_event_model_alias",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected ordered migrations %v, got %v", want, got)
@@ -53,11 +55,11 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 		t.Fatal("expected schema_migrations table to exist")
 	}
 	for _, column := range []string{"provider", "endpoint", "auth_type", "request_id"} {
-		if !db.Migrator().HasColumn(&models.UsageEvent{}, column) {
+		if !db.Migrator().HasColumn(&entities.UsageEvent{}, column) {
 			t.Fatalf("expected usage_events.%s column to exist", column)
 		}
 	}
-	if !db.Migrator().HasColumn(&models.UsageIdentity{}, "lookup_key") {
+	if !db.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		t.Fatal("expected usage_identities.lookup_key column to exist")
 	}
 
@@ -79,6 +81,8 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 		"20260505_add_usage_identity_lookup_key",
 		"20260505_migrate_ai_provider_identities_to_auth_index",
 		"20260506_add_usage_performance_indexes",
+		"20260507_add_usage_identity_metadata_fields",
+		"20260508_add_usage_event_model_alias",
 	}
 	if len(versions) != len(expected) {
 		t.Fatalf("expected migration versions %v, got %v", expected, versions)
@@ -104,8 +108,8 @@ func TestOpenDatabaseMigrationsAreIdempotent(t *testing.T) {
 	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
 		t.Fatalf("count schema migrations: %v", err)
 	}
-	if count != 13 {
-		t.Fatalf("expected 13 applied migrations after reopening database, got %d", count)
+	if count != 15 {
+		t.Fatalf("expected 15 applied migrations after reopening database, got %d", count)
 	}
 }
 

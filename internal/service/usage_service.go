@@ -3,14 +3,15 @@ package service
 import (
 	"context"
 
-	"cpa-usage-keeper/internal/cpa"
+	repodto "cpa-usage-keeper/internal/repository/dto"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
 type UsageProvider interface {
-	GetUsageWithFilter(context.Context, UsageFilter) (*cpa.StatisticsSnapshot, error)
-	GetUsageOverview(context.Context, UsageFilter) (*UsageOverviewSnapshot, error)
-	ListUsageEvents(context.Context, UsageFilter) (*UsageEventsPage, error)
-	ListUsageEventFilterOptions(context.Context, UsageFilter) (*UsageEventFilterOptions, error)
-	ListUsageCredentialStats(context.Context, UsageFilter) ([]UsageCredentialStat, error)
-	GetUsageAnalysis(context.Context, UsageFilter) (*UsageAnalysisSnapshot, error)
+	GetUsageWithFilter(context.Context, servicedto.UsageFilter) (*repodto.StatisticsSnapshot, error)
+	GetUsageOverview(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error)
+	ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error)
+	ListUsageEventFilterOptions(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error)
+	ListUsageCredentialStats(context.Context, servicedto.UsageFilter) ([]servicedto.UsageCredentialStat, error)
+	GetUsageAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error)
 }

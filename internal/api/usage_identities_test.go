@@ -7,28 +7,28 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/redact"
 )
 
 type usageIdentitiesStub struct {
-	items       []models.UsageIdentity
-	activeItems []models.UsageIdentity
+	items       []entities.UsageIdentity
+	activeItems []entities.UsageIdentity
 	err         error
 }
 
-func (s usageIdentitiesStub) ListUsageIdentities(context.Context) ([]models.UsageIdentity, error) {
+func (s usageIdentitiesStub) ListUsageIdentities(context.Context) ([]entities.UsageIdentity, error) {
 	return s.items, s.err
 }
 
-func (s usageIdentitiesStub) ListActiveUsageIdentities(context.Context) ([]models.UsageIdentity, error) {
+func (s usageIdentitiesStub) ListActiveUsageIdentities(context.Context) ([]entities.UsageIdentity, error) {
 	if s.activeItems != nil {
 		return s.activeItems, s.err
 	}
 	return s.items, s.err
 }
 
-func TestUsageIdentitiesRouteReturnsMetadataStatsAndDeletedRows(t *testing.T) {
+func TestUsageIdentitiesRouteReturnsMetadataStatsAndActiveRows(t *testing.T) {
 	firstUsedAt := time.Date(2026, 5, 4, 8, 0, 0, 0, time.UTC)
 	lastUsedAt := time.Date(2026, 5, 4, 9, 0, 0, 0, time.UTC)
 	statsUpdatedAt := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
@@ -36,44 +36,46 @@ func TestUsageIdentitiesRouteReturnsMetadataStatsAndDeletedRows(t *testing.T) {
 	updatedAt := time.Date(2026, 5, 4, 10, 30, 0, 0, time.UTC)
 	deletedAt := time.Date(2026, 5, 4, 11, 0, 0, 0, time.UTC)
 
-	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []models.UsageIdentity{
-		{
-			ID:                         1,
-			Name:                       "Claude Desktop",
-			AuthType:                   models.UsageIdentityAuthTypeAuthFile,
-			AuthTypeName:               "oauth",
-			Identity:                   "2",
-			Type:                       "auth-file",
-			Provider:                   "anthropic",
-			TotalRequests:              10,
-			SuccessCount:               8,
-			FailureCount:               2,
-			InputTokens:                100,
-			OutputTokens:               200,
-			ReasoningTokens:            30,
-			CachedTokens:               40,
-			TotalTokens:                370,
-			LastAggregatedUsageEventID: 99,
-			FirstUsedAt:                &firstUsedAt,
-			LastUsedAt:                 &lastUsedAt,
-			StatsUpdatedAt:             &statsUpdatedAt,
-			CreatedAt:                  createdAt,
-			UpdatedAt:                  updatedAt,
-		},
-		{
-			ID:           2,
-			Name:         "Deleted Provider",
-			AuthType:     models.UsageIdentityAuthTypeAIProvider,
-			AuthTypeName: "apikey",
-			Identity:     "sk-deleted-provider-secret",
-			Type:         "openai",
-			Provider:     "OpenAI",
-			IsDeleted:    true,
-			DeletedAt:    &deletedAt,
-			CreatedAt:    createdAt,
-			UpdatedAt:    updatedAt,
-		},
-	}})
+	activeIdentity := entities.UsageIdentity{
+		ID:                         1,
+		Name:                       "Claude Desktop",
+		AuthType:                   entities.UsageIdentityAuthTypeAuthFile,
+		AuthTypeName:               "oauth",
+		Identity:                   "2",
+		Type:                       "auth-file",
+		Provider:                   "anthropic",
+		TotalRequests:              10,
+		SuccessCount:               8,
+		FailureCount:               2,
+		InputTokens:                100,
+		OutputTokens:               200,
+		ReasoningTokens:            30,
+		CachedTokens:               40,
+		TotalTokens:                370,
+		LastAggregatedUsageEventID: 99,
+		FirstUsedAt:                &firstUsedAt,
+		LastUsedAt:                 &lastUsedAt,
+		StatsUpdatedAt:             &statsUpdatedAt,
+		CreatedAt:                  createdAt,
+		UpdatedAt:                  updatedAt,
+	}
+	deletedIdentity := entities.UsageIdentity{
+		ID:           2,
+		Name:         "Deleted Provider",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "sk-deleted-provider-secret",
+		Type:         "openai",
+		Provider:     "OpenAI",
+		IsDeleted:    true,
+		DeletedAt:    &deletedAt,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	}
+	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", usageIdentitiesStub{
+		items:       []entities.UsageIdentity{activeIdentity, deletedIdentity},
+		activeItems: []entities.UsageIdentity{activeIdentity},
+	})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/identities", nil)
 	resp := httptest.NewRecorder()
 
@@ -85,6 +87,9 @@ func TestUsageIdentitiesRouteReturnsMetadataStatsAndDeletedRows(t *testing.T) {
 	}
 	if !contains(body, `"identities":[`) || !contains(body, `"id":1`) || !contains(body, `"identity":"2"`) {
 		t.Fatalf("expected auth file identity row in response, got %s", body)
+	}
+	if contains(body, "Deleted Provider") || contains(body, "sk-deleted-provider-secret") || contains(body, `"deleted_at"`) {
+		t.Fatalf("expected deleted identities to be filtered from response, got %s", body)
 	}
 	for _, expected := range []string{
 		`"name":"Claude Desktop"`,
@@ -104,8 +109,7 @@ func TestUsageIdentitiesRouteReturnsMetadataStatsAndDeletedRows(t *testing.T) {
 		`"first_used_at":"2026-05-04T08:00:00Z"`,
 		`"last_used_at":"2026-05-04T09:00:00Z"`,
 		`"stats_updated_at":"2026-05-04T10:00:00Z"`,
-		`"is_deleted":true`,
-		`"deleted_at":"2026-05-04T11:00:00Z"`,
+		`"is_deleted":false`,
 	} {
 		if !contains(body, expected) {
 			t.Fatalf("expected %s in response body: %s", expected, body)
@@ -113,12 +117,107 @@ func TestUsageIdentitiesRouteReturnsMetadataStatsAndDeletedRows(t *testing.T) {
 	}
 }
 
+func TestUsageIdentitiesRouteDoesNotReturnUnpublishedMetadataFields(t *testing.T) {
+	activeStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	activeUntil := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	accountID := "acct_123"
+	planType := "team"
+	limitReached := true
+	primaryUsed := 80
+	primaryLimit := 18000
+	primaryResetSeconds := 3600
+	primaryResetAt := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	secondaryUsed := 20
+	secondaryLimit := 604800
+	secondaryResetSeconds := 86400
+	secondaryResetAt := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []entities.UsageIdentity{{
+		ID:                          1,
+		Name:                        "Codex Account",
+		AuthType:                    entities.UsageIdentityAuthTypeAuthFile,
+		AuthTypeName:                "oauth",
+		Identity:                    "codex-auth",
+		Type:                        "codex",
+		Provider:                    "Codex",
+		Prefix:                      "codex-prefix",
+		AccountID:                   &accountID,
+		ActiveStart:                 &activeStart,
+		ActiveUntil:                 &activeUntil,
+		PlanType:                    &planType,
+		LimitReached:                &limitReached,
+		PrimaryWindowUsedPercent:    &primaryUsed,
+		PrimaryWindowLimitSeconds:   &primaryLimit,
+		PrimaryWindowResetSeconds:   &primaryResetSeconds,
+		PrimaryWindowResetAt:        &primaryResetAt,
+		SecondaryWindowUsedPercent:  &secondaryUsed,
+		SecondaryWindowLimitSeconds: &secondaryLimit,
+		SecondaryWindowResetSeconds: &secondaryResetSeconds,
+		SecondaryWindowResetAt:      &secondaryResetAt,
+	}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/identities", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
+	}
+	for _, forbidden := range []string{
+		`"prefix"`,
+		`"account_id"`,
+		`"active_start"`,
+		`"active_until"`,
+		`"plan_type"`,
+		`"limit_reached"`,
+		`"primary_window_used_percent"`,
+		`"primary_window_limit_seconds"`,
+		`"primary_window_reset_seconds"`,
+		`"primary_window_reset_at"`,
+		`"secondary_window_used_percent"`,
+		`"secondary_window_limit_seconds"`,
+		`"secondary_window_reset_seconds"`,
+		`"secondary_window_reset_at"`,
+	} {
+		if contains(body, forbidden) {
+			t.Fatalf("expected API response not to include %s, got %s", forbidden, body)
+		}
+	}
+}
+
+func TestUsageIdentitiesRouteReturnsProviderDisplayName(t *testing.T) {
+	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []entities.UsageIdentity{{
+		ID:           1,
+		Name:         "Provider Name",
+		Prefix:       "Team Prefix",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "provider-auth-index",
+		Type:         "openai",
+		Provider:     "OpenAI",
+	}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/identities", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
+	}
+	if !contains(body, `"displayName":"Provider Name(Team Prefix)"`) {
+		t.Fatalf("expected displayName with name and prefix, got %s", body)
+	}
+	if contains(body, `"prefix"`) {
+		t.Fatalf("expected raw prefix field to stay unpublished, got %s", body)
+	}
+}
+
 func TestUsageIdentitiesRouteMasksAIProviderIdentity(t *testing.T) {
 	rawLookupKey := "sk-live-secret-value"
-	rawPrefix := "sk-live-prefix"
 	maskedLookupKey := redact.APIKeyDisplayName(rawLookupKey)
-	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []models.UsageIdentity{
-		{ID: 1, Name: rawPrefix, AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: rawLookupKey, Type: "openai " + rawLookupKey, Provider: "OpenAI " + rawPrefix},
+	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", usageIdentitiesStub{items: []entities.UsageIdentity{
+		{ID: 1, Name: "Provider Name", Prefix: "Team Prefix", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: rawLookupKey, Type: "openai", Provider: "OpenAI"},
 	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/identities", nil)
 	resp := httptest.NewRecorder()
@@ -129,11 +228,14 @@ func TestUsageIdentitiesRouteMasksAIProviderIdentity(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
 	}
-	if contains(body, rawLookupKey) || contains(body, rawPrefix) {
-		t.Fatalf("expected raw AI provider lookup values to be hidden, got %s", body)
+	if contains(body, rawLookupKey) {
+		t.Fatalf("expected raw AI provider lookup key to be hidden, got %s", body)
 	}
 	if !contains(body, `"identity":"`+maskedLookupKey+`"`) {
 		t.Fatalf("expected masked AI provider identity %q in response body: %s", maskedLookupKey, body)
+	}
+	if !contains(body, `"name":"Provider Name"`) || !contains(body, `"provider":"OpenAI"`) || !contains(body, `"displayName":"Provider Name(Team Prefix)"`) {
+		t.Fatalf("expected AI provider display fields to use usage_identities values directly, got %s", body)
 	}
 }
 

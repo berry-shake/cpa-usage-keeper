@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"cpa-usage-keeper/internal/service"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/sirupsen/logrus"
 )
 
@@ -15,8 +15,8 @@ import (
 const redisInboxProcessInterval = 5 * time.Second
 
 type RedisBatchSyncer interface {
-	PullRedisUsageInbox(ctx context.Context) (*service.RedisInboxPullResult, error)
-	ProcessRedisUsageInbox(ctx context.Context) (*service.RedisBatchSyncResult, error)
+	PullRedisUsageInbox(ctx context.Context) (*servicedto.RedisInboxPullResult, error)
+	ProcessRedisUsageInbox(ctx context.Context) (*servicedto.RedisBatchSyncResult, error)
 }
 
 type RedisDrainConfig struct {
@@ -116,7 +116,7 @@ func (d *RedisDrain) runProcessLoop(ctx context.Context) {
 	}
 }
 
-func (d *RedisDrain) logBatchFailure(result *service.RedisBatchSyncResult, err error) {
+func (d *RedisDrain) logBatchFailure(result *servicedto.RedisBatchSyncResult, err error) {
 	fields := logrus.Fields{
 		"status":          "",
 		"empty":           false,
@@ -158,7 +158,7 @@ func (d *RedisDrain) SyncNow(ctx context.Context) error {
 }
 
 // runRedisPull 只防止 Pull 自身重入，不阻塞 Process；这样 Redis 长轮询或退避不会跳过本地 inbox 处理周期。
-func (d *RedisDrain) runRedisPull(ctx context.Context) (*service.RedisInboxPullResult, error) {
+func (d *RedisDrain) runRedisPull(ctx context.Context) (*servicedto.RedisInboxPullResult, error) {
 	d.mu.Lock()
 	if d.pullRunning {
 		d.mu.Unlock()
@@ -179,7 +179,7 @@ func (d *RedisDrain) runRedisPull(ctx context.Context) (*service.RedisInboxPullR
 }
 
 // runRedisProcess 只防止 Process 自身重入，不阻塞 Pull；Process 的输入必须来自已持久化的 redis_usage_inboxes。
-func (d *RedisDrain) runRedisProcess(ctx context.Context) (*service.RedisBatchSyncResult, error) {
+func (d *RedisDrain) runRedisProcess(ctx context.Context) (*servicedto.RedisBatchSyncResult, error) {
 	d.mu.Lock()
 	if d.processRunning {
 		d.mu.Unlock()
@@ -203,7 +203,7 @@ func (d *RedisDrain) runRedisProcess(ctx context.Context) (*service.RedisBatchSy
 	return result, returnErr
 }
 
-func (d *RedisDrain) recordPullResult(result *service.RedisInboxPullResult, err error) {
+func (d *RedisDrain) recordPullResult(result *servicedto.RedisInboxPullResult, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastRunAt = d.now().UTC()
@@ -222,7 +222,7 @@ func (d *RedisDrain) recordPullResult(result *service.RedisInboxPullResult, err 
 	}
 }
 
-func (d *RedisDrain) recordResult(result *service.RedisBatchSyncResult, err error) {
+func (d *RedisDrain) recordResult(result *servicedto.RedisBatchSyncResult, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastRunAt = d.now().UTC()

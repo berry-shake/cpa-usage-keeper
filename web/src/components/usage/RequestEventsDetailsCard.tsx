@@ -35,6 +35,7 @@ type RequestEventRow = {
   source: string;
   sourceType: string;
   authIndex: string;
+  isDelete: boolean;
   failed: boolean;
   latencyMs: number | null;
   inputTokens: number;
@@ -143,6 +144,7 @@ export function RequestEventsDetailsCard({
         source,
         sourceType,
         authIndex,
+        isDelete: event.isDelete === true,
         failed: event.failed === true,
         latencyMs,
         inputTokens,
@@ -168,9 +170,10 @@ export function RequestEventsDetailsCard({
   const sourceOptions = useMemo(() => {
     const options = [
       { value: ALL_FILTER, label: t('usage_stats.filter_all') },
-      ...backendSourceOptions.map((source) => ({ value: source.value, label: source.label || source.value })),
+      ...backendSourceOptions.map((source) => ({ value: source.value, label: source.displayName || source.label || source.value })),
     ];
-    const selectedLabel = backendSourceOptions.find((source) => source.value === sourceFilter)?.label;
+    const selectedSource = backendSourceOptions.find((source) => source.value === sourceFilter);
+    const selectedLabel = selectedSource?.displayName || selectedSource?.label;
     return appendSelectedOption(options, sourceFilter, selectedLabel || sourceFilter);
   }, [backendSourceOptions, sourceFilter, t]);
 
@@ -450,10 +453,19 @@ export function RequestEventsDetailsCard({
                     </td>
                     <td className={styles.modelCell}>{row.model}</td>
                     <td className={styles.requestEventsSourceCell} title={row.source}>
-                      <span>{row.source}</span>
-                      {row.sourceType && (
-                        <span className={styles.credentialType}>{row.sourceType}</span>
-                      )}
+                      <span className={styles.requestEventsSourceStack}>
+                        <span className={styles.requestEventsSourceValue}>{row.source}</span>
+                        {(row.isDelete || row.sourceType) && (
+                          <span className={styles.requestEventsSourceTags}>
+                            {row.sourceType && (
+                              <span className={styles.credentialType}>{row.sourceType}</span>
+                            )}
+                            {row.isDelete && (
+                              <span className={styles.requestEventsDeletedTag}>{t('usage_stats.deleted')}</span>
+                            )}
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td>
                       <span
