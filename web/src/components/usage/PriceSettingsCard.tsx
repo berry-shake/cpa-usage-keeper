@@ -78,13 +78,13 @@ export function PriceSettingsCard({
 }: PriceSettingsCardProps) {
   const { t } = useTranslation();
 
-  // Add form state
+  // 新增价格表单先暂存输入值，保存成功后再一次性同步到父级配置。
   const [selectedModel, setSelectedModel] = useState('');
   const [promptPrice, setPromptPrice] = useState('');
   const [completionPrice, setCompletionPrice] = useState('');
   const [cachePrice, setCachePrice] = useState('');
 
-  // Edit modal state
+  // 编辑弹窗独立保存草稿值，避免用户取消时污染已保存价格。
   const [editModel, setEditModel] = useState<string | null>(null);
   const [editPrompt, setEditPrompt] = useState('');
   const [editCompletion, setEditCompletion] = useState('');
@@ -209,6 +209,7 @@ export function PriceSettingsCard({
                     options={options}
                     onChange={handleModelSelect}
                     placeholder={t('usage_stats.model_price_select_placeholder')}
+                    className={styles.usagePillControl}
                   />
                 </div>
                 <div className={styles.formField}>
@@ -219,6 +220,7 @@ export function PriceSettingsCard({
                     onChange={(e) => setPromptPrice(e.target.value)}
                     placeholder="0.00"
                     step="0.0001"
+                    className={styles.usagePillControl}
                   />
                 </div>
                 <div className={styles.formField}>
@@ -229,6 +231,7 @@ export function PriceSettingsCard({
                     onChange={(e) => setCompletionPrice(e.target.value)}
                     placeholder="0.00"
                     step="0.0001"
+                    className={styles.usagePillControl}
                   />
                 </div>
                 <div className={styles.formField}>
@@ -239,9 +242,10 @@ export function PriceSettingsCard({
                     onChange={(e) => setCachePrice(e.target.value)}
                     placeholder="0.00"
                     step="0.0001"
+                    className={styles.usagePillControl}
                   />
                 </div>
-                <Button variant="primary" onClick={handleSavePrice} disabled={!selectedModel}>
+                <Button variant="primary" className={styles.usagePillAction} onClick={handleSavePrice} disabled={!selectedModel}>
                   {t('common.save')}
                 </Button>
               </div>
@@ -255,10 +259,10 @@ export function PriceSettingsCard({
                     <div key={model} className={styles.priceItem}>
                       <span className={styles.priceModel}>{formatDisplayName(model)}</span>
                       <div className={styles.priceActions}>
-                        <Button variant="secondary" size="sm" onClick={() => handleOpenEdit(model)}>
+                        <Button variant="secondary" size="sm" className={styles.usagePillAction} onClick={() => handleOpenEdit(model)}>
                           {t('common.edit')}
                         </Button>
-                        <Button variant="danger" size="sm" onClick={() => handleDeletePrice(model)}>
+                        <Button variant="danger" size="sm" className={`${styles.usagePillAction} ${styles.usagePillActionDanger}`} onClick={() => handleDeletePrice(model)}>
                           {t('common.delete')}
                         </Button>
                       </div>
@@ -299,17 +303,17 @@ export function PriceSettingsCard({
         )}
       </div>
 
-      {/* Edit Modal */}
+      {/* 编辑弹窗沿用同一套价格输入和操作按钮样式。 */}
       <Modal
         open={editModel !== null}
         title={formatDisplayName(editModel ?? '')}
         onClose={() => setEditModel(null)}
         footer={
           <div className={styles.priceActions}>
-            <Button variant="secondary" onClick={() => setEditModel(null)}>
+            <Button variant="secondary" className={styles.usagePillAction} onClick={() => setEditModel(null)}>
               {t('common.cancel')}
             </Button>
-            <Button variant="primary" onClick={handleSaveEdit}>
+            <Button variant="primary" className={styles.usagePillAction} onClick={handleSaveEdit}>
               {t('common.save')}
             </Button>
           </div>
@@ -325,6 +329,7 @@ export function PriceSettingsCard({
               onChange={(e) => setEditPrompt(e.target.value)}
               placeholder="0.00"
               step="0.0001"
+              className={styles.usagePillControl}
             />
           </div>
           <div className={styles.formField}>
@@ -335,6 +340,7 @@ export function PriceSettingsCard({
               onChange={(e) => setEditCompletion(e.target.value)}
               placeholder="0.00"
               step="0.0001"
+              className={styles.usagePillControl}
             />
           </div>
           <div className={styles.formField}>
@@ -345,6 +351,7 @@ export function PriceSettingsCard({
               onChange={(e) => setEditCache(e.target.value)}
               placeholder="0.00"
               step="0.0001"
+              className={styles.usagePillControl}
             />
           </div>
         </div>
