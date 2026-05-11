@@ -3,6 +3,7 @@ package cpa
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -10,10 +11,20 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 var ErrRedisQueueAuth = errors.New("redis queue auth failed")
+
+type redisQueueSyncMode string
+
+const (
+	redisQueueSyncModeRedis redisQueueSyncMode = "redis"
+	redisQueueSyncModeHTTP  redisQueueSyncMode = "http"
+)
 
 type RedisQueueClient struct {
 	address       string
@@ -21,15 +32,52 @@ type RedisQueueClient struct {
 	timeout       time.Duration
 	queueKey      string
 	batchSize     int
+	httpClient    *Client
+	mu            sync.Mutex
+	syncMode      redisQueueSyncMode
+	dial          func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
-func NewRedisQueueClient(baseURL, redisQueueAddr, managementKey string, timeout time.Duration, queueKey string, batchSize int) *RedisQueueClient {
+type RedisQueueOptions struct {
+	BaseURL       string
+	RedisAddr     string
+	ManagementKey string
+	Timeout       time.Duration
+	QueueKey      string
+	BatchSize     int
+	TLS           bool
+	TLSSkipVerify bool
+}
+
+func NewRedisQueueClientWithOptions(opts RedisQueueOptions) *RedisQueueClient {
+	addr, useTLS := redisQueueAddress(opts.BaseURL, opts.RedisAddr)
+	if opts.TLS {
+		useTLS = true
+	}
+	netDialer := &net.Dialer{Timeout: opts.Timeout}
+	dial := netDialer.DialContext
+	if useTLS {
+		tlsDialer := &tls.Dialer{NetDialer: netDialer, Config: &tls.Config{InsecureSkipVerify: opts.TLSSkipVerify}}
+		dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if opts.Timeout > 0 {
+				deadline := time.Now().Add(opts.Timeout)
+				if existing, ok := ctx.Deadline(); !ok || deadline.Before(existing) {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithDeadline(ctx, deadline)
+					defer cancel()
+				}
+			}
+			return tlsDialer.DialContext(ctx, network, addr)
+		}
+	}
 	return &RedisQueueClient{
-		address:       redisQueueAddress(baseURL, redisQueueAddr),
-		managementKey: strings.TrimSpace(managementKey),
-		timeout:       timeout,
-		queueKey:      strings.TrimSpace(queueKey),
-		batchSize:     batchSize,
+		address:       addr,
+		managementKey: strings.TrimSpace(opts.ManagementKey),
+		timeout:       opts.Timeout,
+		queueKey:      strings.TrimSpace(opts.QueueKey),
+		batchSize:     opts.BatchSize,
+		httpClient:    NewClient(opts.BaseURL, opts.ManagementKey, opts.Timeout, opts.TLSSkipVerify),
+		dial:          dial,
 	}
 }
 
@@ -44,6 +92,37 @@ func (c *RedisQueueClient) PopUsage(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("redis queue batch size must be positive")
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch c.syncMode {
+	case redisQueueSyncModeRedis:
+		return c.popUsageOverRedis(ctx)
+	case redisQueueSyncModeHTTP:
+		return c.popUsageOverHTTP(ctx)
+	}
+
+	messages, err := c.popUsageOverRedis(ctx)
+	if err == nil {
+		c.syncMode = redisQueueSyncModeRedis
+		logrus.WithField("message_count", len(messages)).Info("usage queue sync used redis protocol")
+		return messages, nil
+	}
+	logrus.WithField("redis_error", err.Error()).Error("usage queue sync failed to used redis protocol")
+	if !c.canFallbackToHTTP() {
+		return nil, fmt.Errorf("usage queue sync failed: %w; http usage queue fallback not possible", err)
+	}
+
+	messages, fallbackErr := c.popUsageOverHTTP(ctx)
+	if fallbackErr != nil {
+		return nil, fmt.Errorf("usage queue sync failed: %w; http usage queue fallback failed: %w", err, fallbackErr)
+	}
+	c.syncMode = redisQueueSyncModeHTTP
+	logrus.WithField("message_count", len(messages)).Info("usage queue sync used http protocol")
+	return messages, nil
+}
+
+func (c *RedisQueueClient) popUsageOverRedis(ctx context.Context) ([]string, error) {
 	conn, reader, err := c.openAuthenticatedConnection(ctx)
 	if err != nil {
 		return nil, err
@@ -63,6 +142,29 @@ func (c *RedisQueueClient) PopUsage(ctx context.Context) ([]string, error) {
 	return popResponse.strings(), nil
 }
 
+func (c *RedisQueueClient) canFallbackToHTTP() bool {
+	return c != nil && c.httpClient != nil && strings.TrimSpace(c.httpClient.baseURL) != ""
+}
+
+func (c *RedisQueueClient) popUsageOverHTTP(ctx context.Context) ([]string, error) {
+	if c == nil || c.httpClient == nil {
+		return nil, fmt.Errorf("redis queue http client is nil")
+	}
+	result, err := c.httpClient.FetchUsageQueue(ctx, c.batchSize)
+	if err != nil {
+		return nil, fmt.Errorf("fetch usage queue over http: %w", err)
+	}
+	messages := make([]string, 0, len(result.Payload))
+	for _, item := range result.Payload {
+		trimmed := strings.TrimSpace(string(item))
+		if trimmed == "" || trimmed == "null" {
+			continue
+		}
+		messages = append(messages, trimmed)
+	}
+	return messages, nil
+}
+
 func (c *RedisQueueClient) openAuthenticatedConnection(ctx context.Context) (net.Conn, *bufio.Reader, error) {
 	if c == nil {
 		return nil, nil, fmt.Errorf("redis queue client is nil")
@@ -74,8 +176,7 @@ func (c *RedisQueueClient) openAuthenticatedConnection(ctx context.Context) (net
 		return nil, nil, fmt.Errorf("redis queue management key is required")
 	}
 
-	dialer := net.Dialer{Timeout: c.timeout}
-	conn, err := dialer.DialContext(ctx, cpaManagementRedisNetwork, c.address)
+	conn, err := c.dial(ctx, cpaManagementRedisNetwork, c.address)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect redis queue: %w", err)
 	}
@@ -100,30 +201,31 @@ func (c *RedisQueueClient) openAuthenticatedConnection(ctx context.Context) (net
 	return conn, reader, nil
 }
 
-func redisQueueAddress(baseURL, redisQueueAddr string) string {
+func redisQueueAddress(baseURL, redisQueueAddr string) (string, bool) {
 	override := strings.TrimSpace(redisQueueAddr)
 	if override != "" {
 		if parsed, err := url.Parse(override); err == nil && parsed.Host != "" {
-			return parsed.Host
+			return parsed.Host, parsed.Scheme == "rediss"
 		}
-		return override
+		return override, false
 	}
 	trimmed := strings.TrimSpace(baseURL)
 	if trimmed == "" {
-		return ""
+		return "", false
 	}
 	parsed, err := url.Parse(trimmed)
 	if err == nil && parsed.Host != "" {
+		useTLS := parsed.Scheme == "https"
 		if parsed.Port() != "" {
-			return parsed.Host
+			return parsed.Host, useTLS
 		}
-		return net.JoinHostPort(parsed.Hostname(), ManagementRedisDefaultPort)
+		return net.JoinHostPort(parsed.Hostname(), ManagementRedisDefaultPort), useTLS
 	}
 	trimmed = strings.TrimPrefix(strings.TrimPrefix(trimmed, "http://"), "https://")
 	if _, _, err := net.SplitHostPort(trimmed); err == nil {
-		return trimmed
+		return trimmed, false
 	}
-	return net.JoinHostPort(trimmed, ManagementRedisDefaultPort)
+	return net.JoinHostPort(trimmed, ManagementRedisDefaultPort), false
 }
 
 func writeRESPCommand(writer io.Writer, parts ...string) error {

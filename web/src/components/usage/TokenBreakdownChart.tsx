@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Line } from 'react-chartjs-2';
+import type { ChartOptions } from 'chart.js';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import type { TokenCategory } from '@/utils/usage';
+import { formatCompactTokenValue, type TokenCategory } from '@/utils/usage';
 import { buildChartOptions, getHourChartMinWidth } from '@/utils/usage/chartConfig';
 import type { UsageOverviewPayload } from './hooks/useUsageData';
 import styles from '@/pages/UsagePage.module.scss';
@@ -32,19 +33,22 @@ export type BuildTokenBreakdownChartSeriesOptions = {
   period: TokenBreakdownChartPeriod;
   hourWindowHours?: number;
   endMs?: number;
+  includeFinalHourBucket?: boolean;
 };
 
-const normalizeHourWindow = (hourWindowHours?: number): number => {
+const resolveHourBucketCount = (hourWindowHours?: number, includeFinalBucket = false): number => {
   if (!Number.isFinite(hourWindowHours) || !hourWindowHours || hourWindowHours <= 0) {
-    return 24;
+    return includeFinalBucket ? 25 : 24;
   }
-  return Math.min(Math.max(Math.floor(hourWindowHours), 1), 24);
+  const resolvedHours = Math.min(Math.max(Math.floor(hourWindowHours), 1), 24);
+  return includeFinalBucket ? resolvedHours + 1 : resolvedHours >= 24 ? 24 : resolvedHours + 1;
 };
 
 const formatHourBucketKey = (timestampMs: number): string => `${new Date(timestampMs).toISOString().slice(0, 13)}:00:00Z`;
 
-const formatChartLabel = (label: string, period: TokenBreakdownChartPeriod) => {
+const formatChartLabel = (label: string, period: TokenBreakdownChartPeriod, isFinalBucket = false) => {
   if (period !== 'hour') return label;
+  if (isFinalBucket) return '24:00';
   const date = new Date(label);
   if (Number.isNaN(date.getTime())) return label;
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
@@ -54,11 +58,11 @@ const getTokenSource = (usage: UsageOverviewPayload | null, period: TokenBreakdo
   period === 'hour' ? (usage?.hourly_series ?? usage?.series) : (usage?.daily_series ?? usage?.series)
 );
 
-const buildHourlyLabels = (source: TokenSeriesSource | undefined, hourWindowHours?: number, endMs?: number) => {
+const buildHourlyLabels = (source: TokenSeriesSource | undefined, hourWindowHours?: number, endMs?: number, includeFinalBucket = false) => {
   const labels = Object.keys(source?.input_tokens ?? {}).sort((a, b) => a.localeCompare(b));
   if (labels.length === 0) return [];
 
-  const bucketCount = normalizeHourWindow(hourWindowHours);
+  const bucketCount = resolveHourBucketCount(hourWindowHours, includeFinalBucket);
   const latestLabelMs = Date.parse(labels[labels.length - 1]);
   const requestedEndMs = Number.isFinite(endMs) && endMs && endMs > 0 ? endMs : latestLabelMs;
   const currentHour = new Date(requestedEndMs);
@@ -73,14 +77,15 @@ export const buildTokenBreakdownChartSeries = ({
   period,
   hourWindowHours,
   endMs,
+  includeFinalHourBucket = false,
 }: BuildTokenBreakdownChartSeriesOptions): TokenBreakdownChartSeries => {
   const source = getTokenSource(usage, period);
   const labels = period === 'hour'
-    ? buildHourlyLabels(source, hourWindowHours, endMs)
+    ? buildHourlyLabels(source, hourWindowHours, endMs, includeFinalHourBucket)
     : Object.keys(source?.input_tokens ?? {}).sort((a, b) => a.localeCompare(b));
 
   return {
-    labels: labels.map((label) => formatChartLabel(label, period)),
+    labels: labels.map((label, index) => formatChartLabel(label, period, includeFinalHourBucket && index === labels.length - 1)),
     dataByCategory: {
       input: labels.map((label) => Number(source?.input_tokens?.[label] ?? 0)),
       output: labels.map((label) => Number(source?.output_tokens?.[label] ?? 0)),
@@ -97,7 +102,55 @@ export interface TokenBreakdownChartProps {
   isMobile: boolean;
   hourWindowHours?: number;
   endMs?: number;
+  includeFinalHourBucket?: boolean;
+  preferredPeriod?: TokenBreakdownChartPeriod;
 }
+
+export const buildTokenBreakdownChartOptions = ({
+  period,
+  labels,
+  isDark,
+  isMobile,
+  stacked = false,
+}: {
+  period: TokenBreakdownChartPeriod;
+  labels: string[];
+  isDark: boolean;
+  isMobile: boolean;
+  stacked?: boolean;
+}): ChartOptions<'line'> => {
+  const baseOptions = buildChartOptions({ period, labels, isDark, isMobile });
+  return {
+    ...baseOptions,
+    plugins: {
+      ...baseOptions.plugins,
+      tooltip: {
+        ...baseOptions.plugins?.tooltip,
+        callbacks: {
+          label: (context) => {
+            const label = context.dataset.label ? `${context.dataset.label}: ` : '';
+            return `${label}${formatCompactTokenValue(Number(context.parsed.y ?? 0), true)}`;
+          },
+        },
+      },
+    },
+    scales: {
+      ...baseOptions.scales,
+      y: {
+        ...baseOptions.scales?.y,
+        stacked,
+        ticks: {
+          ...baseOptions.scales?.y?.ticks,
+          callback: (value) => formatCompactTokenValue(Number(value)),
+        },
+      },
+      x: {
+        ...baseOptions.scales?.x,
+        stacked,
+      },
+    },
+  };
+};
 
 export function TokenBreakdownChart({
   usage,
@@ -105,13 +158,19 @@ export function TokenBreakdownChart({
   isDark,
   isMobile,
   hourWindowHours,
-  endMs
+  endMs,
+  includeFinalHourBucket = false,
+  preferredPeriod = 'hour'
 }: TokenBreakdownChartProps) {
   const { t } = useTranslation();
-  const [period, setPeriod] = useState<'hour' | 'day'>('hour');
+  const [period, setPeriod] = useState<TokenBreakdownChartPeriod>(preferredPeriod);
+
+  useEffect(() => {
+    setPeriod(preferredPeriod);
+  }, [preferredPeriod]);
 
   const { chartData, chartOptions } = useMemo(() => {
-    const series = buildTokenBreakdownChartSeries({ usage, period, hourWindowHours, endMs });
+    const series = buildTokenBreakdownChartSeries({ usage, period, hourWindowHours, endMs, includeFinalHourBucket });
     const categoryLabels: Record<TokenCategory, string> = {
       input: t('usage_stats.input_tokens'),
       output: t('usage_stats.output_tokens'),
@@ -133,24 +192,16 @@ export function TokenBreakdownChart({
       }))
     };
 
-    const baseOptions = buildChartOptions({ period, labels: series.labels, isDark, isMobile });
-    const options = {
-      ...baseOptions,
-      scales: {
-        ...baseOptions.scales,
-        y: {
-          ...baseOptions.scales?.y,
-          stacked: true
-        },
-        x: {
-          ...baseOptions.scales?.x,
-          stacked: true
-        }
-      }
-    };
+    const options = buildTokenBreakdownChartOptions({
+      period,
+      labels: series.labels,
+      isDark,
+      isMobile,
+      stacked: true,
+    });
 
     return { chartData: data, chartOptions: options };
-  }, [usage, period, isDark, isMobile, hourWindowHours, endMs, t]);
+  }, [usage, period, isDark, isMobile, hourWindowHours, endMs, includeFinalHourBucket, t]);
 
   return (
     <Card

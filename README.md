@@ -6,7 +6,10 @@
 
 它依赖 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 作为后端 CPA 数据来源，目标是在 CPA 之上补充持久化存储与统计分析能力。服务会从 CPA Redis usage 队列消费事件并写入 SQLite，定时拉取 CPA metadata，暴露聚合 API，并提供内置 Web Dashboard 用于查看 usage、pricing、request health 和 model/API 维度的统计信息。
 
-![cpa-usage-keeper-screenshot](https://images.bitskyline.com/i/2026/05/1pmg6l.png)
+<p float="left">
+  <img src="https://images.bitskyline.com/i/2026/05/3lgvpz.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/3lgenc.png" width="49%" />
+</p>
 
 ## 功能特性
 
@@ -15,6 +18,7 @@
 - 内置 React Dashboard
 - 可选密码登录保护
 - SQLite 数据库本地备份与保留策略
+- Linux systemd 服务文件
 - Docker / Docker Compose 部署
 
 ## 项目结构
@@ -52,10 +56,12 @@ cp .env.example .env
 | `APP_PORT` | 否 | `8080` | HTTP 监听端口 |
 | `APP_BASE_PATH` | 否 | 根路径 | 子路径部署前缀，例如 `/cpa`；留空表示 `/` |
 | `TZ` | 否 | `Asia/Shanghai` | 项目业务时区，影响 Today、按天聚合、定时任务和日志时间 |
-| `REDIS_QUEUE_ADDR` | 否 | `CPA_BASE_URL` 主机名 + `8317` | CPA Redis/RESP TCP 地址；非默认端口时填写 `host:port` |
+| `REDIS_QUEUE_ADDR` | 否 | `CPA_BASE_URL` 主机名 + `8317` | CPA Redis/RESP TCP 地址；留空时会使用 `CPA_BASE_URL` 的主机名和默认端口 `8317`，且当 `CPA_BASE_URL` 为 https 时自动启用 TLS；非默认端口时填写 `host:port` |
+| `REDIS_QUEUE_TLS` | 否 | `false` | 是否使用 TLS 连接 Redis 队列；仅在 `REDIS_QUEUE_ADDR` 留空且 `CPA_BASE_URL` 为 https 时自动启用；如果显式设置了 `REDIS_QUEUE_ADDR`，需手动设为 `true` |
 | `REDIS_QUEUE_BATCH_SIZE` | 否 | `1000` | 每次最多拉取的队列记录数 |
 | `REDIS_QUEUE_IDLE_INTERVAL` | 否 | `1s` | 队列为空时的检查间隔 |
 | `REQUEST_TIMEOUT` | 否 | `30s` | CPA 请求超时 |
+| `TLS_SKIP_VERIFY` | 否 | `false` | 跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证；仅在使用自签名证书时启用 |
 | `WORK_DIR` | 否 | `./data` | 应用工作目录；数据库、日志和备份默认分别写入 `app.db`、`logs/`、`backups/` |
 | `LOG_LEVEL` | 否 | `info` | 日志级别 |
 | `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
@@ -126,6 +132,57 @@ npm --prefix ./web run test
 npm --prefix ./web run lint
 npm --prefix ./web run typecheck
 npm --prefix ./web run build
+```
+
+## Linux 二进制运行
+
+### 下载
+
+在 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载对应架构的 Linux 二进制包，或使用命令行下载：
+
+```bash
+curl -L -o cpa-usage-keeper.tar.gz "<替换为 Linux 二进制包下载地址>"
+mkdir -p cpa-usage-keeper
+tar -xzf cpa-usage-keeper.tar.gz -C cpa-usage-keeper --strip-components=1
+cd cpa-usage-keeper
+```
+
+请在 Releases 页面复制 `linux_amd64` 或 `linux_arm64` 包的下载地址，并替换上面命令中的占位符。
+
+### 配置
+
+复制配置模板并编辑，具体配置项参考上方“配置”章节：
+
+```bash
+cp .env.example .env
+vim .env
+```
+
+### 直接运行
+
+```bash
+./cpa-usage-keeper
+```
+
+### systemd 常驻运行
+
+Linux 二进制包内置 `cpa-usage-keeper.service`，可直接注册为 `systemd` 服务。启动后进程由 systemd 托管，关闭 SSH 或终端不会结束进程。
+
+`systemd` 的 `WorkingDirectory` 需要绝对路径。下面的 `sed` 命令会把当前目录自动写入 service 文件：
+
+```bash
+sudo cp cpa-usage-keeper.service /etc/systemd/system/cpa-usage-keeper.service # 复制 service 文件到 systemd 目录
+sudo sed -i "s|__CPA_USAGE_KEEPER_DIR__|$(pwd)|g" /etc/systemd/system/cpa-usage-keeper.service # 写入当前目录作为 WorkingDirectory
+sudo systemctl daemon-reload # 重新加载 systemd 配置
+sudo systemctl enable --now cpa-usage-keeper # 设置开机自启并立即启动服务
+```
+
+常用命令：
+
+```bash
+sudo systemctl status cpa-usage-keeper # 查看服务状态
+sudo journalctl -u cpa-usage-keeper -f # 实时查看服务日志
+sudo systemctl restart cpa-usage-keeper # 重启服务
 ```
 
 ## Docker

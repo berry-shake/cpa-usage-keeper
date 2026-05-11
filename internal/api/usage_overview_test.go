@@ -7,44 +7,40 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/cpa"
-	"cpa-usage-keeper/internal/service"
+	"cpa-usage-keeper/internal/repository/dto"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
 type usageFilterStub struct {
-	usage         *cpa.StatisticsSnapshot
-	overview      *service.UsageOverviewSnapshot
+	usage         *dto.StatisticsSnapshot
+	overview      *servicedto.UsageOverviewSnapshot
 	err           error
-	lastFilter    service.UsageFilter
+	lastFilter    servicedto.UsageFilter
 	filterCalls   int
 	overviewCalls int
 }
 
-func (s *usageFilterStub) GetUsageWithFilter(_ context.Context, filter service.UsageFilter) (*cpa.StatisticsSnapshot, error) {
+func (s *usageFilterStub) GetUsageWithFilter(_ context.Context, filter servicedto.UsageFilter) (*dto.StatisticsSnapshot, error) {
 	s.lastFilter = filter
 	s.filterCalls++
 	return s.usage, s.err
 }
 
-func (s *usageFilterStub) GetUsageOverview(_ context.Context, filter service.UsageFilter) (*service.UsageOverviewSnapshot, error) {
+func (s *usageFilterStub) GetUsageOverview(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
 	s.lastFilter = filter
 	s.overviewCalls++
 	return s.overview, s.err
 }
 
-func (s *usageFilterStub) ListUsageEvents(context.Context, service.UsageFilter) (*service.UsageEventsPage, error) {
+func (s *usageFilterStub) ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
 	return nil, s.err
 }
 
-func (s *usageFilterStub) ListUsageEventFilterOptions(context.Context, service.UsageFilter) (*service.UsageEventFilterOptions, error) {
+func (s *usageFilterStub) ListUsageEventFilterOptions(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	return nil, s.err
 }
 
-func (s *usageFilterStub) ListUsageCredentialStats(context.Context, service.UsageFilter) ([]service.UsageCredentialStat, error) {
-	return nil, s.err
-}
-
-func (s *usageFilterStub) GetUsageAnalysis(context.Context, service.UsageFilter) (*service.UsageAnalysisSnapshot, error) {
+func (s *usageFilterStub) GetUsageAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
 	return nil, s.err
 }
 
@@ -66,7 +62,7 @@ func TestUsageOverviewResponseIncludesResolvedRangeAndTimezone(t *testing.T) {
 	t.Cleanup(func() { time.Local = previousLocal })
 	time.Local = location
 
-	provider := &usageFilterStub{overview: &service.UsageOverviewSnapshot{}}
+	provider := &usageFilterStub{overview: &servicedto.UsageOverviewSnapshot{}}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/overview?range=custom&start=2026-04-20&end=2026-04-21", nil)
 	resp := httptest.NewRecorder()
@@ -85,8 +81,8 @@ func TestUsageOverviewResponseIncludesResolvedRangeAndTimezone(t *testing.T) {
 }
 
 func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
-	provider := &usageFilterStub{overview: &service.UsageOverviewSnapshot{
-		Usage: &cpa.StatisticsSnapshot{
+	provider := &usageFilterStub{overview: &servicedto.UsageOverviewSnapshot{
+		Usage: &dto.StatisticsSnapshot{
 			TotalRequests: 1,
 			SuccessCount:  1,
 			TotalTokens:   20,
@@ -96,12 +92,12 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 			TokensByHour: map[string]int64{
 				"2026-04-22T11:00:00Z": 20,
 			},
-			APIs: map[string]cpa.APISnapshot{
+			APIs: map[string]dto.APISnapshot{
 				"provider-a": {
 					TotalRequests: 1,
 					SuccessCount:  1,
 					TotalTokens:   20,
-					Models: map[string]cpa.ModelSnapshot{
+					Models: map[string]dto.ModelSnapshot{
 						"claude-sonnet": {
 							TotalRequests: 1,
 							SuccessCount:  1,
@@ -111,7 +107,7 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 				},
 			},
 		},
-		Summary: service.UsageOverviewSummary{
+		Summary: servicedto.UsageOverviewSummary{
 			RequestCount:    1,
 			TokenCount:      20,
 			WindowMinutes:   1440,
@@ -122,7 +118,7 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 			CachedTokens:    2,
 			ReasoningTokens: 3,
 		},
-		Series: service.UsageOverviewSeries{
+		Series: servicedto.UsageOverviewSeries{
 			Requests:        map[string]int64{"2026-04-22T11:00:00Z": 1},
 			Tokens:          map[string]int64{"2026-04-22T11:00:00Z": 20},
 			RPM:             map[string]float64{"2026-04-22T11:00:00Z": 1.0 / 60.0},
@@ -133,11 +129,11 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 			CachedTokens:    map[string]int64{"2026-04-22T11:00:00Z": 2},
 			ReasoningTokens: map[string]int64{"2026-04-22T11:00:00Z": 3},
 		},
-		Health: service.UsageOverviewHealth{
+		Health: servicedto.UsageOverviewHealth{
 			TotalSuccess: 1,
 			TotalFailure: 0,
 			SuccessRate:  100,
-			BlockDetails: []service.UsageOverviewHealthBlock{{
+			BlockDetails: []servicedto.UsageOverviewHealthBlock{{
 				StartTime: mustParseTime(t, "2026-04-22T11:00:00Z"),
 				EndTime:   mustParseTime(t, "2026-04-22T11:15:00Z"),
 				Success:   1,

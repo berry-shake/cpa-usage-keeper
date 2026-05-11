@@ -1,20 +1,14 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"fmt"
 	"sort"
 	"strings"
 
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"gorm.io/gorm"
 )
-
-type ModelPriceSettingInput struct {
-	Model                string
-	PromptPricePer1M     float64
-	CompletionPricePer1M float64
-	CachePricePer1M      float64
-}
 
 func ListUsedModels(db *gorm.DB) ([]string, error) {
 	if db == nil {
@@ -22,7 +16,7 @@ func ListUsedModels(db *gorm.DB) ([]string, error) {
 	}
 
 	var modelsList []string
-	if err := db.Model(&models.UsageEvent{}).
+	if err := db.Model(&entities.UsageEvent{}).
 		Distinct().
 		Where("trim(model) <> ''").
 		Order("model asc").
@@ -47,19 +41,19 @@ func ListUsedModels(db *gorm.DB) ([]string, error) {
 	return cleaned, nil
 }
 
-func ListModelPriceSettings(db *gorm.DB) ([]models.ModelPriceSetting, error) {
+func ListModelPriceSettings(db *gorm.DB) ([]entities.ModelPriceSetting, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
 
-	var settings []models.ModelPriceSetting
+	var settings []entities.ModelPriceSetting
 	if err := db.Order("model asc").Find(&settings).Error; err != nil {
 		return nil, fmt.Errorf("list pricing settings: %w", err)
 	}
 	return settings, nil
 }
 
-func UpsertModelPriceSetting(db *gorm.DB, input ModelPriceSettingInput) (*models.ModelPriceSetting, error) {
+func UpsertModelPriceSetting(db *gorm.DB, input dto.ModelPriceSettingInput) (*entities.ModelPriceSetting, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
@@ -69,10 +63,10 @@ func UpsertModelPriceSetting(db *gorm.DB, input ModelPriceSettingInput) (*models
 		return nil, fmt.Errorf("model is required")
 	}
 
-	setting := &models.ModelPriceSetting{}
+	setting := &entities.ModelPriceSetting{}
 	if err := db.Where("model = ?", modelName).First(setting).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			setting = &models.ModelPriceSetting{Model: modelName}
+			setting = &entities.ModelPriceSetting{Model: modelName}
 		} else {
 			return nil, fmt.Errorf("load pricing setting: %w", err)
 		}
@@ -98,7 +92,7 @@ func DeleteModelPriceSetting(db *gorm.DB, model string) error {
 	if modelName == "" {
 		return fmt.Errorf("model is required")
 	}
-	if err := db.Where("model = ?", modelName).Delete(&models.ModelPriceSetting{}).Error; err != nil {
+	if err := db.Where("model = ?", modelName).Delete(&entities.ModelPriceSetting{}).Error; err != nil {
 		return fmt.Errorf("delete pricing setting: %w", err)
 	}
 	return nil

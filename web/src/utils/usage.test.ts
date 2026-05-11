@@ -188,6 +188,18 @@ describe('resolveUsageFilterWindow', () => {
       windowMinutes: Math.max((nowMs - expectedStart.getTime()) / 60000, 1),
     });
   });
+
+  it('resolves 30d as a rolling thirty-day window', () => {
+    const nowMs = Date.parse('2026-04-23T12:34:56.000Z');
+
+    const window = resolveUsageFilterWindow(usage, '30d', { nowMs });
+
+    expect(window).toEqual({
+      startMs: nowMs - 30 * 24 * 60 * 60 * 1000,
+      endMs: nowMs,
+      windowMinutes: 30 * 24 * 60,
+    });
+  });
 });
 
 describe('sanitizeChartLines', () => {

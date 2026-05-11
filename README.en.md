@@ -6,7 +6,10 @@ CPA Usage Keeper is a standalone CPA usage persistence and dashboard service.
 
 It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) as the backend CPA data source and adds persistent storage and statistical analysis capabilities on top of CPA. The service consumes events from the CPA Redis usage queue into SQLite, periodically pulls CPA metadata, exposes aggregation APIs, and serves a built-in web dashboard for usage, pricing, request health, and model/API statistics.
 
-![cpa-usage-keeper-screenshot](https://images.bitskyline.com/i/2026/05/1pmg6l.png)
+<p float="left">
+  <img src="https://images.bitskyline.com/i/2026/05/3lgvpz.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/3lgenc.png" width="49%" />
+</p>
 
 ## Features
 
@@ -15,6 +18,7 @@ It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) a
 - Built-in React dashboard
 - Optional password login protection
 - Local SQLite database backups with retention
+- Linux systemd service file
 - Docker / Docker Compose deployment
 
 ## Project Structure
@@ -52,10 +56,12 @@ cp .env.example .env
 | `APP_PORT` | No | `8080` | HTTP listen port |
 | `APP_BASE_PATH` | No | root path | Subpath prefix such as `/cpa`; empty means `/` |
 | `TZ` | No | `Asia/Shanghai` | Project business timezone; affects Today, daily aggregation, scheduled tasks, and log timestamps |
-| `REDIS_QUEUE_ADDR` | No | `CPA_BASE_URL` hostname + `8317` | CPA Redis/RESP TCP address; set `host:port` for non-default ports |
+| `REDIS_QUEUE_ADDR` | No | `CPA_BASE_URL` hostname + `8317` | CPA Redis/RESP TCP address; when empty, uses the `CPA_BASE_URL` hostname with port `8317` and auto-detects TLS from whether `CPA_BASE_URL` is https; set `host:port` for non-default ports |
+| `REDIS_QUEUE_TLS` | No | `false` | Use TLS for Redis queue connection; when `REDIS_QUEUE_ADDR` is set explicitly, enable this with `true` to use TLS |
 | `REDIS_QUEUE_BATCH_SIZE` | No | `1000` | Maximum queue records per pull |
 | `REDIS_QUEUE_IDLE_INTERVAL` | No | `1s` | Empty queue check interval |
 | `REQUEST_TIMEOUT` | No | `30s` | CPA request timeout |
+| `TLS_SKIP_VERIFY` | No | `false` | Skip TLS certificate verification for CPA HTTPS and Redis queue TLS; enable only with self-signed certificates |
 | `WORK_DIR` | No | `./data` | Application work directory; database, logs, and backups default to `app.db`, `logs/`, and `backups/` under it |
 | `LOG_LEVEL` | No | `info` | Log level |
 | `LOG_FILE_ENABLED` | No | `true` | Write persistent log files |
@@ -126,6 +132,57 @@ npm --prefix ./web run test
 npm --prefix ./web run lint
 npm --prefix ./web run typecheck
 npm --prefix ./web run build
+```
+
+## Linux Binary Service
+
+### Download
+
+Download the Linux binary package for your architecture from [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest), or use the command line:
+
+```bash
+curl -L -o cpa-usage-keeper.tar.gz "<replace-with-linux-binary-download-url>"
+mkdir -p cpa-usage-keeper
+tar -xzf cpa-usage-keeper.tar.gz -C cpa-usage-keeper --strip-components=1
+cd cpa-usage-keeper
+```
+
+Copy the `linux_amd64` or `linux_arm64` package URL from Releases, then replace the placeholder in the command above.
+
+### Configure
+
+Copy and edit the example config. See the Configuration section above for the available options:
+
+```bash
+cp .env.example .env
+vim .env
+```
+
+### Run Directly
+
+```bash
+./cpa-usage-keeper
+```
+
+### Run With systemd
+
+The Linux binary package includes `cpa-usage-keeper.service`, which can be registered directly as a `systemd` service. After it starts, systemd keeps the process running after SSH or terminal sessions close.
+
+`systemd` requires an absolute `WorkingDirectory`. The `sed` command below writes the current directory into the service file automatically:
+
+```bash
+sudo cp cpa-usage-keeper.service /etc/systemd/system/cpa-usage-keeper.service # Copy the service file into the systemd unit directory.
+sudo sed -i "s|__CPA_USAGE_KEEPER_DIR__|$(pwd)|g" /etc/systemd/system/cpa-usage-keeper.service # Write the current directory as WorkingDirectory.
+sudo systemctl daemon-reload # Reload systemd unit files.
+sudo systemctl enable --now cpa-usage-keeper # Enable startup on boot and start the service now.
+```
+
+Useful commands:
+
+```bash
+sudo systemctl status cpa-usage-keeper # Show service status.
+sudo journalctl -u cpa-usage-keeper -f # Follow service logs.
+sudo systemctl restart cpa-usage-keeper # Restart the service.
 ```
 
 ## Docker

@@ -2,6 +2,7 @@
 .dev-docs/
 .claude/
 .worktrees/
+plans/
 
 # local environment files
 .env

@@ -6,22 +6,22 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"cpa-usage-keeper/internal/cpa"
+	"cpa-usage-keeper/internal/repository/dto"
 )
 
 const apiAliasPrefix = "redacted_api_"
 
-func UsageSnapshot(snapshot *cpa.StatisticsSnapshot) *cpa.StatisticsSnapshot {
+func UsageSnapshot(snapshot *dto.StatisticsSnapshot) *dto.StatisticsSnapshot {
 	if snapshot == nil {
 		return nil
 	}
 
-	redacted := &cpa.StatisticsSnapshot{
+	redacted := &dto.StatisticsSnapshot{
 		TotalRequests:  snapshot.TotalRequests,
 		SuccessCount:   snapshot.SuccessCount,
 		FailureCount:   snapshot.FailureCount,
 		TotalTokens:    snapshot.TotalTokens,
-		APIs:           make(map[string]cpa.APISnapshot, len(snapshot.APIs)),
+		APIs:           make(map[string]dto.APISnapshot, len(snapshot.APIs)),
 		RequestsByDay:  cloneIntMap(snapshot.RequestsByDay),
 		RequestsByHour: cloneIntMap(snapshot.RequestsByHour),
 		TokensByDay:    cloneIntMap(snapshot.TokensByDay),
@@ -85,14 +85,14 @@ func cloneIntMap(src map[string]int64) map[string]int64 {
 	return cloned
 }
 
-func cloneAPISnapshot(src cpa.APISnapshot) cpa.APISnapshot {
-	cloned := cpa.APISnapshot{
+func cloneAPISnapshot(src dto.APISnapshot) dto.APISnapshot {
+	cloned := dto.APISnapshot{
 		DisplayName:   src.DisplayName,
 		TotalRequests: src.TotalRequests,
 		SuccessCount:  src.SuccessCount,
 		FailureCount:  src.FailureCount,
 		TotalTokens:   src.TotalTokens,
-		Models:        make(map[string]cpa.ModelSnapshot, len(src.Models)),
+		Models:        make(map[string]dto.ModelSnapshot, len(src.Models)),
 	}
 
 	for modelName, modelSnapshot := range src.Models {
@@ -102,13 +102,13 @@ func cloneAPISnapshot(src cpa.APISnapshot) cpa.APISnapshot {
 	return cloned
 }
 
-func cloneModelSnapshot(src cpa.ModelSnapshot) cpa.ModelSnapshot {
-	cloned := cpa.ModelSnapshot{
+func cloneModelSnapshot(src dto.ModelSnapshot) dto.ModelSnapshot {
+	cloned := dto.ModelSnapshot{
 		TotalRequests: src.TotalRequests,
 		SuccessCount:  src.SuccessCount,
 		FailureCount:  src.FailureCount,
 		TotalTokens:   src.TotalTokens,
-		Details:       make([]cpa.RequestDetail, len(src.Details)),
+		Details:       make([]dto.RequestDetail, len(src.Details)),
 	}
 	copy(cloned.Details, src.Details)
 	return cloned

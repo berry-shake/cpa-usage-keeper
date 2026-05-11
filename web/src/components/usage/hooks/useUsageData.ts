@@ -25,8 +25,8 @@ export interface UseUsageDataOptions {
   enabled?: boolean;
 }
 
-const toRangeQuery = (value: string): UsageTimeRange => (
-  value === '4h' || value === '8h' || value === '12h' || value === '24h' || value === 'today' || value === '7d' || value === 'all' || value === 'custom'
+export const normalizeUsageOverviewRange = (value: string): UsageTimeRange => (
+  value === '4h' || value === '8h' || value === '12h' || value === '24h' || value === 'today' || value === '7d' || value === '30d' || value === 'all' || value === 'custom'
     ? value
     : 'all'
 );
@@ -44,7 +44,7 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
   const lastRefreshedAtTs = useUsageStatsStore((state) => state.lastRefreshedAt);
   const loadUsageStats = useUsageStatsStore((state) => state.loadUsageStats);
 
-  const resolvedRange = toRangeQuery(range);
+  const resolvedRange = normalizeUsageOverviewRange(range);
   const requestStart = resolvedRange === 'custom' ? toCustomDateParam(customStart) : undefined;
   const requestEnd = resolvedRange === 'custom' ? toCustomDateParam(customEnd) : undefined;
   const customRangeReady = resolvedRange !== 'custom' || (requestStart !== undefined && requestEnd !== undefined);

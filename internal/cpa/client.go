@@ -1,13 +1,21 @@
 package cpa
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
+
+	"cpa-usage-keeper/internal/cpa/dto/apicall"
+	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
+	"cpa-usage-keeper/internal/cpa/dto/response"
 )
 
 type Client struct {
@@ -17,6 +25,10 @@ type Client struct {
 }
 
 func (c *Client) doJSONRequest(ctx context.Context, path string, target any, kind string, configure func(*http.Request)) (int, []byte, error) {
+	return c.doJSONRequestWithBody(ctx, http.MethodGet, path, nil, target, kind, configure)
+}
+
+func (c *Client) doJSONRequestWithBody(ctx context.Context, method string, path string, body []byte, target any, kind string, configure func(*http.Request)) (int, []byte, error) {
 	if c == nil {
 		return 0, nil, fmt.Errorf("cpa client is nil")
 	}
@@ -24,7 +36,7 @@ func (c *Client) doJSONRequest(ctx context.Context, path string, target any, kin
 		return 0, nil, fmt.Errorf("cpa base url is required")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, fmt.Errorf("build %s request: %w", kind, err)
 	}
@@ -38,18 +50,18 @@ func (c *Client) doJSONRequest(ctx context.Context, path string, target any, kin
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return resp.StatusCode, nil, fmt.Errorf("read %s response: %w", kind, err)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return resp.StatusCode, body, fmt.Errorf("%s request returned status %d", kind, resp.StatusCode)
+		return resp.StatusCode, responseBody, fmt.Errorf("%s request returned status %d", kind, resp.StatusCode)
 	}
-	if err := json.Unmarshal(body, target); err != nil {
-		return resp.StatusCode, body, fmt.Errorf("decode %s json: %w", kind, err)
+	if err := json.Unmarshal(responseBody, target); err != nil {
+		return resp.StatusCode, responseBody, fmt.Errorf("decode %s json: %w", kind, err)
 	}
-	return resp.StatusCode, body, nil
+	return resp.StatusCode, responseBody, nil
 }
 
 func (c *Client) doManagementJSONRequest(ctx context.Context, path string, target any, kind string) (int, []byte, error) {
@@ -64,18 +76,41 @@ func (c *Client) doManagementJSONRequest(ctx context.Context, path string, targe
 	})
 }
 
-func NewClient(baseURL, managementKey string, timeout time.Duration) *Client {
+func (c *Client) doManagementJSONPostRequest(ctx context.Context, path string, requestBody any, target any, kind string) (int, []byte, error) {
+	if c == nil {
+		return 0, nil, fmt.Errorf("cpa client is nil")
+	}
+	if c.managementKey == "" {
+		return 0, nil, fmt.Errorf("cpa management key is required")
+	}
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return 0, nil, fmt.Errorf("encode management %s json: %w", kind, err)
+	}
+	return c.doJSONRequestWithBody(ctx, http.MethodPost, path, body, target, "management "+kind, func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer "+c.managementKey)
+		req.Header.Set("Content-Type", "application/json")
+	})
+}
+
+func NewClient(baseURL, managementKey string, timeout time.Duration, tlsSkipVerify bool) *Client {
+	httpClient := &http.Client{
+		Timeout: timeout,
+	}
+	if tlsSkipVerify {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		httpClient.Transport = transport
+	}
 	return &Client{
 		baseURL:       strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		managementKey: strings.TrimSpace(managementKey),
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
+		httpClient:    httpClient,
 	}
 }
 
-func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*ExternalAPIKeysResult, error) {
-	result := &ExternalAPIKeysResult{}
+func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*response.ExternalAPIKeysResult, error) {
+	result := &response.ExternalAPIKeysResult{}
 	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementExternalAPIKeysEndpoint, &result.Payload, "external api keys")
 	result.StatusCode = statusCode
 	result.Body = body
@@ -85,17 +120,32 @@ func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*ExternalAPIKeysResu
 	return result, nil
 }
 
-func (c *Client) FetchModels(ctx context.Context) (*ModelsResult, error) {
+func (c *Client) FetchUsageQueue(ctx context.Context, count int) (*response.UsageQueueResult, error) {
+	result := &response.UsageQueueResult{}
+	if count <= 0 {
+		return result, fmt.Errorf("usage queue count must be positive")
+	}
+	queryPath := cpaManagementUsageQueueEndpoint + "?count=" + url.QueryEscape(strconv.Itoa(count))
+	statusCode, body, err := c.doManagementJSONRequest(ctx, queryPath, &result.Payload, "usage queue")
+	result.StatusCode = statusCode
+	result.Body = body
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (c *Client) FetchModels(ctx context.Context) (*response.ModelsResult, error) {
 	externalAPIKeys, err := c.FetchExternalAPIKeys(ctx)
 	if err != nil {
-		return &ModelsResult{}, err
+		return &response.ModelsResult{}, err
 	}
 	externalAPIKey := firstNonEmptyString(externalAPIKeys.Payload.ExternalAPIKeys)
 	if externalAPIKey == "" {
-		return &ModelsResult{}, fmt.Errorf("cpa external api keys are required")
+		return &response.ModelsResult{}, fmt.Errorf("cpa external api keys are required")
 	}
 
-	result := &ModelsResult{}
+	result := &response.ModelsResult{}
 	statusCode, body, err := c.doJSONRequest(ctx, cpaModelsEndpoint, &result.Payload, "models", func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+externalAPIKey)
 	})
@@ -107,8 +157,8 @@ func (c *Client) FetchModels(ctx context.Context) (*ModelsResult, error) {
 	return result, nil
 }
 
-func (c *Client) FetchAuthFiles(ctx context.Context) (*AuthFilesResult, error) {
-	result := &AuthFilesResult{}
+func (c *Client) FetchAuthFiles(ctx context.Context) (*response.AuthFilesResult, error) {
+	result := &response.AuthFilesResult{}
 	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementAuthFilesEndpoint, &result.Payload, "auth files")
 	result.StatusCode = statusCode
 	result.Body = body
@@ -118,24 +168,33 @@ func (c *Client) FetchAuthFiles(ctx context.Context) (*AuthFilesResult, error) {
 	return result, nil
 }
 
-func (c *Client) FetchGeminiAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) CallManagementAPI(ctx context.Context, request apicall.Request) (*apicall.Response, error) {
+	result := &apicall.Response{}
+	_, _, err := c.doManagementJSONPostRequest(ctx, cpaManagementAPICallEndpoint, request, result, "api call")
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (c *Client) FetchGeminiAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementGeminiAPIKeyEndpoint, "gemini-api-key", "gemini api keys")
 }
 
-func (c *Client) FetchClaudeAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) FetchClaudeAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementClaudeAPIKeyEndpoint, "claude-api-key", "claude api keys")
 }
 
-func (c *Client) FetchCodexAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) FetchCodexAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementCodexAPIKeyEndpoint, "codex-api-key", "codex api keys")
 }
 
-func (c *Client) FetchVertexAPIKeys(ctx context.Context) (*ProviderKeyConfigResult, error) {
+func (c *Client) FetchVertexAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	return c.fetchProviderKeyConfig(ctx, cpaManagementVertexAPIKeyEndpoint, "vertex-api-key", "vertex api keys")
 }
 
-func (c *Client) fetchProviderKeyConfig(ctx context.Context, path string, payloadKey string, kind string) (*ProviderKeyConfigResult, error) {
-	result := &ProviderKeyConfigResult{}
+func (c *Client) fetchProviderKeyConfig(ctx context.Context, path string, payloadKey string, kind string) (*response.ProviderKeyConfigResult, error) {
+	result := &response.ProviderKeyConfigResult{}
 	var raw json.RawMessage
 	statusCode, body, err := c.doManagementJSONRequest(ctx, path, &raw, kind)
 	result.StatusCode = statusCode
@@ -151,8 +210,8 @@ func (c *Client) fetchProviderKeyConfig(ctx context.Context, path string, payloa
 	return result, nil
 }
 
-func (c *Client) FetchOpenAICompatibility(ctx context.Context) (*OpenAICompatibilityResult, error) {
-	result := &OpenAICompatibilityResult{}
+func (c *Client) FetchOpenAICompatibility(ctx context.Context) (*response.OpenAICompatibilityResult, error) {
+	result := &response.OpenAICompatibilityResult{}
 	var raw json.RawMessage
 	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementOpenAICompatibilityEndpoint, &raw, "openai compatibility")
 	result.StatusCode = statusCode
@@ -168,8 +227,8 @@ func (c *Client) FetchOpenAICompatibility(ctx context.Context) (*OpenAICompatibi
 	return result, nil
 }
 
-func decodeProviderKeyConfigPayload(raw json.RawMessage, payloadKey string) ([]ProviderKeyConfig, error) {
-	var direct []ProviderKeyConfig
+func decodeProviderKeyConfigPayload(raw json.RawMessage, payloadKey string) ([]providerconfig.ProviderKeyConfig, error) {
+	var direct []providerconfig.ProviderKeyConfig
 	if err := json.Unmarshal(raw, &direct); err == nil {
 		return direct, nil
 	}
@@ -187,8 +246,8 @@ func decodeProviderKeyConfigPayload(raw json.RawMessage, payloadKey string) ([]P
 	return direct, nil
 }
 
-func decodeOpenAICompatibilityPayload(raw json.RawMessage, payloadKey string) ([]OpenAICompatibilityConfig, error) {
-	var direct []OpenAICompatibilityConfig
+func decodeOpenAICompatibilityPayload(raw json.RawMessage, payloadKey string) ([]providerconfig.OpenAICompatibilityConfig, error) {
+	var direct []providerconfig.OpenAICompatibilityConfig
 	if err := json.Unmarshal(raw, &direct); err == nil {
 		return direct, nil
 	}

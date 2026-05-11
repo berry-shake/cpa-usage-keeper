@@ -64,8 +64,9 @@ jobs:
           mkdir -p "${package_dir}/data"
 
           CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" CC="${CC}" \
-            go build -trimpath -ldflags="-s -w" -o "${package_dir}/cpa-usage-keeper" ./cmd/server/main.go
+            go build -trimpath -ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" -o "${package_dir}/cpa-usage-keeper" ./cmd/server/main.go
           cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
+          cp deploy/linux/cpa-usage-keeper.service "${package_dir}/"
           tar -czf "dist/${package_name}.tar.gz" -C dist "${package_name}"
 
       - name: Upload binary package artifact
@@ -126,7 +127,7 @@ jobs:
           mkdir -p "${package_dir}/data"
 
           CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" \
-            go build -trimpath -ldflags="-s -w" -o "${package_dir}/cpa-usage-keeper" ./cmd/server/main.go
+            go build -trimpath -ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" -o "${package_dir}/cpa-usage-keeper" ./cmd/server/main.go
           cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
           tar -czf "dist/${package_name}.tar.gz" -C dist "${package_name}"
 
@@ -204,7 +205,7 @@ jobs:
           mkdir -p "${package_dir}/data"
 
           CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" CC="${CC}" \
-            go build -trimpath -ldflags="-s -w" -o "${package_dir}/cpa-usage-keeper.exe" ./cmd/server/main.go
+            go build -trimpath -ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" -o "${package_dir}/cpa-usage-keeper.exe" ./cmd/server/main.go
           cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
 
       - name: Archive binary package

@@ -34,6 +34,7 @@ type RequestEventRow = {
   source: string;
   sourceType: string;
   authIndex: string;
+  isDelete: boolean;
   failed: boolean;
   latencyMs: number | null;
   inputTokens: number;
@@ -142,6 +143,7 @@ export function RequestEventsDetailsCard({
         source,
         sourceType,
         authIndex,
+        isDelete: event.isDelete === true,
         failed: event.failed === true,
         latencyMs,
         inputTokens,
@@ -166,9 +168,10 @@ export function RequestEventsDetailsCard({
   const sourceOptions = useMemo(() => {
     const options = [
       { value: ALL_FILTER, label: t('usage_stats.filter_all') },
-      ...backendSourceOptions.map((source) => ({ value: source.value, label: source.label || source.value })),
+      ...backendSourceOptions.map((source) => ({ value: source.value, label: source.displayName || source.label || source.value })),
     ];
-    const selectedLabel = backendSourceOptions.find((source) => source.value === sourceFilter)?.label;
+    const selectedSource = backendSourceOptions.find((source) => source.value === sourceFilter);
+    const selectedLabel = selectedSource?.displayName || selectedSource?.label;
     return appendSelectedOption(options, sourceFilter, selectedLabel || sourceFilter);
   }, [backendSourceOptions, sourceFilter, t]);
 
@@ -310,6 +313,7 @@ export function RequestEventsDetailsCard({
           <Button
             variant="ghost"
             size="sm"
+            className={styles.usagePillAction}
             onClick={handleClearFilters}
             disabled={!hasActiveFilters}
           >
@@ -328,7 +332,7 @@ export function RequestEventsDetailsCard({
               value={effectiveModelFilter}
               options={modelOptions}
               onChange={onModelFilterChange}
-              className={styles.requestEventsSelect}
+              className={`${styles.requestEventsSelect} ${styles.usagePillControl}`}
               ariaLabel={t('usage_stats.request_events_filter_model')}
               fullWidth={false}
             />
@@ -341,7 +345,7 @@ export function RequestEventsDetailsCard({
               value={effectiveSourceFilter}
               options={sourceOptions}
               onChange={onSourceFilterChange}
-              className={styles.requestEventsSelect}
+              className={`${styles.requestEventsSelect} ${styles.usagePillControl}`}
               ariaLabel={t('usage_stats.request_events_filter_source')}
               fullWidth={false}
             />
@@ -354,7 +358,7 @@ export function RequestEventsDetailsCard({
               value={effectiveResultFilter}
               options={resultOptions}
               onChange={onResultFilterChange}
-              className={styles.requestEventsResultSelect}
+              className={`${styles.requestEventsResultSelect} ${styles.usagePillControl}`}
               ariaLabel={t('usage_stats.request_events_filter_result')}
               fullWidth={false}
             />
@@ -368,7 +372,7 @@ export function RequestEventsDetailsCard({
               value={String(pageSize)}
               options={pageSizeSelectOptions}
               onChange={(value) => onPageSizeChange(Number(value))}
-              className={`${styles.requestEventsPageSizeSelect} ${styles.requestEventsPageSizeSelectCompact}`}
+              className={`${styles.requestEventsPageSizeSelect} ${styles.requestEventsPageSizeSelectCompact} ${styles.usagePillControl}`}
               ariaLabel={`${t('usage_stats.request_events_rows_per_page')}: ${pageSizeOptions.join(', ')}`}
               fullWidth={false}
               disabled={loading}
@@ -376,10 +380,10 @@ export function RequestEventsDetailsCard({
           </div>
           <div className={styles.requestEventsPaginationItem}>
             <span className={styles.requestEventsFilterLabel}>{pageLabel}</span>
-            <div className={styles.requestEventsPagerControls}>
+            <div className={`${styles.requestEventsPagerControls} ${styles.usagePillShell}`}>
               <button
                 type="button"
-                className={styles.requestEventsPagerButton}
+                className={`${styles.requestEventsPagerButton} ${styles.usagePillAction}`}
                 onClick={() => onPageChange(page - 1)}
                 disabled={loading || safePage <= 1}
               >
@@ -387,7 +391,7 @@ export function RequestEventsDetailsCard({
               </button>
               <button
                 type="button"
-                className={styles.requestEventsPagerButton}
+                className={`${styles.requestEventsPagerButton} ${styles.usagePillAction}`}
                 onClick={() => onPageChange(page + 1)}
                 disabled={loading || safeTotalPages === 0 || safePage >= safeTotalPages}
               >
@@ -439,10 +443,19 @@ export function RequestEventsDetailsCard({
                     </td>
                     <td className={styles.modelCell}>{row.model}</td>
                     <td className={styles.requestEventsSourceCell} title={row.source}>
-                      <span>{row.source}</span>
-                      {row.sourceType && (
-                        <span className={styles.credentialType}>{row.sourceType}</span>
-                      )}
+                      <span className={styles.requestEventsSourceStack}>
+                        <span className={styles.requestEventsSourceValue}>{row.source}</span>
+                        {(row.isDelete || row.sourceType) && (
+                          <span className={styles.requestEventsSourceTags}>
+                            {row.sourceType && (
+                              <span className={styles.credentialType}>{row.sourceType}</span>
+                            )}
+                            {row.isDelete && (
+                              <span className={styles.requestEventsDeletedTag}>{t('usage_stats.deleted')}</span>
+                            )}
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td>
                       <span

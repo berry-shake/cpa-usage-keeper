@@ -2,14 +2,16 @@ package service
 
 import (
 	"context"
+	"cpa-usage-keeper/internal/repository/dto"
 	"math"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
 func TestUsageServiceGetUsageWithFilterDelegatesToFilteredSnapshot(t *testing.T) {
@@ -18,7 +20,7 @@ func TestUsageServiceGetUsageWithFilterDelegatesToFilteredSnapshot(t *testing.T)
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), TotalTokens: 20},
 	}); err != nil {
@@ -28,7 +30,7 @@ func TestUsageServiceGetUsageWithFilterDelegatesToFilteredSnapshot(t *testing.T)
 	start := time.Date(2026, 4, 16, 9, 30, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 10, 30, 0, 0, time.UTC)
 	provider := NewUsageService(db)
-	snapshot, err := provider.GetUsageWithFilter(context.Background(), UsageFilter{StartTime: &start, EndTime: &end})
+	snapshot, err := provider.GetUsageWithFilter(context.Background(), servicedto.UsageFilter{StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("GetUsageWithFilter returned error: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
-	if _, err := repository.UpsertModelPriceSetting(db, repository.ModelPriceSettingInput{
+	if _, err := repository.UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
@@ -51,7 +53,7 @@ func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
-	if _, _, err := repository.InsertUsageEvents(db, []models.UsageEvent{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), InputTokens: 1000, OutputTokens: 500, CachedTokens: 100, ReasoningTokens: 50, TotalTokens: 1650},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), InputTokens: 500, OutputTokens: 250, CachedTokens: 0, ReasoningTokens: 25, TotalTokens: 775},
 	}); err != nil {
@@ -61,7 +63,7 @@ func TestUsageServiceGetUsageOverviewDelegatesToFilteredOverview(t *testing.T) {
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 0, time.UTC)
 	provider := NewUsageService(db)
-	overview, err := provider.GetUsageOverview(context.Background(), UsageFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := provider.GetUsageOverview(context.Background(), servicedto.UsageFilter{Range: "24h", StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatalf("GetUsageOverview returned error: %v", err)
 	}

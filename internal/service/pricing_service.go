@@ -6,29 +6,24 @@ import (
 	"sort"
 	"strings"
 
-	"cpa-usage-keeper/internal/cpa"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/cpa/dto/response"
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
+	repodto "cpa-usage-keeper/internal/repository/dto"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
 type PricingProvider interface {
 	ListUsedModels(context.Context) ([]string, error)
-	ListPricing(context.Context) ([]models.ModelPriceSetting, error)
-	UpdatePricing(context.Context, UpdatePricingInput) (*models.ModelPriceSetting, error)
+	ListPricing(context.Context) ([]entities.ModelPriceSetting, error)
+	UpdatePricing(context.Context, servicedto.UpdatePricingInput) (*entities.ModelPriceSetting, error)
 	DeletePricing(context.Context, string) error
 }
 
 type ModelsFetcher interface {
-	FetchModels(context.Context) (*cpa.ModelsResult, error)
-}
-
-type UpdatePricingInput struct {
-	Model                string
-	PromptPricePer1M     float64
-	CompletionPricePer1M float64
-	CachePricePer1M      float64
+	FetchModels(context.Context) (*response.ModelsResult, error)
 }
 
 type pricingService struct {
@@ -48,11 +43,11 @@ func (s *pricingService) ListUsedModels(ctx context.Context) ([]string, error) {
 	return s.effectiveModels(ctx)
 }
 
-func (s *pricingService) ListPricing(context.Context) ([]models.ModelPriceSetting, error) {
+func (s *pricingService) ListPricing(context.Context) ([]entities.ModelPriceSetting, error) {
 	return repository.ListModelPriceSettings(s.db)
 }
 
-func (s *pricingService) UpdatePricing(ctx context.Context, input UpdatePricingInput) (*models.ModelPriceSetting, error) {
+func (s *pricingService) UpdatePricing(ctx context.Context, input servicedto.UpdatePricingInput) (*entities.ModelPriceSetting, error) {
 	modelName := strings.TrimSpace(input.Model)
 	if modelName == "" {
 		return nil, fmt.Errorf("model is required")
@@ -74,7 +69,7 @@ func (s *pricingService) UpdatePricing(ctx context.Context, input UpdatePricingI
 		return nil, fmt.Errorf("model %q has not been used", modelName)
 	}
 
-	return repository.UpsertModelPriceSetting(s.db, repository.ModelPriceSettingInput{
+	return repository.UpsertModelPriceSetting(s.db, repodto.ModelPriceSettingInput{
 		Model:                modelName,
 		PromptPricePer1M:     input.PromptPricePer1M,
 		CompletionPricePer1M: input.CompletionPricePer1M,
@@ -101,7 +96,7 @@ func (s *pricingService) effectiveModels(ctx context.Context) ([]string, error) 
 	return normalizeCPAModels(result), nil
 }
 
-func normalizeCPAModels(result *cpa.ModelsResult) []string {
+func normalizeCPAModels(result *response.ModelsResult) []string {
 	if result == nil {
 		return []string{}
 	}

@@ -1,23 +1,26 @@
 package repository
 
 import (
+	"cpa-usage-keeper/internal/repository/dto"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/models"
+	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/repository/migration"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-type StorageCleanupResult struct {
-	RedisInbox RedisUsageInboxCleanupResult
-}
-
 func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
+	databaseExists, err := sqliteDatabaseFileExists(cfg.SQLitePath)
+	if err != nil {
+		return nil, err
+	}
 	dsn := sqliteDSN(cfg.SQLitePath)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
@@ -41,11 +44,22 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
 	}
 
-	if err := runSchemaMigrations(db); err != nil {
-		return nil, fmt.Errorf("run schema migrations: %w", err)
+	hasTables, err := sqliteDatabaseHasTables(db)
+	if err != nil {
+		return nil, err
 	}
-	if err := db.AutoMigrate(models.All()...); err != nil {
-		return nil, fmt.Errorf("auto migrate database: %w", err)
+	if !databaseExists || !hasTables {
+		if err := db.AutoMigrate(entities.All()...); err != nil {
+			return nil, fmt.Errorf("auto migrate fresh database: %w", err)
+		}
+		if err := migration.MarkAllAsApplied(db); err != nil {
+			return nil, fmt.Errorf("mark schema migrations applied: %w", err)
+		}
+		return db, nil
+	}
+
+	if err := migration.Run(db); err != nil {
+		return nil, fmt.Errorf("run schema migrations: %w", err)
 	}
 
 	return db, nil
@@ -59,7 +73,33 @@ func sqliteDSN(path string) string {
 	return trimmed + "?_busy_timeout=5000&_foreign_keys=on"
 }
 
-func InsertUsageEvents(db *gorm.DB, events []models.UsageEvent) (int, int, error) {
+func sqliteDatabaseFileExists(path string) (bool, error) {
+	trimmed := strings.TrimSpace(path)
+	if before, _, ok := strings.Cut(trimmed, "?"); ok {
+		trimmed = before
+	}
+	if trimmed == "" || trimmed == ":memory:" {
+		return false, nil
+	}
+	_, err := os.Stat(trimmed)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check sqlite database %s: %w", filepath.Clean(trimmed), err)
+}
+
+func sqliteDatabaseHasTables(db *gorm.DB) (bool, error) {
+	var count int64
+	if err := db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").Scan(&count).Error; err != nil {
+		return false, fmt.Errorf("check sqlite database tables: %w", err)
+	}
+	return count > 0, nil
+}
+
+func InsertUsageEvents(db *gorm.DB, events []entities.UsageEvent) (int, int, error) {
 	if db == nil {
 		return 0, 0, fmt.Errorf("database is nil")
 	}
@@ -67,12 +107,14 @@ func InsertUsageEvents(db *gorm.DB, events []models.UsageEvent) (int, int, error
 		return 0, 0, nil
 	}
 
-	const batchSize = 100
 	inserted := 0
 
-	for start := 0; start < len(events); start += batchSize {
-		end := min(start+batchSize, len(events))
+	// 按仓储默认批次拆分写入，避免单条 INSERT 的 SQLite 变量数量过多。
+	for start := 0; start < len(events); start += insertBatchSize(entities.UsageEvent{}) {
+		end := min(start+insertBatchSize(entities.UsageEvent{}), len(events))
 		batch := events[start:end]
+
+		// 每批仍按 event_key 去重，保持原有重复事件忽略语义。
 		result := db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "event_key"}},
 			DoNothing: true,
@@ -89,15 +131,15 @@ func InsertUsageEvents(db *gorm.DB, events []models.UsageEvent) (int, int, error
 
 // CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox，最后执行 VACUUM。
 // VACUUM 必须在删除完成后单独执行，任何一步失败都会停止后续步骤并把已完成部分的结果返回给上层日志。
-func CleanupStorage(db *gorm.DB, now time.Time) (StorageCleanupResult, error) {
+func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error) {
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {
-		return StorageCleanupResult{RedisInbox: redisResult}, err
+		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
 	if err := db.Exec("VACUUM").Error; err != nil {
-		return StorageCleanupResult{RedisInbox: redisResult}, err
+		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
-	return StorageCleanupResult{RedisInbox: redisResult}, nil
+	return dto.StorageCleanupResult{RedisInbox: redisResult}, nil
 }
 
 func Vacuum(db *gorm.DB) error {

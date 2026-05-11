@@ -67,11 +67,28 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('disabled');
   });
 
-  it('uses backend source values while showing resolved source labels', () => {
-    const html = renderCard({ sourceFilter: 'source-a' });
+  it('stacks source value above source tags', () => {
+    const html = renderCard({
+      events: [{ ...events[0], isDelete: true }],
+    });
 
-    expect(countOccurrences(html, 'Provider A')).toBeGreaterThanOrEqual(2);
-    expect(html).toContain('aria-label="Source"><span class="_triggerText_c80422 ">Provider A</span>');
+    expect(html).toContain('_requestEventsSourceStack_');
+    expect(html).toContain('_requestEventsSourceValue_');
+    expect(html).toContain('_requestEventsSourceTags_');
+    expect(html).toContain('_requestEventsDeletedTag_');
+    expect(html).toContain('Provider A');
+    expect(html).toContain('openai');
+    expect(html).toContain('Deleted');
+  });
+
+  it('uses backend source values while showing resolved source labels', () => {
+    const html = renderCard({
+      sourceFilter: 'source-a',
+      sourceOptions: [{ value: 'source-a', label: 'Provider A', displayName: 'Provider A(Team Prefix)' }, { value: 'source-b', label: 'Provider B' }],
+    });
+
+    expect(countOccurrences(html, 'Provider A(Team Prefix)')).toBeGreaterThanOrEqual(1);
+    expect(html).toContain('aria-label="Source"><span class="_triggerText_c80422 ">Provider A(Team Prefix)</span>');
   });
 
   it('uses backend model and source options instead of current page grouping', () => {

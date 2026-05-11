@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/cpa"
+	"cpa-usage-keeper/internal/repository/dto"
 )
 
 func TestAPIAliasIsStableAndIdempotent(t *testing.T) {
@@ -33,27 +33,27 @@ func TestAPIKeyDisplayNameMasksMiddle(t *testing.T) {
 }
 
 func TestUsageSnapshotRedactsOnlyAPIKeys(t *testing.T) {
-	snapshot := &cpa.StatisticsSnapshot{
+	snapshot := &dto.StatisticsSnapshot{
 		TotalRequests: 1,
 		SuccessCount:  1,
 		TotalTokens:   42,
-		APIs: map[string]cpa.APISnapshot{
+		APIs: map[string]dto.APISnapshot{
 			"sk-live-secret-value": {
 				TotalRequests: 1,
 				SuccessCount:  1,
 				TotalTokens:   42,
-				Models: map[string]cpa.ModelSnapshot{
+				Models: map[string]dto.ModelSnapshot{
 					"claude-sonnet": {
 						TotalRequests: 1,
 						SuccessCount:  1,
 						TotalTokens:   42,
-						Details: []cpa.RequestDetail{{
+						Details: []dto.RequestDetail{{
 							Timestamp: time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC),
 							LatencyMS: 150,
 							Source:    "source-a",
 							AuthIndex: "3",
 							Failed:    false,
-							Tokens:    cpa.TokenStats{TotalTokens: 42},
+							Tokens:    dto.TokenStats{TotalTokens: 42},
 						}},
 					},
 				},

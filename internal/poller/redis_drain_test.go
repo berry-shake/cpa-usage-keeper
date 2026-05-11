@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"cpa-usage-keeper/internal/service"
+	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/sirupsen/logrus"
 )
 
 type redisDrainSyncStub struct {
 	mu             sync.Mutex
-	pullResults    []*service.RedisInboxPullResult
+	pullResults    []*servicedto.RedisInboxPullResult
 	pullErrs       []error
-	processResults []*service.RedisBatchSyncResult
+	processResults []*servicedto.RedisBatchSyncResult
 	processErrs    []error
 	pullStarted    chan struct{}
 	releasePull    chan struct{}
@@ -25,11 +25,11 @@ type redisDrainSyncStub struct {
 	processCalls   int
 }
 
-func (s *redisDrainSyncStub) PullRedisUsageInbox(context.Context) (*service.RedisInboxPullResult, error) {
+func (s *redisDrainSyncStub) PullRedisUsageInbox(context.Context) (*servicedto.RedisInboxPullResult, error) {
 	s.mu.Lock()
 	s.pullCalls++
 	call := s.pullCalls
-	result := &service.RedisInboxPullResult{Status: "completed", InsertedRows: 1}
+	result := &servicedto.RedisInboxPullResult{Status: "completed", InsertedRows: 1}
 	if len(s.pullResults) >= call {
 		result = s.pullResults[call-1]
 	} else if len(s.pullResults) > 0 {
@@ -53,11 +53,11 @@ func (s *redisDrainSyncStub) PullRedisUsageInbox(context.Context) (*service.Redi
 	return result, err
 }
 
-func (s *redisDrainSyncStub) ProcessRedisUsageInbox(ctx context.Context) (*service.RedisBatchSyncResult, error) {
+func (s *redisDrainSyncStub) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.RedisBatchSyncResult, error) {
 	s.mu.Lock()
 	s.processCalls++
 	call := s.processCalls
-	result := &service.RedisBatchSyncResult{Status: "completed", InsertedEvents: 1}
+	result := &servicedto.RedisBatchSyncResult{Status: "completed", InsertedEvents: 1}
 	if len(s.processResults) >= call {
 		result = s.processResults[call-1]
 	} else if len(s.processResults) > 0 {
@@ -103,7 +103,7 @@ func captureRedisDrainLogrusOutput(t *testing.T) *bytes.Buffer {
 
 func TestRedisDrainLoopsLogTaskStarts(t *testing.T) {
 	logs := captureRedisDrainLogrusOutput(t)
-	syncer := &redisDrainSyncStub{pullResults: []*service.RedisInboxPullResult{{Empty: true, Status: "empty"}}}
+	syncer := &redisDrainSyncStub{pullResults: []*servicedto.RedisInboxPullResult{{Empty: true, Status: "empty"}}}
 	drain := NewRedisDrain(syncer, RedisDrainConfig{IdleInterval: time.Hour, ErrorBackoff: time.Hour})
 
 	pullCtx, cancelPull := context.WithCancel(context.Background())
@@ -129,7 +129,7 @@ func TestRedisDrainLoopsLogTaskStarts(t *testing.T) {
 }
 
 func TestRedisDrainPullLoopDoesNotProcessInbox(t *testing.T) {
-	syncer := &redisDrainSyncStub{pullResults: []*service.RedisInboxPullResult{{Empty: true, Status: "empty"}}}
+	syncer := &redisDrainSyncStub{pullResults: []*servicedto.RedisInboxPullResult{{Empty: true, Status: "empty"}}}
 	drain := NewRedisDrain(syncer, RedisDrainConfig{IdleInterval: time.Hour, ErrorBackoff: time.Hour})
 	ctx, cancel := context.WithCancel(context.Background())
 	drain.sleep = func(context.Context, time.Duration) bool {

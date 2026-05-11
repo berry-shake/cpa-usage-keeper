@@ -9,6 +9,8 @@ const (
 	cpaManagementClaudeAPIKeyEndpoint        = "/v0/management/claude-api-key"
 	cpaManagementAmpcodeEndpoint             = "/v0/management/ampcode"
 	cpaManagementOpenAICompatibilityEndpoint = "/v0/management/openai-compatibility"
+	cpaManagementUsageQueueEndpoint          = "/v0/management/usage-queue"
+	cpaManagementAPICallEndpoint             = "/v0/management/api-call"
 	cpaModelsEndpoint                        = "/v1/models"
 
 	cpaManagementRedisNetwork     = "tcp"
