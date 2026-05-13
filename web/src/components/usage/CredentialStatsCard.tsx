@@ -151,8 +151,9 @@ export function CredentialStatsCard({
         />
       }
       className={`${styles.detailsFixedCard} ${styles.credentialStatsCard}`}
+      aria-busy={loading}
     >
-      {loading ? (
+      {loading && rows.length === 0 ? (
         <div className={styles.hint}>{t('common.loading')}</div>
       ) : rows.length > 0 ? (
         <div className={`${styles.detailsScroll} ${styles.credentialStatsScroll}`}>
