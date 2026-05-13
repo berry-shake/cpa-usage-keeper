@@ -1,5 +1,3 @@
-export const USAGE_QUOTA_REFRESH_LIMIT = 20
-
 export interface AuthSessionResponse {
   authenticated: boolean
 }

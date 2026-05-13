@@ -166,6 +166,22 @@ describe('credentialViewModels', () => {
     expect(rows[0].extraQuota.map((quota) => quota.label)).toEqual(['Code Assist Credit'])
   })
 
+  it('classifies quota bar colors at 50 and 20 percent remaining thresholds', () => {
+    const quotas = new Map<string, UsageQuotaRow[]>([
+      ['green-auth', [{ key: 'rate_limit.primary_window', label: '5h', remainingFraction: 0.5 }]],
+      ['yellow-auth', [{ key: 'rate_limit.primary_window', label: '5h', remainingFraction: 0.49 }]],
+      ['red-auth', [{ key: 'rate_limit.primary_window', label: '5h', remainingFraction: 0.19 }]],
+    ])
+
+    const rows = buildAuthFileCredentialRows([
+      identity({ identity: 'green-auth' }),
+      identity({ identity: 'yellow-auth' }),
+      identity({ identity: 'red-auth' }),
+    ], quotas)
+
+    expect(rows.map((row) => row.primaryQuota?.status)).toEqual(['ok', 'warning', 'danger'])
+  })
+
   it('uses quota window duration instead of raw key when classifying Codex windows', () => {
     const quotas = new Map<string, UsageQuotaRow[]>([
       ['auth-1', [

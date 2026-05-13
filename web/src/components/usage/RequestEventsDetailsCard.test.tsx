@@ -68,6 +68,33 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('disabled');
   });
 
+  it('formats timestamps with compact numeric date and time', () => {
+    const html = renderCard({
+      events: [{ ...events[0], timestamp: '2026-05-13T00:38:19+08:00' }],
+    });
+
+    expect(html).toContain('2026/05/13 00:38:19');
+    expect(html).not.toContain('5/13/2026, 12:38:19 AM');
+  });
+
+  it('renders cache rate after cached tokens with two decimal places', () => {
+    const html = renderCard({
+      events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 100, cached_tokens: 25 } }],
+    });
+
+    expect(html.indexOf('<th>Cached</th>')).toBeLessThan(html.indexOf('<th>Cache Rate</th>'));
+    expect(html.indexOf('<th>Cache Rate</th>')).toBeLessThan(html.indexOf('<th>Total Tokens</th>'));
+    expect(html).toContain('<td>25</td><td>25.00%</td><td>200</td>');
+  });
+
+  it('shows a dash for cache rate when input tokens are zero', () => {
+    const html = renderCard({
+      events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 0, cached_tokens: 25 } }],
+    });
+
+    expect(html).toContain('<td>0</td><td>60</td><td>20</td><td>25</td><td>-</td><td>200</td>');
+  });
+
   it('stacks source value above source tags', () => {
     const html = renderCard({
       events: [{ ...events[0], isDelete: true }],

@@ -159,7 +159,7 @@ export function formatCredentialPercent(value: number | null): string {
   if (value === null) {
     return '—'
   }
-  return `${Math.round(value)}%`
+  return `${value.toFixed(2)}%`
 }
 
 export function credentialToneClassName(prefix: string, tone: string): string {

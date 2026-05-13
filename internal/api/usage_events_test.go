@@ -61,6 +61,14 @@ func (s *usageEventsStub) GetUsageAnalysis(context.Context, servicedto.UsageFilt
 }
 
 func TestUsageEventsReturnsFilteredRows(t *testing.T) {
+	previousLocal := time.Local
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	t.Cleanup(func() { time.Local = previousLocal })
+	time.Local = location
+
 	provider := &usageEventsStub{events: []servicedto.UsageEventRecord{{
 		ID:              42,
 		Timestamp:       time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
@@ -104,6 +112,9 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	}
 	if !contains(body, `"auth_index":"2"`) {
 		t.Fatalf("expected auth index in response body: %s", body)
+	}
+	if !contains(body, `"timestamp":"2026-04-22T19:00:00+08:00"`) {
+		t.Fatalf("expected project timezone timestamp in response body: %s", body)
 	}
 	if provider.filterCalls != 1 {
 		t.Fatalf("expected ListUsageEvents to be called once, got %d", provider.filterCalls)

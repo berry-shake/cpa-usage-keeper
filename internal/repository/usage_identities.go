@@ -8,6 +8,7 @@ import (
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/timeutil"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -194,9 +195,9 @@ func AggregateUsageIdentityStats(ctx context.Context, db *gorm.DB, now time.Time
 				"reasoning_tokens":               identity.ReasoningTokens + delta.ReasoningTokens,
 				"cached_tokens":                  identity.CachedTokens + delta.CachedTokens,
 				"total_tokens":                   identity.TotalTokens + delta.TotalTokens,
-				"first_used_at":                  firstUsedAt,
-				"last_used_at":                   lastUsedAt,
-				"stats_updated_at":               now,
+				"first_used_at":                  formatStorageTimePtr(firstUsedAt),
+				"last_used_at":                   formatStorageTimePtr(lastUsedAt),
+				"stats_updated_at":               timeutil.FormatStorageTime(now),
 				"last_aggregated_usage_event_id": delta.MaxUsageEventID,
 			}
 			if err := tx.Model(&entities.UsageIdentity{}).Where("id = ?", identity.ID).Updates(updates).Error; err != nil {
@@ -300,11 +301,28 @@ func normalizeUsageIdentities(identities []entities.UsageIdentity, authType enti
 		identity.ProjectID = trimOptionalString(identity.ProjectID)
 		identity.PlanType = trimOptionalString(identity.PlanType)
 		identity.IsDeleted = false
+		identity.ActiveStart = normalizeStorageTimePtr(identity.ActiveStart)
+		identity.ActiveUntil = normalizeStorageTimePtr(identity.ActiveUntil)
 		identity.DeletedAt = nil
 		normalized = append(normalized, identity)
 	}
 
 	return normalized, incomingIdentities
+}
+
+func normalizeStorageTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := timeutil.NormalizeStorageTime(*value)
+	return &normalized
+}
+
+func formatStorageTimePtr(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return timeutil.FormatStorageTime(*value)
 }
 
 func trimOptionalString(value *string) *string {
@@ -365,7 +383,7 @@ func markStaleUsageIdentitiesDeleted(tx *gorm.DB, query *gorm.DB, incomingIdenti
 		end := min(start+insertBatchSize(entities.UsageIdentity{}), len(staleIDs))
 		if err := tx.Model(&entities.UsageIdentity{}).
 			Where("id IN ?", staleIDs[start:end]).
-			Updates(map[string]any{"is_deleted": true, "deleted_at": now}).Error; err != nil {
+			Updates(map[string]any{"is_deleted": true, "deleted_at": timeutil.FormatStorageTime(now)}).Error; err != nil {
 			return fmt.Errorf("%s: %w", context, err)
 		}
 	}

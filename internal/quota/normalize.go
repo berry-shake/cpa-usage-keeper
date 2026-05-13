@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"cpa-usage-keeper/internal/timeutil"
 )
 
 func NormalizeQuotaRows(output ProviderOutput) []QuotaRow {
@@ -173,7 +175,7 @@ func appendCodexWindowQuotaRow(rows []QuotaRow, key string, label string, scope 
 		row.Window = &QuotaWindow{Seconds: intPtr(window.LimitWindowSeconds)}
 	}
 	if window.ResetAt != 0 {
-		row.ResetAt = time.Unix(window.ResetAt, 0).UTC().Format(time.RFC3339)
+		row.ResetAt = timeutil.FormatStorageTime(time.Unix(window.ResetAt, 0))
 	}
 	return append(rows, row)
 }

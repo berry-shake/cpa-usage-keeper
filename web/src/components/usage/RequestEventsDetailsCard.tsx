@@ -50,6 +50,7 @@ type RequestEventRow = {
   reasoningTokens: number;
   cachedTokens: number;
   totalTokens: number;
+  cacheRate: string;
   cost: number;
   hasPrice: boolean;
 };
@@ -79,6 +80,17 @@ const toNumber = (value: unknown): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
   return parsed;
+};
+
+const formatRequestEventTimestamp = (timestamp: string): string => {
+  const match = timestamp.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})/);
+  if (!match) return timestamp || '-';
+  return `${match[1]}/${match[2]}/${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+};
+
+const formatCacheRate = (cachedTokens: number, inputTokens: number): string => {
+  if (inputTokens <= 0) return '-';
+  return `${((cachedTokens / inputTokens) * 100).toFixed(2)}%`;
 };
 
 const encodeCsv = (value: string | number): string => {
@@ -121,7 +133,7 @@ export function RequestEventsDetailsCard({
   onSourceFilterChange,
   onResultFilterChange,
 }: RequestEventsDetailsCardProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const latencyHint = t('usage_stats.latency_unit_hint', {
     field: LATENCY_SOURCE_FIELD,
     unit: t('usage_stats.duration_unit_ms'),
@@ -131,7 +143,6 @@ export function RequestEventsDetailsCard({
     return events.map((event, index) => {
       const timestamp = event.timestamp;
       const timestampMs = Date.parse(timestamp);
-      const date = Number.isNaN(timestampMs) ? null : new Date(timestampMs);
       const sourceRaw = String(event.source_raw ?? '').trim() || String(event.source ?? '').trim();
       const authIndexRaw = event.auth_index as unknown;
       const authIndex =
@@ -170,7 +181,7 @@ export function RequestEventsDetailsCard({
         id: event.id ? String(event.id) : `${timestamp}-${model}-${sourceRaw || source}-${authIndex}-${index}`,
         timestamp,
         timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
-        timestampLabel: date ? date.toLocaleString(i18n.language) : timestamp || '-',
+        timestampLabel: formatRequestEventTimestamp(timestamp),
         model,
         sourceRaw: sourceRaw || '-',
         source,
@@ -184,11 +195,12 @@ export function RequestEventsDetailsCard({
         reasoningTokens,
         cachedTokens,
         totalTokens,
+        cacheRate: formatCacheRate(cachedTokens, inputTokens),
         cost,
         hasPrice: Boolean(pricing),
       };
     });
-  }, [events, i18n.language, modelPrices]);
+  }, [events, modelPrices]);
 
   const hasLatencyData = useMemo(() => rows.some((row) => row.latencyMs !== null), [rows]);
   const [mobileRenderState, setMobileRenderState] = useState({ key: '', count: MOBILE_PAGE_SIZE });
@@ -430,8 +442,9 @@ export function RequestEventsDetailsCard({
                   {hasLatencyData && <th title={latencyHint}>{t('usage_stats.time')}</th>}
                   <th>{t('usage_stats.input_tokens')}</th>
                   <th>{t('usage_stats.output_tokens')}</th>
-                  <th>{t('usage_stats.reasoning_tokens')}</th>
+                  <th className={styles.requestEventsReasoningHeader}>{t('usage_stats.reasoning_tokens')}</th>
                   <th>{t('usage_stats.cached_tokens')}</th>
+                  <th>{t('usage_stats.cache_rate')}</th>
                   <th>{t('usage_stats.total_tokens')}</th>
                   <th>{t('usage_stats.total_cost')}</th>
                 </tr>
@@ -476,6 +489,7 @@ export function RequestEventsDetailsCard({
                     <td>{row.outputTokens.toLocaleString()}</td>
                     <td>{row.reasoningTokens.toLocaleString()}</td>
                     <td>{row.cachedTokens.toLocaleString()}</td>
+                    <td>{row.cacheRate}</td>
                     <td>{row.totalTokens.toLocaleString()}</td>
                     <td title={row.hasPrice ? undefined : t('usage_stats.cost_need_price')}>
                       {row.hasPrice ? formatUsd(row.cost) : '-'}

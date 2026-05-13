@@ -247,10 +247,10 @@ function quotaStatus(row: UsageQuotaRow, percent: number | null, kind: DisplayQu
   if (remainingPercent === null) {
     return 'unknown'
   }
-  if (remainingPercent <= 10) {
+  if (remainingPercent < 20) {
     return 'danger'
   }
-  if (remainingPercent <= 25) {
+  if (remainingPercent < 50) {
     return 'warning'
   }
   return 'ok'

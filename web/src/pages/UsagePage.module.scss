@@ -526,6 +526,15 @@
   margin: 0;
   padding: 6px 12px;
   font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+
+  &:out-of-range {
+    color: var(--text-tertiary);
+    background: color-mix(in srgb, var(--bg-secondary) 88%, var(--border-color));
+    border-color: color-mix(in srgb, var(--border-color) 72%, var(--text-tertiary));
+  }
 }
 
 .customRangeField .customRangeInput {
@@ -2329,18 +2338,35 @@
 
 .requestEventsTableWrapper {
   overflow: auto;
-  max-height: 460px;
+  height: clamp(400px, 60vh, 600px);
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
 
   @include mobile {
     display: none;
   }
+
+  .table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
 }
 
 .requestEventsTimestamp {
   white-space: nowrap;
-  min-width: 160px;
+  width: 136px;
+  min-width: 136px;
+  font-variant-numeric: tabular-nums;
+}
+
+.requestEventsReasoningHeader {
+  white-space: nowrap;
 }
 
 .requestEventsSourceCell,

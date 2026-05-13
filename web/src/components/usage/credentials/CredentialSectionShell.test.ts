@@ -1,13 +1,19 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { CredentialsPagination, formatCredentialNumber } from './CredentialSectionShell'
+import { CredentialsPagination, formatCredentialNumber, formatCredentialPercent } from './CredentialSectionShell'
 
 describe('CredentialSectionShell formatting', () => {
   it('uses the shared compact K/M/B number format', () => {
     expect(formatCredentialNumber(950)).toBe('950')
     expect(formatCredentialNumber(12_345)).toBe('12.35K')
     expect(formatCredentialNumber(1_234_567)).toBe('1.23M')
+  })
+
+  it('formats credential rates with two decimal places', () => {
+    expect(formatCredentialPercent(2 / 3 * 100)).toBe('66.67%')
+    expect(formatCredentialPercent(75)).toBe('75.00%')
+    expect(formatCredentialPercent(null)).toBe('—')
   })
 
   it('renders only controls in the pagination footer', () => {

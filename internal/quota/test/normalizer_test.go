@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/quota"
+	"cpa-usage-keeper/internal/timeutil"
 )
 
 func TestNormalizeClaudeQuotaRows(t *testing.T) {
@@ -42,6 +43,14 @@ func TestNormalizeClaudeQuotaRows(t *testing.T) {
 }
 
 func TestNormalizeCodexQuotaRows(t *testing.T) {
+	previousLocal := time.Local
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	t.Cleanup(func() { time.Local = previousLocal })
+	time.Local = location
+
 	allowed := true
 	limitReached := false
 	resetAt := int64(1760000000)
@@ -83,7 +92,7 @@ func TestNormalizeCodexQuotaRows(t *testing.T) {
 	assertFloatField(t, primary.UsedPercent, 25, "primary usedPercent")
 	assertIntField(t, primary.Window.Seconds, 18000, "primary window seconds")
 	assertIntField(t, primary.ResetAfterSeconds, 1200, "primary resetAfterSeconds")
-	if primary.ResetAt != time.Unix(resetAt, 0).UTC().Format(time.RFC3339) {
+	if primary.ResetAt != timeutil.FormatStorageTime(time.Unix(resetAt, 0)) {
 		t.Fatalf("unexpected primary resetAt: %#v", primary)
 	}
 	assertBoolField(t, primary.Allowed, true, "primary allowed")
