@@ -1,12 +1,15 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { IconChevronDown } from '@/components/ui/icons';
 import { formatCompactNumber, formatUsd } from '@/utils/usage';
 import type { UsageCredential } from '@/lib/types';
-import styles from '@/pages/UsagePage.module.scss';
-
-const MOBILE_CREDENTIAL_STATS_PAGE_SIZE = 5;
+import {
+  CredentialSectionShell,
+  formatCredentialNumber,
+  formatCredentialPercent,
+  successRateTone,
+} from './credentials/CredentialSectionShell';
+import styles from './CredentialStatsCard.module.scss';
 
 export interface CredentialStatsCardProps {
   credentials: UsageCredential[];
@@ -89,38 +92,45 @@ export function formatCredentialCost(row: Pick<CredentialRow, 'cost' | 'costAvai
   return row.costAvailable || row.cost > 0 ? formatUsd(row.cost) : '--';
 }
 
-function CredentialStatsTitle({ title, subtitle, eyebrow }: { title: string; subtitle: string; eyebrow: string }) {
+function RequestMetricValue({ total, success, failure }: { total: number; success: number; failure: number }) {
   return (
-    <div className={styles.sectionTitleBlock}>
-      <span className={styles.sectionEyebrow}>{eyebrow}</span>
-      <h3 className={styles.sectionTitle}>{title}</h3>
-      <p className={styles.sectionSubtitle}>{subtitle}</p>
-    </div>
+    <span className={styles.requestMetric}>
+      <strong>{formatCredentialNumber(total)}</strong>
+      <span className={styles.requestBreakdown}>
+        (<span className={styles.metricValueSuccess}>{formatCredentialNumber(success)}</span>/<span className={styles.metricValueDanger}>{formatCredentialNumber(failure)}</span>)
+      </span>
+    </span>
   );
 }
 
-export function CredentialStatsCard({
-  credentials,
-  loading,
-}: CredentialStatsCardProps) {
+function MetricPill({ label, value, valueClassName }: { label: string; value: React.ReactNode; valueClassName?: string }) {
+  return (
+    <span className={styles.metricPill}>
+      <span className={styles.metricLabel}>{label}</span>
+      <span className={`${styles.metricValue} ${valueClassName ?? ''}`.trim()}>{value}</span>
+    </span>
+  );
+}
+
+function successRateValueClass(rate: number): string {
+  const tone = successRateTone(rate);
+  switch (tone) {
+    case 'success':
+      return styles.metricValueSuccess;
+    case 'warning':
+      return styles.metricValueWarning;
+    case 'danger':
+      return styles.metricValueDanger;
+    default:
+      return '';
+  }
+}
+
+export function CredentialStatsCard({ credentials, loading }: CredentialStatsCardProps) {
   const { t } = useTranslation();
   const [expandedCredentials, setExpandedCredentials] = useState<Set<string>>(new Set());
-  const [mobileRenderState, setMobileRenderState] = useState({
-    key: '',
-    count: MOBILE_CREDENTIAL_STATS_PAGE_SIZE,
-  });
   const rows = useMemo(() => buildCredentialRows(credentials), [credentials]);
   const showCost = useMemo(() => rows.some((row) => row.costAvailable || row.cost > 0), [rows]);
-  const columnCount = showCost ? 4 : 3;
-  const mobileRenderKey = `${showCost}:${rows.map((row) => row.key).join('|')}`;
-  const mobileVisibleCount = mobileRenderState.key === mobileRenderKey
-    ? mobileRenderState.count
-    : MOBILE_CREDENTIAL_STATS_PAGE_SIZE;
-  const mobileRows = useMemo(
-    () => rows.slice(0, mobileVisibleCount),
-    [mobileVisibleCount, rows]
-  );
-  const canLoadMoreMobile = mobileRows.length < rows.length;
 
   const toggleExpand = (key: string) => {
     setExpandedCredentials((current) => {
@@ -133,272 +143,100 @@ export function CredentialStatsCard({
       return next;
     });
   };
-  const successRateClass = (successRate: number) => (
-    successRate >= 95
-      ? styles.statSuccess
-      : successRate >= 80
-        ? styles.statNeutral
-        : styles.statFailure
-  );
 
   return (
-    <Card
-      title={
-        <CredentialStatsTitle
-          eyebrow={t('usage_stats.credential_stats_eyebrow')}
-          title={t('usage_stats.credential_stats_title')}
-          subtitle={t('usage_stats.credential_stats_subtitle')}
-        />
-      }
-      className={`${styles.detailsFixedCard} ${styles.credentialStatsCard}`}
-      aria-busy={loading}
+    <CredentialSectionShell
+      eyebrow={t('usage_stats.credential_stats_eyebrow')}
+      title={t('usage_stats.credential_stats_title')}
+      subtitle={t('usage_stats.credential_stats_subtitle')}
+      countLabel={t('usage_stats.credentials_count', { count: rows.length })}
     >
-      {loading && rows.length === 0 ? (
-        <div className={styles.hint}>{t('common.loading')}</div>
-      ) : rows.length > 0 ? (
-        <div className={`${styles.detailsScroll} ${styles.credentialStatsScroll}`}>
-          <div className={`${styles.tableWrapper} ${styles.credentialStatsTableWrapper}`}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>{t('usage_stats.credential_name')}</th>
-                  <th>{t('usage_stats.requests_count')}</th>
-                  <th>{t('usage_stats.success_rate')}</th>
-                  {showCost && <th>{t('usage_stats.total_cost')}</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, index) => {
-                  const isExpandable = row.models.length > 0;
-                  const isExpanded = expandedCredentials.has(row.key);
-                  const panelId = `credential-models-${index}`;
+      {loading && rows.length === 0 && (
+        <div className={styles.state}>{t('common.loading')}</div>
+      )}
+      {!loading && rows.length === 0 && (
+        <div className={styles.state}>{t('usage_stats.no_data')}</div>
+      )}
+      {rows.map((row) => {
+        const isExpandable = row.models.length > 0;
+        const isExpanded = expandedCredentials.has(row.key);
+        const panelId = `credential-models-${row.key}`;
 
-                  return (
-                    <Fragment key={row.key}>
-                      <tr>
-                        <td className={styles.modelCell}>
-                          <span className={styles.credentialNameCell}>
-                            {isExpandable ? (
-                              <button
-                                type="button"
-                                className={styles.credentialExpandButton}
-                                onClick={() => toggleExpand(row.key)}
-                                aria-expanded={isExpanded}
-                                aria-controls={panelId}
-                              >
-                                <span
-                                  className={`${styles.expandIcon} ${isExpanded ? styles.expandIconExpanded : ''}`.trim()}
-                                  aria-hidden="true"
-                                >
-                                  ▶
-                                </span>
-                                <span>{row.displayName}</span>
-                              </button>
-                            ) : (
-                              <span>{row.displayName}</span>
-                            )}
-                            {row.type && <span className={styles.credentialType}>{row.type}</span>}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={styles.requestCountCell}>
-                            <span>{formatCompactNumber(row.total)}</span>
-                            <span className={styles.requestBreakdown}>
-                              (<span className={styles.statSuccess}>{row.success.toLocaleString()}</span>{' '}
-                              <span className={styles.statFailure}>{row.failure.toLocaleString()}</span>)
-                            </span>
-                          </span>
-                        </td>
-                        <td>
-                          <span className={successRateClass(row.successRate)}>
-                            {row.successRate.toFixed(1)}%
-                          </span>
-                        </td>
-                        {showCost && (
-                          <td>{formatCredentialCost(row)}</td>
-                        )}
-                      </tr>
-                      {isExpandable && isExpanded && (
-                        <tr className={styles.credentialModelsTableRow}>
-                          <td colSpan={columnCount}>
-                            <div id={panelId} className={styles.credentialModelsPanel}>
-                              {row.models.map((model) => (
-                                <div
-                                  key={model.model}
-                                  className={`${styles.modelRow} ${showCost ? styles.modelRowWithCost : ''}`.trim()}
-                                >
-                                  <span className={styles.modelName}>{model.model}</span>
-                                  <span className={styles.modelStat}>
-                                    <span className={styles.requestCountCell}>
-                                      <span>{model.total.toLocaleString()}</span>
-                                      <span className={styles.requestBreakdown}>
-                                        (<span className={styles.statSuccess}>{model.success.toLocaleString()}</span>{' '}
-                                        <span className={styles.statFailure}>{model.failure.toLocaleString()}</span>)
-                                      </span>
-                                    </span>
-                                  </span>
-                                  <span className={styles.modelStat}>{formatCompactNumber(model.tokens)}</span>
-                                  {showCost && (
-                                    <span className={styles.modelStat}>{formatCredentialCost(model)}</span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className={styles.credentialStatsMobileCards}>
-            {mobileRows.map((row, index) => {
-              const isExpandable = row.models.length > 0;
-              const isExpanded = expandedCredentials.has(row.key);
-              const panelId = `credential-mobile-models-${index}`;
+        const titleNode = isExpandable ? (
+          <button
+            type="button"
+            className={styles.titleButton}
+            onClick={() => toggleExpand(row.key)}
+            aria-expanded={isExpanded}
+            aria-controls={panelId}
+          >
+            <span className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ''}`.trim()} aria-hidden="true">
+              <IconChevronDown size={14} />
+            </span>
+            <span className={styles.displayName}>{row.displayName}</span>
+          </button>
+        ) : (
+          <span className={styles.displayName}>{row.displayName}</span>
+        );
 
-              return (
-                <article key={row.key} className={styles.credentialStatsMobileCard}>
-                  <div className={styles.credentialStatsMobileHeader}>
-                    <div className={styles.credentialStatsMobileNameRow}>
-                      {isExpandable ? (
-                        <button
-                          type="button"
-                          className={styles.credentialStatsMobileExpandButton}
-                          onClick={() => toggleExpand(row.key)}
-                          aria-expanded={isExpanded}
-                          aria-controls={panelId}
-                        >
-                          <span
-                            className={`${styles.expandIcon} ${isExpanded ? styles.expandIconExpanded : ''}`.trim()}
-                            aria-hidden="true"
-                          >
-                            ▶
-                          </span>
-                          <span className={styles.credentialStatsMobileName}>{row.displayName}</span>
-                        </button>
-                      ) : (
-                        <span className={styles.credentialStatsMobileName}>{row.displayName}</span>
-                      )}
-                      {row.type && <span className={styles.credentialType}>{row.type}</span>}
-                    </div>
-                  </div>
-
-                  <dl className={styles.credentialStatsMobileMetrics}>
-                    <div className={styles.credentialStatsMobileMetric}>
-                      <dt className={styles.credentialStatsMobileMetricLabel}>
-                        {t('usage_stats.requests_count')}
-                      </dt>
-                      <dd className={styles.credentialStatsMobileMetricValue}>
-                        <span className={styles.requestCountCell}>
-                          <span>{row.total.toLocaleString()}</span>
-                          <span className={styles.requestBreakdown}>
-                            (<span className={styles.statSuccess}>{row.success.toLocaleString()}</span>{' '}
-                            <span className={styles.statFailure}>{row.failure.toLocaleString()}</span>)
-                          </span>
+        return (
+          <div
+            key={row.key}
+            className={`${styles.itemWrap} ${isExpanded ? styles.expanded : ''}`.trim()}
+          >
+            <div className={styles.row}>
+              <div className={styles.identityBlock}>
+                {titleNode}
+                {row.type && <span className={styles.typeBadge}>{row.type}</span>}
+              </div>
+              <div className={`${styles.metricGroup} ${showCost ? styles.metricGroupWithCost : ''}`.trim()}>
+                <MetricPill
+                  label={t('usage_stats.requests_count')}
+                  value={<RequestMetricValue total={row.total} success={row.success} failure={row.failure} />}
+                />
+                <MetricPill
+                  label={t('usage_stats.success_rate')}
+                  value={formatCredentialPercent(row.successRate)}
+                  valueClassName={successRateValueClass(row.successRate)}
+                />
+                {showCost && (
+                  <MetricPill label={t('usage_stats.total_cost')} value={formatCredentialCost(row)} />
+                )}
+              </div>
+            </div>
+            {isExpandable && isExpanded && (
+              <div
+                id={panelId}
+                className={styles.modelsPanel}
+              >
+                {row.models.map((model) => (
+                  <Fragment key={model.model}>
+                    <div className={`${styles.modelItem} ${showCost ? '' : styles.modelItemNoCost}`.trim()}>
+                      <span className={styles.modelName}>{model.model}</span>
+                      <span className={styles.modelMetric}>
+                        <span className={styles.modelMetricLabel}>{t('usage_stats.requests_count')}</span>
+                        <span className={styles.modelMetricValue}>
+                          <RequestMetricValue total={model.total} success={model.success} failure={model.failure} />
                         </span>
-                      </dd>
+                      </span>
+                      <span className={styles.modelMetric}>
+                        <span className={styles.modelMetricLabel}>{t('usage_stats.tokens_count')}</span>
+                        <span className={styles.modelMetricValue}>{formatCompactNumber(model.tokens)}</span>
+                      </span>
+                      {showCost && (
+                        <span className={styles.modelMetric}>
+                          <span className={styles.modelMetricLabel}>{t('usage_stats.total_cost')}</span>
+                          <span className={styles.modelMetricValue}>{formatCredentialCost(model)}</span>
+                        </span>
+                      )}
                     </div>
-                    <div className={styles.credentialStatsMobileMetric}>
-                      <dt className={styles.credentialStatsMobileMetricLabel}>
-                        {t('usage_stats.success_rate')}
-                      </dt>
-                      <dd className={`${styles.credentialStatsMobileMetricValue} ${successRateClass(row.successRate)}`}>
-                        {row.successRate.toFixed(1)}%
-                      </dd>
-                    </div>
-                    {showCost && (
-                      <div
-                        className={`${styles.credentialStatsMobileMetric} ${styles.credentialStatsMobileMetricWide}`}
-                      >
-                        <dt className={styles.credentialStatsMobileMetricLabel}>
-                          {t('usage_stats.total_cost')}
-                        </dt>
-                        <dd className={styles.credentialStatsMobileMetricValue}>
-                          {formatCredentialCost(row)}
-                        </dd>
-                      </div>
-                    )}
-                  </dl>
-
-                  {isExpandable && isExpanded && (
-                    <div id={panelId} className={styles.credentialStatsMobileModels}>
-                      {row.models.map((model) => (
-                        <article key={model.model} className={styles.credentialStatsMobileModelItem}>
-                          <div className={styles.credentialStatsMobileModelHeader}>
-                            <span className={styles.credentialStatsMobileModelName}>{model.model}</span>
-                          </div>
-                          <dl className={styles.credentialStatsMobileModelMetrics}>
-                            <div className={styles.credentialStatsMobileMetric}>
-                              <dt className={styles.credentialStatsMobileMetricLabel}>
-                                {t('usage_stats.requests_count')}
-                              </dt>
-                              <dd className={styles.credentialStatsMobileMetricValue}>
-                                <span className={styles.requestCountCell}>
-                                  <span>{model.total.toLocaleString()}</span>
-                                  <span className={styles.requestBreakdown}>
-                                    (<span className={styles.statSuccess}>{model.success.toLocaleString()}</span>{' '}
-                                    <span className={styles.statFailure}>{model.failure.toLocaleString()}</span>)
-                                  </span>
-                                </span>
-                              </dd>
-                            </div>
-                            <div className={styles.credentialStatsMobileMetric}>
-                              <dt className={styles.credentialStatsMobileMetricLabel}>
-                                {t('usage_stats.tokens_count')}
-                              </dt>
-                              <dd className={styles.credentialStatsMobileMetricValue}>
-                                {formatCompactNumber(model.tokens)}
-                              </dd>
-                            </div>
-                            {showCost && (
-                              <div
-                                className={
-                                  `${styles.credentialStatsMobileMetric} ${styles.credentialStatsMobileMetricWide}`
-                                }
-                              >
-                                <dt className={styles.credentialStatsMobileMetricLabel}>
-                                  {t('usage_stats.total_cost')}
-                                </dt>
-                                <dd className={styles.credentialStatsMobileMetricValue}>
-                                  {formatCredentialCost(model)}
-                                </dd>
-                              </div>
-                            )}
-                          </dl>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-            {canLoadMoreMobile && (
-              <div className={styles.credentialStatsLoadMore}>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  fullWidth
-                  onClick={() => setMobileRenderState((current) => ({
-                    key: mobileRenderKey,
-                    count: (
-                      current.key === mobileRenderKey
-                        ? current.count
-                        : MOBILE_CREDENTIAL_STATS_PAGE_SIZE
-                    ) + MOBILE_CREDENTIAL_STATS_PAGE_SIZE,
-                  }))}
-                >
-                  {t('usage_stats.credential_stats_load_more')}
-                </Button>
+                  </Fragment>
+                ))}
               </div>
             )}
           </div>
-        </div>
-      ) : (
-        <div className={styles.hint}>{t('usage_stats.no_data')}</div>
-      )}
-    </Card>
+        );
+      })}
+    </CredentialSectionShell>
   );
 }

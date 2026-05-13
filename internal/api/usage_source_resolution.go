@@ -107,11 +107,23 @@ func (r usageSourceResolver) resolve(rawSource string, authIndex string) usageSo
 			SourceKey:   "provider:fallback:" + inferredProvider,
 		}
 	}
+	// SourceKey 保留完整脱敏串作为桶 ID，避免不同 source 被误合并；
+	// DisplayName 缩成固定长度，前端长列表里不再被超长字符串撑爆。
 	masked := redact.APIKeyDisplayName(normalizedSource)
 	return usageSourceResolution{
-		DisplayName: masked,
+		DisplayName: compactMaskedSource(normalizedSource),
 		SourceKey:   "raw:" + masked,
 	}
+}
+
+// compactMaskedSource 把任意长度的 source 缩成最多 12 字符的「首4****末4」形式。
+// 短于 9 字符的输入沿用 APIKeyDisplayName 的渐进规则，保持和其它场景一致。
+func compactMaskedSource(value string) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= 8 {
+		return redact.APIKeyDisplayName(value)
+	}
+	return string(runes[:4]) + "****" + string(runes[len(runes)-4:])
 }
 
 func uintToString(value uint) string {
