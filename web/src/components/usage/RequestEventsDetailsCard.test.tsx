@@ -6,7 +6,7 @@ import type { UsageEvent } from '@/lib/types';
 
 const events: UsageEvent[] = [
   {
-    id: 101,
+    id: '101',
     timestamp: '2026-04-23T02:00:00.000Z',
     model: 'claude-sonnet',
     source: 'Provider A',
@@ -85,6 +85,19 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html.indexOf('<th>Cached</th>')).toBeLessThan(html.indexOf('<th>Cache Rate</th>'));
     expect(html.indexOf('<th>Cache Rate</th>')).toBeLessThan(html.indexOf('<th>Total Tokens</th>'));
     expect(html).toContain('<td>25</td><td>25.00%</td><td>200</td>');
+  });
+
+  it('uses Claude token semantics for cache rate', () => {
+    const html = renderCard({
+      events: [{
+        ...events[0],
+        source_type: 'claude',
+        tokens: { ...events[0].tokens, input_tokens: 400, cached_tokens: 600, total_tokens: 500 },
+      }],
+    });
+
+    expect(html).toContain('<td>600</td><td>60.00%</td><td>500</td>');
+    expect(html).not.toContain('150.00%');
   });
 
   it('shows a dash for cache rate when input tokens are zero', () => {

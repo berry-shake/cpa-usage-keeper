@@ -591,6 +591,7 @@ const resources = {
         request_events_page_empty: '第 0 / 0 頁',
         request_events_previous_page: '上一頁',
         request_events_next_page: '下一頁',
+        request_events_load_more: '載入更多',
         request_events_timestamp: '時間',
         request_events_source: '來源',
         request_events_auth_index: '憑證',
@@ -649,6 +650,12 @@ const resources = {
         model_price_settings_title: '模型價格表',
         model_price_settings_subtitle: '維護後端定價，讓 token 活動可以換算成成本分析。',
         model_price_settings_eyebrow: '定價',
+        model_price_sync: '同步遠端價格',
+        model_price_sync_hint: '自動從遠端價格庫匹配目前使用的模型。',
+        model_price_sync_summary: '最近遠端同步：{{time}}，已匹配 {{count}} 個模型，來源：{{source}}。',
+        model_price_sync_success: '已同步 {{count}} 個模型價格',
+        model_price_sync_empty: '遠端價格庫中未匹配到目前使用的模型',
+        model_price_sync_failed: '同步模型價格失敗',
         model_price_select_placeholder: '選擇模型',
         model_price_configured: '已設定',
         model_price_prompt: '輸入',
@@ -684,9 +691,11 @@ const resources = {
         api_details_title: 'API 用量拆分',
         api_details_subtitle: '對比不同 API 面的請求量、Token 負載和預估成本。',
         api_details_eyebrow: 'API 視圖',
+        api_details_load_more: '載入更多',
         model_stats_title: '模型表現表',
         model_stats_subtitle: '按模型查看吞吐、延遲、穩定性與成本分布。',
-        model_stats_eyebrow: '模型視圖'
+        model_stats_eyebrow: '模型視圖',
+        model_stats_load_more: '載入更多'
       }
     }
   }

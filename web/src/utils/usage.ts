@@ -533,6 +533,24 @@ export function getAnalysisApiStats(
   });
 }
 
+export function calculateCacheRate({
+  inputTokens,
+  cachedTokens,
+  sourceType,
+}: {
+  inputTokens: unknown;
+  cachedTokens: unknown;
+  sourceType?: unknown;
+}): number | null {
+  const input = Math.max(toNumber(inputTokens), 0);
+  const cached = Math.max(toNumber(cachedTokens), 0);
+  const denominator = isAnthropicStyleProvider(sourceType) ? input + cached : input;
+  if (denominator <= 0) {
+    return null;
+  }
+  return (cached / denominator) * 100;
+}
+
 // CPA 把 provider 原始口径直接落库；Anthropic 的 input_tokens 不含 cached，其它 provider 都含。
 // 计算成本/缓存率时需要按 source_type 区分公式。
 export function isAnthropicStyleProvider(sourceType: unknown): boolean {

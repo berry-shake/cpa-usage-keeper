@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildChartData, buildUsageFromDetails, calculateCost, filterUsageByWindow, filterUsageSnapshot, getAnalysisApiStats, getApiStats, resolveUsageFilterWindow, sanitizeChartLines } from '@/utils/usage';
+import { buildChartData, buildUsageFromDetails, calculateCacheRate, calculateCost, filterUsageByWindow, filterUsageSnapshot, getAnalysisApiStats, getApiStats, resolveUsageFilterWindow, sanitizeChartLines } from '@/utils/usage';
 import type { UsageSnapshot } from '@/lib/types';
 
 afterEach(() => {
@@ -328,5 +328,19 @@ describe('calculateCost', () => {
     );
     // 用 anthropic 公式：promptTokens=1，不会被减成 0
     expect(cost).toBeGreaterThan(0);
+  });
+});
+
+describe('calculateCacheRate', () => {
+  it('uses input tokens as the denominator for OpenAI-style providers', () => {
+    expect(calculateCacheRate({ inputTokens: 1000, cachedTokens: 250, sourceType: 'openai' })).toBe(25);
+  });
+
+  it('adds cached tokens to the denominator for Anthropic-style providers', () => {
+    expect(calculateCacheRate({ inputTokens: 400, cachedTokens: 600, sourceType: 'claude' })).toBe(60);
+  });
+
+  it('returns null when there is no cacheable input', () => {
+    expect(calculateCacheRate({ inputTokens: 0, cachedTokens: 0, sourceType: 'openai' })).toBeNull();
   });
 });

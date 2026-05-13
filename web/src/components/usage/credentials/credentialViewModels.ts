@@ -1,4 +1,5 @@
 import type { UsageIdentity, UsageQuotaRow } from '@/lib/types'
+import { calculateCacheRate } from '@/utils/usage'
 
 export const CREDENTIALS_PAGE_SIZE = 10
 
@@ -347,11 +348,11 @@ function successRate(identity: UsageIdentity): number | null {
 }
 
 function cacheRate(identity: UsageIdentity): number | null {
-  const inputTokens = safeNumber(identity.input_tokens)
-  if (inputTokens <= 0) {
-    return null
-  }
-  return (safeNumber(identity.cached_tokens) / inputTokens) * 100
+  return calculateCacheRate({
+    inputTokens: identity.input_tokens,
+    cachedTokens: identity.cached_tokens,
+    sourceType: identity.type,
+  })
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {

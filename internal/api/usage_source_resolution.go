@@ -126,8 +126,8 @@ func compactMaskedSource(value string) string {
 	return string(runes[:4]) + "****" + string(runes[len(runes)-4:])
 }
 
-func uintToString(value uint) string {
-	return strconv.FormatUint(uint64(value), 10)
+func uintToString(value int64) string {
+	return strconv.FormatInt(value, 10)
 }
 
 func firstNonEmptyString(values ...string) string {

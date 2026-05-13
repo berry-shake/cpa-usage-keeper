@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
 import type { UsageEvent, UsageSourceFilterOption } from '@/lib/types';
 import {
+  calculateCacheRate,
   calculateCost,
   formatDurationMs,
   formatUsd,
@@ -88,9 +89,9 @@ const formatRequestEventTimestamp = (timestamp: string): string => {
   return `${match[1]}/${match[2]}/${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
 };
 
-const formatCacheRate = (cachedTokens: number, inputTokens: number): string => {
-  if (inputTokens <= 0) return '-';
-  return `${((cachedTokens / inputTokens) * 100).toFixed(2)}%`;
+const formatCacheRateForSource = (cachedTokens: number, inputTokens: number, sourceType?: string): string => {
+  const rate = calculateCacheRate({ inputTokens, cachedTokens, sourceType });
+  return rate === null ? '-' : `${rate.toFixed(2)}%`;
 };
 
 const encodeCsv = (value: string | number): string => {
@@ -195,7 +196,7 @@ export function RequestEventsDetailsCard({
         reasoningTokens,
         cachedTokens,
         totalTokens,
-        cacheRate: formatCacheRate(cachedTokens, inputTokens),
+        cacheRate: formatCacheRateForSource(cachedTokens, inputTokens, sourceType),
         cost,
         hasPrice: Boolean(pricing),
       };
