@@ -1361,13 +1361,19 @@
 }
 
 .credentialStatsCard {
+  height: auto;
+  max-height: 520px;
+  overflow: hidden;
+
   @include mobile {
-    height: auto;
+    max-height: none;
     overflow: visible;
   }
 }
 
 .credentialStatsScroll {
+  max-height: 100%;
+
   @include mobile {
     overflow: visible;
   }
