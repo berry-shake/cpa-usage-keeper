@@ -13,8 +13,8 @@ import {
   Legend,
   Filler
 } from 'chart.js';
-import { ApiError, fetchStatus, fetchUpdateCheck, fetchUsageAnalysis, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents } from '@/lib/api';
-import type { StatusResponse, UsageAnalysisResponse, UsageEvent, UsageSourceFilterOption } from '@/lib/types';
+import { ApiError, fetchStatus, fetchUpdateCheck, fetchUsageAnalysis, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents } from '@/lib/api';
+import type { StatusResponse, UsageAnalysisResponse, UsageCredentialsResponse, UsageEvent, UsageSourceFilterOption } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
@@ -31,6 +31,7 @@ import {
   PriceSettingsCard,
   AuthFileCredentialsSection,
   AiProviderCredentialsSection,
+  CredentialStatsCard,
   RequestEventsDetailsCard,
   TokenBreakdownChart,
   CostTrendChart,
@@ -550,6 +551,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [analysisData, setAnalysisData] = useState<UsageAnalysisResponse>({ apis: [], models: [] });
   const [, setAnalysisLastRefreshedAt] = useState<Date | null>(null);
   const analysisRequestControllerRef = useRef<AbortController | null>(null);
+  const [credentialStatsLoading, setCredentialStatsLoading] = useState(false);
+  const [credentialStatsError, setCredentialStatsError] = useState('');
+  const [credentialStatsData, setCredentialStatsData] = useState<UsageCredentialsResponse>({ credentials: [] });
+  const credentialStatsRequestControllerRef = useRef<AbortController | null>(null);
 
   const tabOptions = useMemo(() => getUsageTabOptions(t), [t]);
   const timeRangeOptions = useMemo(() => getTimeRangeOptions(t), [t]);
@@ -655,6 +660,61 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       if (analysisRequestControllerRef.current === controller) {
         setAnalysisLoading(false);
         analysisRequestControllerRef.current = null;
+      }
+    }
+  }, [customTimeRange.end, customTimeRange.start, onAuthRequired, timeRange]);
+
+  const loadCredentialStats = useCallback(async () => {
+    if (timeRange === 'custom') {
+      if (!customTimeRange.start || !customTimeRange.end) {
+        credentialStatsRequestControllerRef.current?.abort();
+        credentialStatsRequestControllerRef.current = null;
+        setCredentialStatsData({ credentials: [] });
+        setCredentialStatsError('');
+        setCredentialStatsLoading(false);
+        return;
+      }
+      const startMs = parseCustomDateStart(customTimeRange.start);
+      const endMs = parseCustomDateEnd(customTimeRange.end);
+      if (startMs === undefined || endMs === undefined || startMs > endMs) {
+        credentialStatsRequestControllerRef.current?.abort();
+        credentialStatsRequestControllerRef.current = null;
+        setCredentialStatsData({ credentials: [] });
+        setCredentialStatsError('');
+        setCredentialStatsLoading(false);
+        return;
+      }
+    }
+
+    credentialStatsRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    credentialStatsRequestControllerRef.current = controller;
+
+    setCredentialStatsLoading(true);
+    setCredentialStatsError('');
+    try {
+      const queryWindow = timeRange === 'custom' ? buildCustomDateRangeQuery({ start: customTimeRange.start, end: customTimeRange.end }) : { start: undefined, end: undefined };
+      const response = await fetchUsageCredentials(timeRange, queryWindow.start, queryWindow.end, controller.signal);
+      if (credentialStatsRequestControllerRef.current !== controller) {
+        return;
+      }
+      setCredentialStatsData(response);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (credentialStatsRequestControllerRef.current === controller) {
+        setCredentialStatsData({ credentials: [] });
+      }
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequired?.();
+        return;
+      }
+      setCredentialStatsError(error instanceof Error ? error.message : 'Failed to load credential stats');
+    } finally {
+      if (credentialStatsRequestControllerRef.current === controller) {
+        setCredentialStatsLoading(false);
+        credentialStatsRequestControllerRef.current = null;
       }
     }
   }, [customTimeRange.end, customTimeRange.start, onAuthRequired, timeRange]);
@@ -920,7 +980,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       return;
     }
     if (activeTab === 'credentials') {
-      await refreshCredentials();
+      await Promise.all([refreshCredentials(), loadCredentialStats()]);
       return;
     }
     if (activeTab === 'analysis') {
@@ -932,7 +992,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       return;
     }
     await loadUsage();
-  }, [activeTab, loadAnalysis, loadEventFilterOptions, loadEvents, loadPricing, loadUsage, refreshCredentials]);
+  }, [activeTab, loadAnalysis, loadCredentialStats, loadEventFilterOptions, loadEvents, loadPricing, loadUsage, refreshCredentials]);
 
   const refreshAutoRefreshTab = useCallback(async () => {
     if (activeTab === 'events') {
@@ -940,11 +1000,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       return;
     }
     if (activeTab === 'credentials') {
-      await refreshCredentials();
+      await Promise.all([refreshCredentials(), loadCredentialStats()]);
       return;
     }
     await loadUsage();
-  }, [activeTab, loadEvents, loadUsage, refreshCredentials]);
+  }, [activeTab, loadCredentialStats, loadEvents, loadUsage, refreshCredentials]);
 
   const autoRefreshEnabled = shouldAutoRefreshUsageTab({
     activeTab,
@@ -1046,6 +1106,20 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       analysisRequestControllerRef.current = null;
     };
   }, [activeTab, loadAnalysis]);
+
+  useEffect(() => {
+    if (activeTab !== 'credentials') {
+      credentialStatsRequestControllerRef.current?.abort();
+      credentialStatsRequestControllerRef.current = null;
+      setCredentialStatsLoading(false);
+      return;
+    }
+    void loadCredentialStats();
+    return () => {
+      credentialStatsRequestControllerRef.current?.abort();
+      credentialStatsRequestControllerRef.current = null;
+    };
+  }, [activeTab, loadCredentialStats]);
 
   useEffect(() => {
     const next = sanitizeRequestEventFilters(
@@ -1476,6 +1550,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
             {activeTab === 'credentials' && (
               <>
+                {credentialStatsError && <div className={styles.errorBox}>{credentialStatsError}</div>}
+                <CredentialStatsCard
+                  credentials={credentialStatsData.credentials}
+                  loading={credentialStatsLoading}
+                />
                 {credentialsData.error && <div className={styles.errorBox}>{credentialsData.error}</div>}
                 <div className={styles.credentialsSections}>
                   <AuthFileCredentialsSection

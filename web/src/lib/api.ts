@@ -1,4 +1,4 @@
-import { type AuthSessionResponse, type PricingEntry, type PricingResponse, type PricingSyncResponse, type StatusResponse, type UpdateCheckResponse, type UsageAnalysisResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse } from './types'
+import { type AuthSessionResponse, type PricingEntry, type PricingResponse, type PricingSyncResponse, type StatusResponse, type UpdateCheckResponse, type UsageAnalysisResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -157,6 +157,23 @@ export async function fetchUsageIdentities(signal?: AbortSignal): Promise<UsageI
   const response = await apiFetch(apiPath('/usage/identities'), { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage identities: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUsageCredentials(range: string, start?: string, end?: string, signal?: AbortSignal): Promise<UsageCredentialsResponse> {
+  const params = new URLSearchParams()
+  params.set('range', range)
+  if (start) {
+    params.set('start', start)
+  }
+  if (end) {
+    params.set('end', end)
+  }
+  const query = params.toString()
+  const response = await apiFetch(`${apiPath('/usage/credentials')}${query ? `?${query}` : ''}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage credentials: ${response.status}`)
   }
   return response.json()
 }

@@ -5,6 +5,7 @@ export { ApiDetailsCard } from './ApiDetailsCard';
 export { ModelStatsCard } from './ModelStatsCard';
 export { PriceSettingsCard } from './PriceSettingsCard';
 export { AiProviderCredentialsSection, AuthFileCredentialsSection, useCredentialsTabData } from './credentials';
+export { CredentialStatsCard } from './CredentialStatsCard';
 export { RequestEventsDetailsCard } from './RequestEventsDetailsCard';
 export { TokenBreakdownChart } from './TokenBreakdownChart';
 export { CostTrendChart } from './CostTrendChart';
