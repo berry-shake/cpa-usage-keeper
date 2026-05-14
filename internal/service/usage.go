@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"cpa-usage-keeper/internal/repository"
 	repodto "cpa-usage-keeper/internal/repository/dto"
@@ -17,6 +19,22 @@ func NewUsageService(db *gorm.DB) UsageProvider {
 	return &usageService{db: db}
 }
 
+func (s *usageService) resolveAPIGroupKey(apiKeyID string) (string, error) {
+	apiKeyID = strings.TrimSpace(apiKeyID)
+	if apiKeyID == "" {
+		return "", nil
+	}
+	parsedID, err := strconv.ParseInt(apiKeyID, 10, 64)
+	if err != nil || parsedID <= 0 {
+		return "", ErrInvalidID
+	}
+	apiKey, err := repository.FindActiveCPAAPIKeyByID(s.db, parsedID)
+	if err != nil {
+		return "", err
+	}
+	return apiKey.APIKey, nil
+}
+
 func (s *usageService) GetUsageWithFilter(_ context.Context, filter servicedto.UsageFilter) (*repodto.StatisticsSnapshot, error) {
 	return repository.BuildUsageSnapshotWithFilter(s.db, repodto.UsageQueryFilter{
 		Range:     filter.Range,
@@ -25,12 +43,17 @@ func (s *usageService) GetUsageWithFilter(_ context.Context, filter servicedto.U
 	})
 }
 
-// Usage 页面里的 Overview tab 只下传时间窗口，仓储层负责构建 overview 聚合。
+// Usage 页面里的 Overview tab 下传时间窗口和全局 API-Key，仓储层负责构建 overview 聚合。
 func (s *usageService) GetUsageOverview(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
+	apiGroupKey, err := s.resolveAPIGroupKey(filter.APIKeyID)
+	if err != nil {
+		return nil, err
+	}
 	overview, err := repository.BuildUsageOverviewWithFilter(s.db, repodto.UsageQueryFilter{
-		Range:     filter.Range,
-		StartTime: filter.StartTime,
-		EndTime:   filter.EndTime,
+		Range:       filter.Range,
+		StartTime:   filter.StartTime,
+		EndTime:     filter.EndTime,
+		APIGroupKey: apiGroupKey,
 	})
 	if err != nil {
 		return nil, err
@@ -96,19 +119,24 @@ func mapUsageOverviewSeries(series repodto.UsageOverviewSeriesRecord) servicedto
 	}
 }
 
-// Usage 页面里的 Request Event Log tab 下传分页和列表筛选条件。
+// Usage 页面里的 Request Event Log tab 下传分页、列表筛选条件和全局 API-Key。
 func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
+	apiGroupKey, err := s.resolveAPIGroupKey(filter.APIKeyID)
+	if err != nil {
+		return nil, err
+	}
 	page, err := repository.ListUsageEventsWithFilter(s.db, repodto.UsageQueryFilter{
-		StartTime: filter.StartTime,
-		EndTime:   filter.EndTime,
-		Limit:     filter.Limit,
-		Page:      filter.Page,
-		PageSize:  filter.PageSize,
-		Offset:    filter.Offset,
-		Model:     filter.Model,
-		Source:    filter.Source,
-		AuthIndex: filter.AuthIndex,
-		Result:    filter.Result,
+		StartTime:   filter.StartTime,
+		EndTime:     filter.EndTime,
+		Limit:       filter.Limit,
+		Page:        filter.Page,
+		PageSize:    filter.PageSize,
+		Offset:      filter.Offset,
+		Model:       filter.Model,
+		Source:      filter.Source,
+		AuthIndex:   filter.AuthIndex,
+		APIGroupKey: apiGroupKey,
+		Result:      filter.Result,
 	})
 	if err != nil {
 		return nil, err
@@ -176,11 +204,16 @@ func (s *usageService) ListUsageCredentialStats(_ context.Context, filter servic
 	return result, nil
 }
 
-// Usage 页面里的 Analysis tab 只下传时间窗口，仓储层负责按 API 和 model 聚合。
+// Usage 页面里的 Analysis tab 下传时间窗口和全局 API-Key，仓储层负责按 API 和 model 聚合。
 func (s *usageService) GetUsageAnalysis(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
+	apiGroupKey, err := s.resolveAPIGroupKey(filter.APIKeyID)
+	if err != nil {
+		return nil, err
+	}
 	apiRows, modelRows, err := repository.ListUsageAnalysisWithFilter(s.db, repodto.UsageQueryFilter{
-		StartTime: filter.StartTime,
-		EndTime:   filter.EndTime,
+		StartTime:   filter.StartTime,
+		EndTime:     filter.EndTime,
+		APIGroupKey: apiGroupKey,
 	})
 	if err != nil {
 		return nil, err

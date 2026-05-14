@@ -1,4 +1,4 @@
-import { type AuthSessionResponse, type PricingEntry, type PricingResponse, type PricingSyncResponse, type StatusResponse, type UpdateCheckResponse, type UsageAnalysisResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse } from './types'
+import { type AuthSessionResponse, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsItem, type CpaApiKeysResponse, type PricingEntry, type PricingResponse, type PricingSyncResponse, type StatusResponse, type UpdateCheckResponse, type UsageAnalysisResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -71,7 +71,7 @@ export async function login(password: string): Promise<void> {
   }
 }
 
-export async function fetchUsageOverview(range: string, start?: string, end?: string, signal?: AbortSignal): Promise<UsageOverviewResponse> {
+export async function fetchUsageOverview(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string): Promise<UsageOverviewResponse> {
   const params = new URLSearchParams()
   params.set('range', range)
   if (start) {
@@ -79,6 +79,10 @@ export async function fetchUsageOverview(range: string, start?: string, end?: st
   }
   if (end) {
     params.set('end', end)
+  }
+  const selectedAPIKeyId = apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
   }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/overview')}${query ? `?${query}` : ''}`, { signal })
@@ -94,6 +98,7 @@ export interface FetchUsageEventsOptions {
   model?: string
   source?: string
   result?: string
+  apiKeyId?: string
 }
 
 export async function fetchUsageEventModelFilterOptions(signal?: AbortSignal): Promise<UsageEventModelFilterOptionsResponse> {
@@ -138,6 +143,10 @@ export async function fetchUsageEvents(range: string, start?: string, end?: stri
   const result = options?.result?.trim()
   if (result) {
     params.set('result', result)
+  }
+  const selectedAPIKeyId = options?.apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
   }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/events')}${query ? `?${query}` : ''}`, { signal })
@@ -238,7 +247,7 @@ export async function fetchUsageQuotaRefreshTask(taskId: string, signal?: AbortS
   return response.json()
 }
 
-export async function fetchUsageAnalysis(range: string, start?: string, end?: string, signal?: AbortSignal): Promise<UsageAnalysisResponse> {
+export async function fetchUsageAnalysis(range: string, start?: string, end?: string, signal?: AbortSignal, apiKeyId?: string): Promise<UsageAnalysisResponse> {
   const params = new URLSearchParams()
   params.set('range', range)
   if (start) {
@@ -247,10 +256,44 @@ export async function fetchUsageAnalysis(range: string, start?: string, end?: st
   if (end) {
     params.set('end', end)
   }
+  const selectedAPIKeyId = apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
+  }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/analysis')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage analysis: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchCpaApiKeyOptions(signal?: AbortSignal): Promise<CpaApiKeyOptionsResponse> {
+  const response = await apiFetch(apiPath('/usage/api-keys/options'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load CPA API key options: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchCpaApiKeys(signal?: AbortSignal): Promise<CpaApiKeysResponse> {
+  const response = await apiFetch(apiPath('/usage/api-keys'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load CPA API keys: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function updateCpaApiKeyAlias(id: string, keyAlias: string): Promise<CpaApiKeySettingsItem> {
+  const response = await apiFetch(apiPath(`/usage/api-keys/${encodeURIComponent(id)}`), {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ keyAlias }),
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update CPA API key alias: ${response.status}`)
   }
   return response.json()
 }
@@ -275,14 +318,6 @@ export async function fetchUpdateCheck(signal?: AbortSignal): Promise<UpdateChec
   const response = await apiFetch(apiPath('/update/check'), { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to check for updates: ${response.status}`)
-  }
-  return response.json()
-}
-
-export async function triggerSync(signal?: AbortSignal): Promise<StatusResponse> {
-  const response = await apiFetch(apiPath('/sync'), { method: 'POST', signal })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to start sync: ${response.status}`)
   }
   return response.json()
 }

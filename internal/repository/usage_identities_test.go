@@ -108,6 +108,55 @@ func TestUsageIdentityReplaceForAuthTypeMarksStaleRowsDeletedAndPreservesStats(t
 	}
 }
 
+func TestUsageIdentityReplaceForAuthTypeDoesNotConsumeIDsForExistingIdentities(t *testing.T) {
+	db := openTestDatabase(t)
+	ctx := context.Background()
+	firstSync := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+
+	if err := ReplaceUsageIdentitiesForAuthType(ctx, db, []entities.UsageIdentity{{
+		Name:     "Auth One",
+		Identity: "auth-1",
+		Type:     "account",
+		Provider: "claude",
+	}}, entities.UsageIdentityAuthTypeAuthFile, firstSync); err != nil {
+		t.Fatalf("initial replace returned error: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := ReplaceUsageIdentitiesForAuthType(ctx, db, []entities.UsageIdentity{{
+			Name:     "Auth One",
+			Identity: "auth-1",
+			Type:     "account",
+			Provider: "claude",
+		}}, entities.UsageIdentityAuthTypeAuthFile, firstSync.Add(time.Duration(i+1)*time.Minute)); err != nil {
+			t.Fatalf("repeat replace returned error: %v", err)
+		}
+	}
+	if err := ReplaceUsageIdentitiesForAuthType(ctx, db, []entities.UsageIdentity{
+		{
+			Name:     "Auth One",
+			Identity: "auth-1",
+			Type:     "account",
+			Provider: "claude",
+		},
+		{
+			Name:     "Auth Two",
+			Identity: "auth-2",
+			Type:     "account",
+			Provider: "claude",
+		},
+	}, entities.UsageIdentityAuthTypeAuthFile, firstSync.Add(time.Hour)); err != nil {
+		t.Fatalf("new identity replace returned error: %v", err)
+	}
+
+	var row entities.UsageIdentity
+	if err := db.Where("identity = ?", "auth-2").First(&row).Error; err != nil {
+		t.Fatalf("expected new identity row: %v", err)
+	}
+	if row.ID != 2 {
+		t.Fatalf("expected second identity id to be 2 without upsert sequence burn, got %d", row.ID)
+	}
+}
+
 func TestUsageIdentityReplaceForAuthTypeRefreshesProjectID(t *testing.T) {
 	db := openTestDatabase(t)
 	ctx := context.Background()

@@ -109,9 +109,9 @@ func NewClient(baseURL, managementKey string, timeout time.Duration, tlsSkipVeri
 	}
 }
 
-func (c *Client) FetchExternalAPIKeys(ctx context.Context) (*response.ExternalAPIKeysResult, error) {
-	result := &response.ExternalAPIKeysResult{}
-	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementExternalAPIKeysEndpoint, &result.Payload, "external api keys")
+func (c *Client) FetchManagementAPIKeys(ctx context.Context) (*response.ManagementAPIKeysResult, error) {
+	result := &response.ManagementAPIKeysResult{}
+	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementAPIKeysEndpoint, &result.Payload, "api keys")
 	result.StatusCode = statusCode
 	result.Body = body
 	if err != nil {
@@ -136,18 +136,18 @@ func (c *Client) FetchUsageQueue(ctx context.Context, count int) (*response.Usag
 }
 
 func (c *Client) FetchModels(ctx context.Context) (*response.ModelsResult, error) {
-	externalAPIKeys, err := c.FetchExternalAPIKeys(ctx)
+	apiKeys, err := c.FetchManagementAPIKeys(ctx)
 	if err != nil {
 		return &response.ModelsResult{}, err
 	}
-	externalAPIKey := firstNonEmptyString(externalAPIKeys.Payload.ExternalAPIKeys)
-	if externalAPIKey == "" {
-		return &response.ModelsResult{}, fmt.Errorf("cpa external api keys are required")
+	apiKey := firstNonEmptyString(apiKeys.Payload.APIKeys)
+	if apiKey == "" {
+		return &response.ModelsResult{}, fmt.Errorf("cpa api keys are required")
 	}
 
 	result := &response.ModelsResult{}
 	statusCode, body, err := c.doJSONRequest(ctx, cpaModelsEndpoint, &result.Payload, "models", func(req *http.Request) {
-		req.Header.Set("Authorization", "Bearer "+externalAPIKey)
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	})
 	result.StatusCode = statusCode
 	result.Body = body

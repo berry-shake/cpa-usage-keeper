@@ -20,6 +20,7 @@ type UsageFilter struct {
 	Model     string
 	Source    string
 	AuthIndex string
+	APIKeyID  string
 	Result    string
 }
 

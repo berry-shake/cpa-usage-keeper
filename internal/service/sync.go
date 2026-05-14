@@ -23,6 +23,7 @@ import (
 
 type MetadataFetcher interface {
 	FetchAuthFiles(ctx context.Context) (*response.AuthFilesResult, error)
+	FetchManagementAPIKeys(ctx context.Context) (*response.ManagementAPIKeysResult, error)
 	FetchGeminiAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error)
 	FetchClaudeAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error)
 	FetchCodexAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error)
@@ -144,10 +145,12 @@ func (s *SyncService) SyncMetadata(ctx context.Context) error {
 	logrus.Debug("metadata sync started")
 	fetchedAt := timeutil.NormalizeStorageTime(s.now())
 	authFilesResult, authFilesErr := s.metadataFetcher.FetchAuthFiles(ctx)
+	apiKeysResult, apiKeysErr := s.metadataFetcher.FetchManagementAPIKeys(ctx)
 	providerConfig, fetchedProviderTypes, providerMetadataErr := fetchProviderMetadata(ctx, s.metadataFetcher)
 	authSyncErr := syncAuthFiles(ctx, s.db, authFilesResult, authFilesErr, fetchedAt)
+	apiKeySyncErr := syncManagementAPIKeys(s.db, apiKeysResult, apiKeysErr, fetchedAt)
 	providerSyncErr, providerWarningErr := syncProviderMetadata(ctx, s.db, providerConfig, fetchedProviderTypes, providerMetadataErr, fetchedAt)
-	upsertErr := joinErrors(authSyncErr, providerSyncErr)
+	upsertErr := joinErrors(authSyncErr, apiKeySyncErr, providerSyncErr)
 	var aggregateErr error
 	if upsertErr == nil {
 		aggregateErr = repository.AggregateUsageIdentityStats(ctx, s.db, fetchedAt)
@@ -425,6 +428,22 @@ func syncAuthFiles(ctx context.Context, db *gorm.DB, result *response.AuthFilesR
 	}
 	if err := repository.ReplaceUsageIdentitiesForAuthType(ctx, db, identities, entities.UsageIdentityAuthTypeAuthFile, now); err != nil {
 		return fmt.Errorf("sync auth file usage identities: %w", err)
+	}
+	return nil
+}
+
+func syncManagementAPIKeys(db *gorm.DB, result *response.ManagementAPIKeysResult, fetchErr error, now time.Time) error {
+	if fetchErr != nil {
+		return fmt.Errorf("fetch management api keys: %w", fetchErr)
+	}
+	if db == nil {
+		return fmt.Errorf("database is nil")
+	}
+	if result == nil {
+		return fmt.Errorf("fetch management api keys: empty response")
+	}
+	if err := repository.SyncCPAAPIKeys(db, result.Payload.APIKeys, now); err != nil {
+		return fmt.Errorf("sync management api keys: %w", err)
 	}
 	return nil
 }

@@ -1,0 +1,123 @@
+package repository
+
+import (
+	"strings"
+	"time"
+
+	"cpa-usage-keeper/internal/entities"
+
+	"gorm.io/gorm"
+)
+
+func MaskAPIKey(key string) string {
+	const mask = "*********"
+	if len(key) < 9 {
+		return mask
+	}
+	return key[:3] + mask + key[len(key)-6:]
+}
+
+func SyncCPAAPIKeys(db *gorm.DB, keys []string, syncedAt time.Time) error {
+	seen := make(map[string]struct{}, len(keys))
+	uniqueKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		uniqueKeys = append(uniqueKeys, key)
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var existingRows []struct {
+			ID        int64
+			APIKey    string
+			IsDeleted bool
+		}
+		if err := tx.Model(&entities.CPAAPIKey{}).Select("id, api_key, is_deleted").Find(&existingRows).Error; err != nil {
+			return err
+		}
+
+		existingByKey := make(map[string]struct {
+			ID        int64
+			IsDeleted bool
+		}, len(existingRows))
+		for _, row := range existingRows {
+			existingByKey[row.APIKey] = struct {
+				ID        int64
+				IsDeleted bool
+			}{ID: row.ID, IsDeleted: row.IsDeleted}
+		}
+
+		incoming := make(map[string]struct{}, len(uniqueKeys))
+		toCreate := make([]entities.CPAAPIKey, 0)
+		for _, key := range uniqueKeys {
+			incoming[key] = struct{}{}
+			if existing, ok := existingByKey[key]; ok {
+				updates := map[string]any{
+					"display_key":    MaskAPIKey(key),
+					"is_deleted":     false,
+					"last_synced_at": &syncedAt,
+					"updated_at":     syncedAt,
+				}
+				if err := tx.Model(&entities.CPAAPIKey{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			toCreate = append(toCreate, entities.CPAAPIKey{
+				APIKey:       key,
+				DisplayKey:   MaskAPIKey(key),
+				IsDeleted:    false,
+				LastSyncedAt: &syncedAt,
+			})
+		}
+		if len(toCreate) > 0 {
+			if err := tx.Create(&toCreate).Error; err != nil {
+				return err
+			}
+		}
+
+		staleIDs := make([]int64, 0)
+		for _, row := range existingRows {
+			if row.IsDeleted {
+				continue
+			}
+			if _, ok := incoming[row.APIKey]; ok {
+				continue
+			}
+			staleIDs = append(staleIDs, row.ID)
+		}
+		if len(staleIDs) == 0 {
+			return nil
+		}
+		return tx.Model(&entities.CPAAPIKey{}).Where("id IN ?", staleIDs).Updates(map[string]any{"is_deleted": true, "updated_at": syncedAt}).Error
+	})
+}
+
+func ListActiveCPAAPIKeys(db *gorm.DB) ([]entities.CPAAPIKey, error) {
+	var rows []entities.CPAAPIKey
+	err := db.Where("is_deleted = ?", false).Order("id asc").Find(&rows).Error
+	return rows, err
+}
+
+func FindActiveCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) {
+	var row entities.CPAAPIKey
+	err := db.Where("id = ? AND is_deleted = ?", id, false).First(&row).Error
+	return row, err
+}
+
+func UpdateCPAAPIKeyAlias(db *gorm.DB, id int64, keyAlias string) error {
+	result := db.Model(&entities.CPAAPIKey{}).Where("id = ? AND is_deleted = ?", id, false).Update("key_alias", strings.TrimSpace(keyAlias))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}

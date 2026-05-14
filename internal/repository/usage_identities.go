@@ -11,7 +11,6 @@ import (
 	"cpa-usage-keeper/internal/timeutil"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 func ReplaceUsageIdentitiesForAuthType(ctx context.Context, db *gorm.DB, identities []entities.UsageIdentity, authType entities.UsageIdentityAuthType, now time.Time) error {
@@ -23,19 +22,17 @@ func ReplaceUsageIdentitiesForAuthType(ctx context.Context, db *gorm.DB, identit
 	normalized, incomingIdentities := normalizeUsageIdentities(identities, authType)
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existingRows, err := listUsageIdentitySyncRows(tx.Model(&entities.UsageIdentity{}).Where("auth_type = ?", authType))
+		if err != nil {
+			return fmt.Errorf("list usage identities for sync: %w", err)
+		}
 		// 先写入或恢复本次同步到的身份，确保 CPA 返回的 deleted row 会重新变为 active。
-		if err := upsertUsageIdentities(tx, normalized); err != nil {
+		if err := syncUsageIdentities(tx, normalized, existingRows); err != nil {
 			return err
 		}
 
 		// 再按 auth_type 范围只对当前 active 身份做 stale 对比；未返回且已 deleted 的历史行不刷新 deleted_at。
-		return markStaleUsageIdentitiesDeleted(
-			tx,
-			tx.Model(&entities.UsageIdentity{}).Where("auth_type = ? AND is_deleted = ?", authType, false),
-			incomingIdentities,
-			now,
-			"mark stale usage identities deleted",
-		)
+		return markStaleUsageIdentityRowsDeleted(tx, existingRows, incomingIdentities, now, "mark stale usage identities deleted")
 	})
 }
 
@@ -49,8 +46,12 @@ func ReplaceUsageIdentitiesForProviderTypes(ctx context.Context, db *gorm.DB, id
 	types := normalizeProviderTypes(providerTypes)
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 先 upsert 本次成功拉到的 provider identity，CPA 返回的历史 deleted provider 会在这里恢复 active。
-		if err := upsertUsageIdentities(tx, normalized); err != nil {
+		existingRows, err := listUsageIdentitySyncRows(tx.Model(&entities.UsageIdentity{}).Where("auth_type = ?", entities.UsageIdentityAuthTypeAIProvider))
+		if err != nil {
+			return fmt.Errorf("list provider usage identities for sync: %w", err)
+		}
+		// 先同步本次成功拉到的 provider identity，CPA 返回的历史 deleted provider 会在这里恢复 active。
+		if err := syncUsageIdentities(tx, normalized, existingRows); err != nil {
 			return err
 		}
 		if len(types) == 0 {
@@ -61,10 +62,13 @@ func ReplaceUsageIdentitiesForProviderTypes(ctx context.Context, db *gorm.DB, id
 		for start := 0; start < len(types); start += insertBatchSize(entities.UsageIdentity{}) {
 			end := min(start+insertBatchSize(entities.UsageIdentity{}), len(types))
 			// 每批只处理本次成功 fetch 的 provider type；未返回且仍 active 的身份才会被标记 deleted。
-			query := tx.Model(&entities.UsageIdentity{}).
+			staleRows, err := listUsageIdentitySyncRows(tx.Model(&entities.UsageIdentity{}).
 				Where("auth_type = ? AND is_deleted = ?", entities.UsageIdentityAuthTypeAIProvider, false).
-				Where("type IN ?", types[start:end])
-			if err := markStaleUsageIdentitiesDeleted(tx, query, incomingIdentities, now, "mark stale provider usage identities deleted"); err != nil {
+				Where("type IN ?", types[start:end]))
+			if err != nil {
+				return fmt.Errorf("list stale provider usage identities: %w", err)
+			}
+			if err := markStaleUsageIdentityRowsDeleted(tx, staleRows, incomingIdentities, now, "mark stale provider usage identities deleted"); err != nil {
 				return err
 			}
 		}
@@ -362,29 +366,38 @@ func normalizeProviderTypes(providerTypes []string) []string {
 	return types
 }
 
-func markStaleUsageIdentitiesDeleted(tx *gorm.DB, query *gorm.DB, incomingIdentities []string, now time.Time, context string) error {
+type usageIdentitySyncRow struct {
+	ID        int64
+	AuthType  entities.UsageIdentityAuthType
+	Identity  string
+	IsDeleted bool
+}
+
+func listUsageIdentitySyncRows(query *gorm.DB) ([]usageIdentitySyncRow, error) {
+	var rows []usageIdentitySyncRow
+	if err := query.Select("id, auth_type, identity, is_deleted").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func markStaleUsageIdentityRowsDeleted(tx *gorm.DB, rows []usageIdentitySyncRow, incomingIdentities []string, now time.Time, context string) error {
 	// 把本次同步到的 identity 放进内存集合，避免生成超大的 identity NOT IN SQL。
 	incoming := make(map[string]struct{}, len(incomingIdentities))
 	for _, identity := range incomingIdentities {
 		incoming[identity] = struct{}{}
 	}
 
-	// 只从数据库读取候选行的最小字段，后续在 Go 中判断哪些行已经 stale。
-	var candidates []struct {
-		ID       int64
-		Identity string
-	}
-	if err := query.Select("id, identity").Find(&candidates).Error; err != nil {
-		return fmt.Errorf("%s: %w", context, err)
-	}
-
-	// 候选行中没有出现在本次输入里的 ID，就是需要标记删除的 stale 数据。
+	// 候选行中没有出现在本次输入里的 active ID，就是需要标记删除的 stale 数据。
 	staleIDs := make([]int64, 0)
-	for _, candidate := range candidates {
-		if _, ok := incoming[candidate.Identity]; ok {
+	for _, row := range rows {
+		if row.IsDeleted {
 			continue
 		}
-		staleIDs = append(staleIDs, candidate.ID)
+		if _, ok := incoming[row.Identity]; ok {
+			continue
+		}
+		staleIDs = append(staleIDs, row.ID)
 	}
 
 	// stale ID 也按批次更新，避免 id IN 在数据量大时再次触发 SQLite 变量上限。
@@ -399,33 +412,55 @@ func markStaleUsageIdentitiesDeleted(tx *gorm.DB, query *gorm.DB, incomingIdenti
 	return nil
 }
 
-func upsertUsageIdentities(tx *gorm.DB, identities []entities.UsageIdentity) error {
+func syncUsageIdentities(tx *gorm.DB, identities []entities.UsageIdentity, existingRows []usageIdentitySyncRow) error {
 	if len(identities) == 0 {
 		return nil
 	}
 
-	// 冲突时只刷新 CPA 当前能提供的元数据，并恢复 deleted row；统计字段由聚合流程维护，不在这里覆盖。
-	if err := tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "auth_type"}, {Name: "identity"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"name":           gorm.Expr("excluded.name"),
-			"auth_type_name": gorm.Expr("excluded.auth_type_name"),
-			"type":           gorm.Expr("excluded.type"),
-			"provider":       gorm.Expr("excluded.provider"),
-			"lookup_key":     gorm.Expr("excluded.lookup_key"),
-			"prefix":         gorm.Expr("excluded.prefix"),
-			"base_url":       gorm.Expr("excluded.base_url"),
-			"account_id":     gorm.Expr("excluded.account_id"),
-			"project_id":     gorm.Expr("excluded.project_id"),
-			"active_start":   gorm.Expr("excluded.active_start"),
-			"active_until":   gorm.Expr("excluded.active_until"),
-			"plan_type":      gorm.Expr("excluded.plan_type"),
-			"is_deleted":     false,
-			"deleted_at":     nil,
-			"updated_at":     gorm.Expr("excluded.updated_at"),
-		}),
-	}).CreateInBatches(&identities, insertBatchSize(entities.UsageIdentity{})).Error; err != nil {
-		return fmt.Errorf("upsert usage identities: %w", err)
+	existingByKey := make(map[string]usageIdentitySyncRow, len(existingRows))
+	for _, row := range existingRows {
+		existingByKey[usageIdentitySyncKey(row.AuthType, row.Identity)] = row
+	}
+
+	toCreate := make([]entities.UsageIdentity, 0)
+	for _, identity := range identities {
+		if existing, ok := existingByKey[usageIdentitySyncKey(identity.AuthType, identity.Identity)]; ok {
+			if err := tx.Model(&entities.UsageIdentity{}).Where("id = ?", existing.ID).Updates(usageIdentityMetadataUpdates(identity)).Error; err != nil {
+				return fmt.Errorf("update usage identity: %w", err)
+			}
+			continue
+		}
+		toCreate = append(toCreate, identity)
+	}
+	if len(toCreate) == 0 {
+		return nil
+	}
+	if err := tx.CreateInBatches(&toCreate, insertBatchSize(entities.UsageIdentity{})).Error; err != nil {
+		return fmt.Errorf("create usage identities: %w", err)
 	}
 	return nil
+}
+
+func usageIdentitySyncKey(authType entities.UsageIdentityAuthType, identity string) string {
+	return fmt.Sprintf("%d:%s", authType, identity)
+}
+
+func usageIdentityMetadataUpdates(identity entities.UsageIdentity) map[string]any {
+	return map[string]any{
+		"name":           identity.Name,
+		"auth_type_name": identity.AuthTypeName,
+		"type":           identity.Type,
+		"provider":       identity.Provider,
+		"lookup_key":     identity.LookupKey,
+		"prefix":         identity.Prefix,
+		"base_url":       identity.BaseURL,
+		"account_id":     identity.AccountID,
+		"project_id":     identity.ProjectID,
+		"active_start":   identity.ActiveStart,
+		"active_until":   identity.ActiveUntil,
+		"plan_type":      identity.PlanType,
+		"is_deleted":     false,
+		"deleted_at":     nil,
+		"updated_at":     identity.UpdatedAt,
+	}
 }

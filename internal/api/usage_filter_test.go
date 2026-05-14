@@ -222,6 +222,26 @@ func TestParseUsageFilterQueryAcceptsEventsPaginationAndFilters(t *testing.T) {
 	}
 }
 
+func TestParseUsageFilterQueryAcceptsAPIKeyID(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/usage/events?api_key_id=%201234567890123456789%20", nil)
+
+	filter, err := parseUsageFilterQuery(req, time.Time{})
+	if err != nil {
+		t.Fatalf("parseUsageFilterQuery returned error: %v", err)
+	}
+	if filter.APIKeyID != "1234567890123456789" {
+		t.Fatalf("expected api key id to be preserved as string, got %+v", filter)
+	}
+
+	timeFilter, err := parseUsageTimeFilterQuery(req, time.Time{})
+	if err != nil {
+		t.Fatalf("parseUsageTimeFilterQuery returned error: %v", err)
+	}
+	if timeFilter.APIKeyID != "1234567890123456789" {
+		t.Fatalf("expected time filter to preserve api key id, got %+v", timeFilter)
+	}
+}
+
 func TestParseUsageFilterQueryUsesLimitAsPageSizeAlias(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/usage/events?limit=20", nil)
 

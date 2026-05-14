@@ -10,6 +10,7 @@ interface LoadUsageStatsOptions {
   range?: UsageTimeRange;
   start?: string;
   end?: string;
+  apiKeyId?: string;
 }
 
 interface UsageStatsState {
@@ -26,8 +27,8 @@ let activeRequest: Promise<void> | null = null;
 let activeRequestKey: string | null = null;
 let activeRequestController: AbortController | null = null;
 
-const buildQueryKey = (range: UsageTimeRange, start?: string, end?: string): string =>
-  `${range}:${start ?? ''}:${end ?? ''}`;
+const buildQueryKey = (range: UsageTimeRange, start?: string, end?: string, apiKeyId?: string): string =>
+  `${range}:${start ?? ''}:${end ?? ''}:${apiKeyId ?? ''}`;
 
 export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
   usage: null,
@@ -42,10 +43,11 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
       range = 'all',
       start,
       end,
+      apiKeyId,
     } = options;
     const { lastRefreshedAt, loading, usage, lastQueryKey } = get();
     const now = Date.now();
-    const queryKey = buildQueryKey(range, start, end);
+    const queryKey = buildQueryKey(range, start, end, apiKeyId);
 
     if (!force && usage && lastRefreshedAt && lastQueryKey === queryKey && now - lastRefreshedAt < staleTimeMs) {
       return;
@@ -65,7 +67,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
 
     activeRequest = (async () => {
       try {
-        const response = await fetchUsageOverview(range, start, end, controller.signal);
+        const response = await fetchUsageOverview(range, start, end, controller.signal, apiKeyId);
         if (activeRequestController !== controller) {
           return;
         }

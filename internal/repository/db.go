@@ -15,7 +15,6 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
@@ -111,28 +110,74 @@ func InsertUsageEvents(db *gorm.DB, events []entities.UsageEvent) (int, int, err
 	}
 
 	inserted := 0
+	deduped := 0
 
-	// 按仓储默认批次拆分写入，避免单条 INSERT 的 SQLite 变量数量过多。
-	for start := 0; start < len(events); start += insertBatchSize(entities.UsageEvent{}) {
-		end := min(start+insertBatchSize(entities.UsageEvent{}), len(events))
-		batch := events[start:end]
-		for index := range batch {
-			batch[index].Timestamp = timeutil.NormalizeStorageTime(batch[index].Timestamp)
-		}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		// 按仓储默认批次拆分写入，避免单条 INSERT 的 SQLite 变量数量过多。
+		for start := 0; start < len(events); start += insertBatchSize(entities.UsageEvent{}) {
+			end := min(start+insertBatchSize(entities.UsageEvent{}), len(events))
+			batch := events[start:end]
+			for index := range batch {
+				batch[index].Timestamp = timeutil.NormalizeStorageTime(batch[index].Timestamp)
+			}
 
-		// 每批仍按 event_key 去重，保持原有重复事件忽略语义。
-		result := db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "event_key"}},
-			DoNothing: true,
-		}).Create(&batch)
-		if result.Error != nil {
-			return 0, 0, fmt.Errorf("insert usage events: %w", result.Error)
+			toInsert, batchDeduped, err := filterNewUsageEvents(tx, batch)
+			if err != nil {
+				return err
+			}
+			deduped += batchDeduped
+			if len(toInsert) == 0 {
+				continue
+			}
+			result := tx.Create(&toInsert)
+			if result.Error != nil {
+				return fmt.Errorf("insert usage events: %w", result.Error)
+			}
+			inserted += int(result.RowsAffected)
 		}
-		inserted += int(result.RowsAffected)
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
 	}
 
-	deduped := len(events) - inserted
 	return inserted, deduped, nil
+}
+
+func filterNewUsageEvents(db *gorm.DB, events []entities.UsageEvent) ([]entities.UsageEvent, int, error) {
+	batchKeys := make([]string, 0, len(events))
+	seenInBatch := make(map[string]struct{}, len(events))
+	uniqueEvents := make([]entities.UsageEvent, 0, len(events))
+	for _, event := range events {
+		if _, ok := seenInBatch[event.EventKey]; ok {
+			continue
+		}
+		seenInBatch[event.EventKey] = struct{}{}
+		batchKeys = append(batchKeys, event.EventKey)
+		uniqueEvents = append(uniqueEvents, event)
+	}
+	if len(uniqueEvents) == 0 {
+		return nil, len(events), nil
+	}
+
+	var existingKeys []string
+	if err := db.Model(&entities.UsageEvent{}).Select("event_key").Where("event_key IN ?", batchKeys).Find(&existingKeys).Error; err != nil {
+		return nil, 0, fmt.Errorf("list existing usage event keys: %w", err)
+	}
+	existing := make(map[string]struct{}, len(existingKeys))
+	for _, key := range existingKeys {
+		existing[key] = struct{}{}
+	}
+
+	toInsert := make([]entities.UsageEvent, 0, len(uniqueEvents))
+	for _, event := range uniqueEvents {
+		if _, ok := existing[event.EventKey]; ok {
+			continue
+		}
+		toInsert = append(toInsert, event)
+	}
+	deduped := len(events) - len(toInsert)
+	return toInsert, deduped, nil
 }
 
 // CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox，最后执行 VACUUM。

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration, syncCpaData } from './UsagePage';
-import { ApiError } from '@/lib/api';
+import { buildCustomDateRangeQuery, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration } from './UsagePage';
 import { filterUsageByWindow, type UsageFilterWindow } from '@/utils/usage';
-import type { StatusResponse, UsageSnapshot } from '@/lib/types';
+import type { UsageSnapshot } from '@/lib/types';
 
 const usage: UsageSnapshot = {
   total_requests: 2,
@@ -221,7 +220,7 @@ describe('UsagePage active tab auto-refresh guard', () => {
   it('keeps Overview auto-refresh enabled and does not auto-refresh other tabs', () => {
     expect(shouldAutoRefreshUsageTab({ activeTab: 'overview', eventsPage: 2, authFilePage: 2, aiProviderPage: 2 })).toBe(true);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'analysis', eventsPage: 1, authFilePage: 1, aiProviderPage: 1 })).toBe(false);
-    expect(shouldAutoRefreshUsageTab({ activeTab: 'pricing', eventsPage: 1, authFilePage: 1, aiProviderPage: 1 })).toBe(false);
+    expect(shouldAutoRefreshUsageTab({ activeTab: 'settings', eventsPage: 1, authFilePage: 1, aiProviderPage: 1 })).toBe(false);
   });
 });
 
@@ -288,7 +287,7 @@ for (const [tab, expected] of [
   ['analysis', true],
   ['events', true],
   ['credentials', true],
-  ['pricing', false],
+  ['settings', false],
 ] as const) {
   it(`returns ${expected} for ${tab} range controls visibility`, () => {
     expect(shouldShowRangeControls(tab)).toBe(expected);
@@ -402,7 +401,7 @@ describe('UsagePage tab labels', () => {
       'translated:usage_stats.tab_credentials',
       'translated:usage_stats.tab_events',
       'translated:usage_stats.tab_analysis',
-      'translated:usage_stats.tab_pricing',
+      'translated:usage_stats.tab_settings',
     ]);
   });
 });
@@ -410,86 +409,15 @@ describe('UsagePage tab labels', () => {
 describe('UsagePage refresh action', () => {
   it('reloads page data without triggering backend sync', async () => {
     let refreshCalls = 0;
-    let syncCalls = 0;
+    const syncCalls = 0;
 
     await refreshPageData({
       refreshActiveTab: async () => {
         refreshCalls += 1;
       },
-      triggerBackendSync: async () => {
-        syncCalls += 1;
-      },
     });
 
     expect(refreshCalls).toBe(1);
     expect(syncCalls).toBe(0);
-  });
-});
-
-describe('UsagePage sync action', () => {
-  it('triggers backend sync, refreshes active tab data, and reloads status', async () => {
-    const calls: string[] = [];
-    let receivedStatus: StatusResponse | null = null;
-    const syncStatus: StatusResponse = { running: true, sync_running: false, last_status: 'completed' };
-    const refreshedStatus: StatusResponse = {
-      running: true,
-      sync_running: false,
-      last_status: 'completed',
-      last_run_at: '2026-04-26T13:00:00.000Z',
-    };
-
-    await syncCpaData({
-      triggerBackendSync: async () => {
-        calls.push('sync');
-        return syncStatus;
-      },
-      refreshActiveTab: async () => {
-        calls.push('refresh');
-      },
-      refreshStatus: async () => {
-        calls.push('status');
-        return refreshedStatus;
-      },
-      onStatus: (status) => {
-        calls.push('set-status');
-        receivedStatus = status;
-      },
-    });
-
-    expect(calls).toEqual(['sync', 'refresh', 'status', 'set-status']);
-    expect(receivedStatus).toBe(refreshedStatus);
-  });
-
-  it('reloads status and preserves the sync error when backend sync fails', async () => {
-    const calls: string[] = [];
-    let receivedStatus: StatusResponse | null = null;
-    const refreshedStatus: StatusResponse = {
-      running: true,
-      sync_running: false,
-      last_status: 'completed',
-      last_run_at: '2026-04-26T13:00:00.000Z',
-    };
-    const syncError = new ApiError('metadata sync failed', 500);
-
-    await expect(syncCpaData({
-      triggerBackendSync: async () => {
-        calls.push('sync');
-        throw syncError;
-      },
-      refreshActiveTab: async () => {
-        calls.push('refresh');
-      },
-      refreshStatus: async () => {
-        calls.push('status');
-        return refreshedStatus;
-      },
-      onStatus: (status) => {
-        calls.push('set-status');
-        receivedStatus = status;
-      },
-    })).rejects.toBe(syncError);
-
-    expect(calls).toEqual(['sync', 'status', 'set-status']);
-    expect(receivedStatus).toBe(refreshedStatus);
   });
 });

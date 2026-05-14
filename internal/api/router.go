@@ -3,15 +3,12 @@ package api
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"io/fs"
-	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"cpa-usage-keeper/internal/poller"
@@ -24,30 +21,9 @@ import (
 )
 
 const appBasePathPlaceholder = "__APP_BASE_PATH__"
-const manualSyncRateLimitWindow = time.Second
-
-type syncLimiter struct {
-	mu       sync.Mutex
-	window   time.Duration
-	lastSync time.Time
-}
-
-func (l *syncLimiter) allow(now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.lastSync.IsZero() && now.Sub(l.lastSync) < l.window {
-		return false
-	}
-	l.lastSync = now
-	return true
-}
 
 type StatusProvider interface {
 	Status() poller.Status
-}
-
-type SyncRunner interface {
-	SyncNow(ctx context.Context) error
 }
 
 type QuotaProvider interface {
@@ -59,10 +35,7 @@ type QuotaProvider interface {
 type OptionalProviders struct {
 	UsageIdentity service.UsageIdentityProvider
 	Quota         QuotaProvider
-}
-
-type syncUserMessageError interface {
-	UserMessage() string
+	CPAAPIKeys    service.CPAAPIKeyProvider
 }
 
 func NewRouter(
@@ -95,21 +68,23 @@ func NewRouter(
 
 	var usageIdentityProvider service.UsageIdentityProvider
 	var quotaProvider QuotaProvider
+	var cpaAPIKeyProvider service.CPAAPIKeyProvider
 	if len(optionalProviders) > 0 {
 		usageIdentityProvider = optionalProviders[0].UsageIdentity
 		quotaProvider = optionalProviders[0].Quota
+		cpaAPIKeyProvider = optionalProviders[0].CPAAPIKeys
 	}
 
 	protected := apiV1.Group("")
 	protected.Use(authHandler.middleware())
 	registerStatusRoutes(protected, statusProvider)
 	registerUpdateRoutes(protected, nil)
-	registerSyncRoutes(protected, statusProvider, &syncLimiter{window: manualSyncRateLimitWindow})
 	registerUsageOverviewRoute(protected, usageProvider)
 	registerUsageAnalysisRoute(protected, usageProvider)
 	registerUsageEventsRoute(protected, usageProvider, usageIdentityProvider)
 	registerUsageCredentialsRoute(protected, usageProvider, usageIdentityProvider)
 	registerUsageIdentityRoutes(protected, usageIdentityProvider)
+	registerCPAAPIKeyRoutes(protected, cpaAPIKeyProvider)
 	registerPricingRoutes(protected, pricingProvider)
 	registerQuotaRoutes(protected, quotaProvider)
 
@@ -257,45 +232,6 @@ func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider) {
 		}
 
 		c.JSON(http.StatusOK, buildStatusResponse(statusProvider.Status()))
-	})
-}
-
-func manualSyncErrorMessage(err error) string {
-	var userMessage syncUserMessageError
-	if errors.As(err, &userMessage) && userMessage.UserMessage() != "" {
-		return userMessage.UserMessage()
-	}
-	return "manual sync failed"
-}
-
-func registerSyncRoutes(router gin.IRoutes, statusProvider StatusProvider, limiter *syncLimiter) {
-	router.POST("/sync", func(c *gin.Context) {
-		if limiter != nil && !limiter.allow(time.Now()) {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "sync rate limit exceeded"})
-			return
-		}
-
-		syncRunner, ok := statusProvider.(SyncRunner)
-		if !ok || syncRunner == nil {
-			writeInternalError(c, "sync runner is not configured", nil)
-			return
-		}
-
-		if err := syncRunner.SyncNow(c.Request.Context()); err != nil {
-			if errors.Is(err, poller.ErrSyncAlreadyRunning) {
-				c.JSON(http.StatusConflict, gin.H{"error": "sync already running"})
-				return
-			}
-			slog.Error("manual sync failed", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": manualSyncErrorMessage(err)})
-			return
-		}
-
-		if statusProvider, ok := syncRunner.(StatusProvider); ok {
-			c.JSON(http.StatusOK, buildStatusResponse(statusProvider.Status()))
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"sync_running": false})
 	})
 }
 

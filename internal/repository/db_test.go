@@ -53,8 +53,8 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
 		t.Fatalf("count schema migrations: %v", err)
 	}
-	if count != 20 {
-		t.Fatalf("expected fresh database to mark 20 migrations applied, got %d", count)
+	if count != 21 {
+		t.Fatalf("expected fresh database to mark 21 migrations applied, got %d", count)
 	}
 	if strings.Contains(logs.String(), "schema migration started") {
 		t.Fatalf("expected fresh database creation not to run version migrations, got logs:\n%s", logs.String())
@@ -119,6 +119,43 @@ func TestInsertUsageEventsDeduplicatesByEventKey(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("expected 2 persisted usage events, got %d", count)
+	}
+}
+
+func TestInsertUsageEventsDoesNotConsumeIDsForDuplicateEventKeys(t *testing.T) {
+	db := openTestDatabase(t)
+	baseTime := time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC)
+
+	inserted, deduped, err := InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "event-1", Model: "claude-sonnet", Timestamp: baseTime}})
+	if err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+	if inserted != 1 || deduped != 0 {
+		t.Fatalf("expected inserted=1 deduped=0, got inserted=%d deduped=%d", inserted, deduped)
+	}
+	for i := 0; i < 5; i++ {
+		inserted, deduped, err = InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "event-1", Model: "claude-sonnet", Timestamp: baseTime}})
+		if err != nil {
+			t.Fatalf("InsertUsageEvents duplicate returned error: %v", err)
+		}
+		if inserted != 0 || deduped != 1 {
+			t.Fatalf("expected duplicate inserted=0 deduped=1, got inserted=%d deduped=%d", inserted, deduped)
+		}
+	}
+	inserted, deduped, err = InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "event-2", Model: "claude-opus", Timestamp: baseTime.Add(time.Minute)}})
+	if err != nil {
+		t.Fatalf("InsertUsageEvents second event returned error: %v", err)
+	}
+	if inserted != 1 || deduped != 0 {
+		t.Fatalf("expected second event inserted=1 deduped=0, got inserted=%d deduped=%d", inserted, deduped)
+	}
+
+	var row entities.UsageEvent
+	if err := db.Where("event_key = ?", "event-2").First(&row).Error; err != nil {
+		t.Fatalf("expected second event row: %v", err)
+	}
+	if row.ID != 2 {
+		t.Fatalf("expected second event id to be 2 without conflict sequence burn, got %d", row.ID)
 	}
 }
 

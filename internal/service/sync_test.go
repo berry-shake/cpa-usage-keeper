@@ -14,6 +14,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/cpa/dto/authfiles"
+	"cpa-usage-keeper/internal/cpa/dto/cpaapikeys"
 	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
 	"cpa-usage-keeper/internal/cpa/dto/response"
 	"cpa-usage-keeper/internal/entities"
@@ -26,25 +27,29 @@ import (
 )
 
 type stubMetadataFetcher struct {
-	authFilesResult *response.AuthFilesResult
-	authFilesErr    error
-	providerConfig  providerconfig.ProviderMetadataConfig
-	geminiErr       error
-	claudeErr       error
-	codexErr        error
-	vertexErr       error
-	openAIErr       error
-	geminiNilResult bool
+	authFilesResult  *response.AuthFilesResult
+	authFilesErr     error
+	apiKeysResult    *response.ManagementAPIKeysResult
+	apiKeysErr       error
+	providerConfig   providerconfig.ProviderMetadataConfig
+	geminiErr        error
+	claudeErr        error
+	codexErr         error
+	vertexErr        error
+	openAIErr        error
+	geminiNilResult  bool
 }
 
 type trackingMetadataFetcher struct {
 	authCalls   int
+	apiKeyCalls int
 	geminiCalls int
 	claudeCalls int
 	codexCalls  int
 	vertexCalls int
 	openAICalls int
 	authErr     error
+	apiKeysErr  error
 	providerErr error
 }
 
@@ -58,6 +63,13 @@ func (s stubMetadataFetcher) FetchAuthFiles(context.Context) (*response.AuthFile
 		return s.authFilesResult, s.authFilesErr
 	}
 	return &response.AuthFilesResult{StatusCode: 200, Payload: authfiles.AuthFilesResponse{}}, nil
+}
+
+func (s stubMetadataFetcher) FetchManagementAPIKeys(context.Context) (*response.ManagementAPIKeysResult, error) {
+	if s.apiKeysResult != nil || s.apiKeysErr != nil {
+		return s.apiKeysResult, s.apiKeysErr
+	}
+	return &response.ManagementAPIKeysResult{StatusCode: 200}, nil
 }
 
 func (s stubMetadataFetcher) FetchGeminiAPIKeys(context.Context) (*response.ProviderKeyConfigResult, error) {
@@ -105,6 +117,14 @@ func (s *trackingMetadataFetcher) FetchAuthFiles(context.Context) (*response.Aut
 	return &response.AuthFilesResult{StatusCode: 200, Payload: authfiles.AuthFilesResponse{}}, nil
 }
 
+func (s *trackingMetadataFetcher) FetchManagementAPIKeys(context.Context) (*response.ManagementAPIKeysResult, error) {
+	s.apiKeyCalls++
+	if s.apiKeysErr != nil {
+		return nil, s.apiKeysErr
+	}
+	return &response.ManagementAPIKeysResult{StatusCode: 200}, nil
+}
+
 func (s *trackingMetadataFetcher) FetchGeminiAPIKeys(context.Context) (*response.ProviderKeyConfigResult, error) {
 	s.geminiCalls++
 	return providerKeyConfigResult(nil, s.providerErr)
@@ -135,6 +155,10 @@ func (s *observingMetadataFetcher) FetchAuthFiles(context.Context) (*response.Au
 		return nil, err
 	}
 	return &response.AuthFilesResult{StatusCode: 200, Payload: authfiles.AuthFilesResponse{}}, nil
+}
+
+func (s *observingMetadataFetcher) FetchManagementAPIKeys(context.Context) (*response.ManagementAPIKeysResult, error) {
+	return &response.ManagementAPIKeysResult{StatusCode: 200}, nil
 }
 
 func (s *observingMetadataFetcher) FetchGeminiAPIKeys(context.Context) (*response.ProviderKeyConfigResult, error) {
@@ -621,8 +645,54 @@ func TestSyncMetadataRefreshesMetadataWithoutSnapshot(t *testing.T) {
 	if err := service.SyncMetadata(context.Background()); err != nil {
 		t.Fatalf("SyncMetadata returned error: %v", err)
 	}
-	if metadata.authCalls != 1 || metadata.providerCalls() != 5 {
-		t.Fatalf("expected metadata fetch once, got auth=%d provider=%d", metadata.authCalls, metadata.providerCalls())
+	if metadata.authCalls != 1 || metadata.apiKeyCalls != 1 || metadata.providerCalls() != 5 {
+		t.Fatalf("expected metadata fetch once, got auth=%d apiKeys=%d provider=%d", metadata.authCalls, metadata.apiKeyCalls, metadata.providerCalls())
+	}
+}
+
+func TestSyncMetadataWritesCPAAPIKeys(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
+		BaseURL: "https://cpa.example.com",
+		MetadataFetcher: stubMetadataFetcher{apiKeysResult: &response.ManagementAPIKeysResult{
+			StatusCode: 200,
+			Payload: cpaapikeys.ManagementAPIKeysResponse{APIKeys: []string{"sk-alpha123456", "sk-beta654321"}},
+		}},
+	})
+
+	if err := service.SyncMetadata(context.Background()); err != nil {
+		t.Fatalf("SyncMetadata returned error: %v", err)
+	}
+
+	rows, err := repository.ListActiveCPAAPIKeys(db)
+	if err != nil {
+		t.Fatalf("ListActiveCPAAPIKeys returned error: %v", err)
+	}
+	if len(rows) != 2 || rows[0].DisplayKey != "sk-*********123456" || rows[0].KeyAlias != "" {
+		t.Fatalf("unexpected synced API key rows: %+v", rows)
+	}
+}
+
+func TestSyncMetadataAPIKeyFetchFailureDoesNotDeleteLocalKeys(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if err := repository.SyncCPAAPIKeys(db, []string{"sk-alpha123456"}, time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("seed API keys: %v", err)
+	}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
+		BaseURL:         "https://cpa.example.com",
+		MetadataFetcher: stubMetadataFetcher{apiKeysErr: errors.New("management unavailable")},
+	})
+
+	if err := service.SyncMetadata(context.Background()); err == nil || !strings.Contains(err.Error(), "management unavailable") {
+		t.Fatalf("expected API key fetch warning, got %v", err)
+	}
+
+	rows, err := repository.ListActiveCPAAPIKeys(db)
+	if err != nil {
+		t.Fatalf("ListActiveCPAAPIKeys returned error: %v", err)
+	}
+	if len(rows) != 1 || rows[0].APIKey != "sk-alpha123456" {
+		t.Fatalf("expected existing key to remain active after fetch failure, got %+v", rows)
 	}
 }
 

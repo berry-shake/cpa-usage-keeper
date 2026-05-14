@@ -348,34 +348,37 @@
 
 .toolbarRow {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px 16px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
   padding: 0 2px;
-
-  @include mobile {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 
 .tabBar {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  flex: 1 1 0;
+  flex-wrap: nowrap;
+  width: 100%;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .tabPill {
+  appearance: none;
   border: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
   color: var(--text-secondary);
   font: inherit;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.2;
   padding: 8px 12px;
   border-radius: 999px;
   cursor: pointer;
@@ -400,19 +403,17 @@
 }
 
 .toolbarActionsRight {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
-  flex: 0 1 auto;
-  margin-left: auto;
+  width: 100%;
+  min-width: 0;
 
   @include mobile {
-    width: 100%;
-    align-items: flex-start;
+    align-items: stretch;
     justify-content: flex-start;
-    margin-left: 0;
   }
 }
 
@@ -422,31 +423,171 @@
   white-space: nowrap;
 }
 
+.usageFilterBar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-height: 92px;
+  opacity: 1;
+  overflow: hidden;
+  transform: translateY(0);
+  transition:
+    max-height 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 240ms ease,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.usageFilterBarCollapsed {
+  max-height: 0;
+  margin-top: -12px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
+.usageFilterField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.apiKeyFilterGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-width: 0;
+  min-height: 46px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.apiKeyFilterField {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.rangeFilterField {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.usageFilterLabel {
+  padding-left: 10px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.apiKeySelectControl,
+.rangeSelectControl {
+  min-width: 0;
+
+  :global(button) {
+    border-radius: 9999px;
+  }
+}
+
+.apiKeySelectControl {
+  width: 150px;
+  flex: 0 0 150px;
+
+  :global(button) {
+    height: 34px;
+    border-color: var(--border-color);
+    background: var(--bg-primary);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
+.apiKeyFilterGroup .usageFilterLabel,
+.timeRangeGroup .usageFilterLabel {
+  padding-left: 0;
+  white-space: nowrap;
+}
+
+.rangeSelectControl {
+  width: 164px;
+  flex: 0 0 164px;
+
+  :global(button) {
+    height: 34px;
+    border-color: var(--border-color);
+    background: var(--bg-primary);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
+.customRangeFieldGroup {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.usageFilterActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
 .timeRangeGroup {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   width: fit-content;
   min-width: 0;
-  max-width: min(620px, 100%);
-  padding: 6px 8px;
+  max-width: 640px;
+  min-height: 46px;
+  padding: 5px 6px 5px 12px;
   border: 1px solid var(--border-color);
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
-  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   opacity: 1;
+  overflow: hidden;
   transform: translateX(0);
-  transition: max-width 340ms cubic-bezier(0.22, 1, 0.36, 1), padding 340ms cubic-bezier(0.22, 1, 0.36, 1), border-width 340ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease, transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    max-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-height 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 260ms ease,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
 
   @include mobile {
-    align-items: center;
+    align-items: stretch;
     flex-wrap: wrap;
+    width: 100%;
+    border-radius: 24px;
   }
 }
 
 .timeRangeGroupCollapsed {
   max-width: 0;
+  min-height: 0;
   padding-left: 0;
   padding-right: 0;
   border-width: 0;
@@ -567,15 +708,32 @@
 }
 
 @media (max-width: #{$breakpoint-tablet}) {
-  .toolbarRow {
-    align-items: flex-start;
-  }
-
   .toolbarActionsRight {
-    width: 100%;
     align-items: flex-start;
     justify-content: flex-start;
-    margin-left: 0;
+  }
+
+  .usageFilterBar {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .apiKeyFilterField {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .rangeFilterField {
+    flex: 0 0 auto;
+    max-width: none;
+  }
+
+  .customRangeFieldGroup {
+    flex: 1 1 100%;
+  }
+
+  .usageFilterActions {
+    margin-left: auto;
   }
 
   .timeRangeGroup {
@@ -610,12 +768,59 @@
     gap: 10px;
   }
 
+  .toolbarActionsRight,
+  .usageFilterBar,
+  .apiKeyFilterGroup,
+  .usageFilterField,
+  .customRangeFieldGroup,
+  .customRangeField,
+  .usageFilterActions,
+  .refreshSwitcher,
+  .refreshPill {
+    width: 100%;
+  }
+
+  .usageFilterBar {
+    gap: 8px;
+  }
+
+  .apiKeyFilterField,
+  .rangeFilterField,
+  .apiKeySelectControl,
+  .rangeSelectControl {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .apiKeyFilterField,
+  .rangeFilterField {
+    align-items: stretch;
+  }
+
+  .customRangeFieldGroup {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .customRangeSeparator {
+    display: none;
+  }
+
+  .customRangeInput {
+    width: 100%;
+  }
+
+  .usageFilterActions {
+    margin-left: 0;
+  }
+
   .container {
     gap: 12px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .usageFilterBar,
   .timeRangeGroup,
   .customRangeInline {
     transition: none;
@@ -1551,7 +1756,8 @@
   white-space: nowrap;
 }
 
-.credentialsSections {
+.credentialsSections,
+.settingsSections {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -1646,6 +1852,127 @@
   > button,
   :global(.btn) {
     min-height: 40px;
+  }
+}
+
+.apiKeySettingsCard:global(.card) {
+  min-height: auto;
+}
+
+.apiKeySettingsBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.apiKeySettingsList {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+}
+
+.apiKeySettingsItem {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.9fr) minmax(200px, 1.1fr);
+  align-items: start;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 86%, transparent);
+  border-radius: 20px;
+  background:
+    radial-gradient(360px 120px at 0% 0%, rgba($primary-color, 0.08), transparent 62%),
+    color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.apiKeySettingsSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.apiKeySettingsName {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.apiKeySettingsMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.apiKeySettingsForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.apiKeyAliasField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.apiKeyFieldLabel,
+.apiKeyAliasLabel {
+  padding-left: 10px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.apiKeyAliasInput {
+  width: 100%;
+}
+
+.apiKeySettingsActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: stretch;
+}
+
+.apiKeySettingsSaveButton {
+  min-width: 72px;
+  min-height: 40px;
+  justify-content: center;
+}
+
+@include tablet {
+  .apiKeySettingsItem {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
+@include mobile {
+  .apiKeySettingsItem {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .apiKeySettingsForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .apiKeySettingsActions,
+  .apiKeySettingsSaveButton {
+    width: 100%;
   }
 }
 

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -27,35 +26,8 @@ type statusStub struct {
 	status poller.Status
 }
 
-type syncStatusStub struct {
-	status poller.Status
-	calls  int
-	err    error
-}
-
-type userFacingSyncError struct {
-	message string
-}
-
-func (e userFacingSyncError) Error() string {
-	return e.message
-}
-
-func (e userFacingSyncError) UserMessage() string {
-	return e.message
-}
-
 func (s statusStub) Status() poller.Status {
 	return s.status
-}
-
-func (s *syncStatusStub) Status() poller.Status {
-	return s.status
-}
-
-func (s *syncStatusStub) SyncNow(context.Context) error {
-	s.calls++
-	return s.err
 }
 
 func TestHealthzReturnsOK(t *testing.T) {
@@ -212,102 +184,15 @@ func TestStatusHidesUpdateCheckForDevVersion(t *testing.T) {
 	}
 }
 
-func TestManualSyncTriggersSyncRunner(t *testing.T) {
-	previousLocal := time.Local
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		t.Fatalf("load location: %v", err)
-	}
-	t.Cleanup(func() { time.Local = previousLocal })
-	time.Local = location
-
-	lastRunAt := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
-	syncer := &syncStatusStub{status: poller.Status{Running: true, LastRunAt: lastRunAt, LastStatus: "completed"}}
-	router := NewRouter(nil, syncer, nil, nil, AuthConfig{}, nil, "")
+func TestManualSyncRouteIsNotRegistered(t *testing.T) {
+	router := NewRouter(nil, statusStub{}, nil, nil, AuthConfig{}, nil, "")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", nil)
 	resp := httptest.NewRecorder()
 
 	router.ServeHTTP(resp, req)
 
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", resp.Code)
-	}
-	if syncer.calls != 1 {
-		t.Fatalf("expected sync runner to be called once, got %d", syncer.calls)
-	}
-	body := resp.Body.String()
-	if !(contains(body, `"last_status":"completed"`) && contains(body, `"last_run_at":"2026-04-16T20:00:00+08:00"`)) {
-		t.Fatalf("unexpected response body: %s", body)
-	}
-}
-
-func TestManualSyncReturnsConflictWhenAlreadyRunning(t *testing.T) {
-	syncer := &syncStatusStub{err: poller.ErrSyncAlreadyRunning}
-	router := NewRouter(nil, syncer, nil, nil, AuthConfig{}, nil, "")
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", nil)
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusConflict {
-		t.Fatalf("expected status 409, got %d", resp.Code)
-	}
-}
-
-func TestManualSyncReturnsWarningsAsError(t *testing.T) {
-	syncer := &syncStatusStub{
-		status: poller.Status{LastStatus: "completed_with_warnings", LastWarning: "metadata unavailable"},
-		err:    poller.ErrSyncCompletedWithWarnings,
-	}
-	router := NewRouter(nil, syncer, nil, nil, AuthConfig{}, nil, "")
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", nil)
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status 500, got %d", resp.Code)
-	}
-	if body := resp.Body.String(); !contains(body, `"error":"manual sync failed"`) {
-		t.Fatalf("unexpected response body: %s", body)
-	}
-}
-
-func TestManualSyncReturnsUserFacingStageError(t *testing.T) {
-	syncer := &syncStatusStub{err: userFacingSyncError{message: "metadata sync failed"}}
-	router := NewRouter(nil, syncer, nil, nil, AuthConfig{}, nil, "")
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", nil)
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status 500, got %d", resp.Code)
-	}
-	if body := resp.Body.String(); !contains(body, `"error":"metadata sync failed"`) {
-		t.Fatalf("unexpected response body: %s", body)
-	}
-}
-
-func TestManualSyncRateLimitsRepeatedRequests(t *testing.T) {
-	syncer := &syncStatusStub{status: poller.Status{LastStatus: "completed"}}
-	router := NewRouter(nil, syncer, nil, nil, AuthConfig{}, nil, "")
-
-	firstResp := httptest.NewRecorder()
-	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync", nil)
-	router.ServeHTTP(firstResp, firstReq)
-	if firstResp.Code != http.StatusOK {
-		t.Fatalf("expected first sync to return 200, got %d", firstResp.Code)
-	}
-
-	secondResp := httptest.NewRecorder()
-	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync", nil)
-	router.ServeHTTP(secondResp, secondReq)
-	if secondResp.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected second sync within one second to return 429, got %d", secondResp.Code)
-	}
-	if syncer.calls != 1 {
-		t.Fatalf("expected rate-limited sync not to call runner again, got %d calls", syncer.calls)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", resp.Code)
 	}
 }
 

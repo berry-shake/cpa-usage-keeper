@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 
 	"cpa-usage-keeper/internal/cpa/dto/authfiles"
-	"cpa-usage-keeper/internal/cpa/dto/externalkeys"
+	"cpa-usage-keeper/internal/cpa/dto/cpaapikeys"
 	"cpa-usage-keeper/internal/cpa/dto/models"
 	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
 )
 
-// ExternalAPIKeysResult 是 FetchExternalAPIKeys 返回的 HTTP 包装，保留状态码、原始响应体和解析后的 DTO。
-type ExternalAPIKeysResult struct {
+// ManagementAPIKeysResult 是 FetchManagementAPIKeys 返回的 HTTP 包装，保留状态码、原始响应体和解析后的 DTO。
+type ManagementAPIKeysResult struct {
 	StatusCode int
 	Body       []byte
-	Payload    externalkeys.ExternalAPIKeysResponse
+	Payload    cpaapikeys.ManagementAPIKeysResponse
 }
 
 // ModelsResult 是 FetchModels 返回的 HTTP 包装，保留状态码、原始响应体和解析后的 DTO。

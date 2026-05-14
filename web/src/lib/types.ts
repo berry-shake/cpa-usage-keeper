@@ -345,6 +345,27 @@ export interface UsageAnalysisResponse {
   models: UsageAnalysisModel[]
 }
 
+export interface CpaApiKeySettingsItem {
+  id: string
+  keyAlias: string
+  displayKey: string
+  label: string
+  lastSyncedAt: string | null
+}
+
+export interface CpaApiKeyOption {
+  id: string
+  label: string
+}
+
+export interface CpaApiKeysResponse {
+  items: CpaApiKeySettingsItem[]
+}
+
+export interface CpaApiKeyOptionsResponse {
+  options: CpaApiKeyOption[]
+}
+
 export interface PricingEntry {
   model: string
   prompt_price_per_1m: number

@@ -92,6 +92,7 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (servicedto.Usag
 	filter.Model = strings.TrimSpace(query.Get("model"))
 	filter.Source = strings.TrimSpace(query.Get("source"))
 	filter.AuthIndex = strings.TrimSpace(query.Get("auth_index"))
+	filter.APIKeyID = strings.TrimSpace(query.Get("api_key_id"))
 	filter.Result = strings.TrimSpace(query.Get("result"))
 	if filter.Result != "" && filter.Result != "success" && filter.Result != "failed" {
 		return servicedto.UsageFilter{}, fmt.Errorf("invalid result %q", filter.Result)

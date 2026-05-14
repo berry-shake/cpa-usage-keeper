@@ -3,6 +3,7 @@ export { UsageChart } from './UsageChart';
 export { ChartLineSelector } from './ChartLineSelector';
 export { ApiDetailsCard } from './ApiDetailsCard';
 export { ModelStatsCard } from './ModelStatsCard';
+export { ApiKeySettingsCard } from './ApiKeySettingsCard';
 export { PriceSettingsCard } from './PriceSettingsCard';
 export { AiProviderCredentialsSection, AuthFileCredentialsSection, useCredentialsTabData } from './credentials';
 export { CredentialStatsCard } from './CredentialStatsCard';

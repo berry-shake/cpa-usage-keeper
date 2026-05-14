@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,32 +15,75 @@ import (
 	"cpa-usage-keeper/internal/cpa/dto/response"
 )
 
-func TestFetchExternalAPIKeysSendsBearerTokenAndParsesExternalKeys(t *testing.T) {
+func TestFetchManagementAPIKeysSendsBearerTokenAndParsesKeys(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != cpaManagementExternalAPIKeysEndpoint {
+		if r.URL.Path != cpaManagementAPIKeysEndpoint {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
 			t.Fatalf("expected management Authorization header, got %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"api-keys":["", "   ", "normal-api-key"]}`))
+		_, _ = w.Write([]byte(`{"api-keys":["sk-alpha", "sk-beta"]}`))
 	}))
 	defer server.Close()
 
 	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
-	result, err := client.FetchExternalAPIKeys(context.Background())
+	result, err := client.FetchManagementAPIKeys(context.Background())
 	if err != nil {
-		t.Fatalf("FetchExternalAPIKeys returned error: %v", err)
+		t.Fatalf("FetchManagementAPIKeys returned error: %v", err)
 	}
 	if result.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", result.StatusCode)
 	}
-	if string(result.Body) != `{"api-keys":["", "   ", "normal-api-key"]}` {
+	if string(result.Body) != `{"api-keys":["sk-alpha", "sk-beta"]}` {
 		t.Fatalf("unexpected body: %s", string(result.Body))
 	}
-	if len(result.Payload.ExternalAPIKeys) != 3 || result.Payload.ExternalAPIKeys[2] != "normal-api-key" {
-		t.Fatalf("unexpected external API keys payload: %#v", result.Payload)
+	if len(result.Payload.APIKeys) != 2 || result.Payload.APIKeys[0] != "sk-alpha" || result.Payload.APIKeys[1] != "sk-beta" {
+		t.Fatalf("unexpected API keys payload: %#v", result.Payload)
+	}
+}
+
+func TestFetchManagementAPIKeysAllowsEmptyArray(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"api-keys":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.FetchManagementAPIKeys(context.Background())
+	if err != nil {
+		t.Fatalf("FetchManagementAPIKeys returned error: %v", err)
+	}
+	if result.Payload.APIKeys == nil || len(result.Payload.APIKeys) != 0 {
+		t.Fatalf("expected empty API key list, got %#v", result.Payload.APIKeys)
+	}
+}
+
+func TestFetchManagementAPIKeysReportsNonSuccessStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	_, err := client.FetchManagementAPIKeys(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "management api keys request returned status 502") {
+		t.Fatalf("expected management request failure, got %v", err)
+	}
+}
+
+func TestFetchManagementAPIKeysRejectsInvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{bad-json}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	_, err := client.FetchManagementAPIKeys(context.Background())
+	if err == nil {
+		t.Fatalf("expected invalid JSON error")
 	}
 }
 
@@ -193,7 +237,7 @@ func TestFetchUsageQueueRejectsNonPositiveCount(t *testing.T) {
 func TestFetchModelsUsesExternalAPIKeyAndParsesOpenAICompatibleResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case cpaManagementExternalAPIKeysEndpoint:
+		case cpaManagementAPIKeysEndpoint:
 			if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
 				t.Fatalf("expected management Authorization header, got %q", got)
 			}
@@ -224,9 +268,9 @@ func TestFetchModelsUsesExternalAPIKeyAndParsesOpenAICompatibleResponse(t *testi
 	}
 }
 
-func TestFetchModelsRejectsMissingExternalAPIKeys(t *testing.T) {
+func TestFetchModelsRejectsMissingManagementAPIKeys(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != cpaManagementExternalAPIKeysEndpoint {
+		if r.URL.Path != cpaManagementAPIKeysEndpoint {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
 		_, _ = w.Write([]byte(`{"api-keys":[]}`))
@@ -235,17 +279,17 @@ func TestFetchModelsRejectsMissingExternalAPIKeys(t *testing.T) {
 
 	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	if _, err := client.FetchModels(context.Background()); err == nil {
-		t.Fatal("expected missing external API keys error")
+		t.Fatal("expected missing management API keys error")
 	}
 }
 
-func TestFetchModelsDoesNotUseProviderEndpointsWhenCPAExternalAPIKeysAreMissing(t *testing.T) {
+func TestFetchModelsDoesNotUseProviderEndpointsWhenCPAManagementAPIKeysAreMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case cpaManagementExternalAPIKeysEndpoint:
+		case cpaManagementAPIKeysEndpoint:
 			_, _ = w.Write([]byte(`{"api-keys":[]}`))
 		case cpaManagementClaudeAPIKeyEndpoint, cpaManagementCodexAPIKeyEndpoint, cpaManagementOpenAICompatibilityEndpoint, cpaModelsEndpoint:
-			t.Fatalf("FetchModels should not request %s when CPA external API keys are missing", r.URL.Path)
+			t.Fatalf("FetchModels should not request %s when CPA management API keys are missing", r.URL.Path)
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -254,14 +298,14 @@ func TestFetchModelsDoesNotUseProviderEndpointsWhenCPAExternalAPIKeysAreMissing(
 
 	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
 	if _, err := client.FetchModels(context.Background()); err == nil {
-		t.Fatal("expected missing CPA external API keys error")
+		t.Fatal("expected missing CPA management API keys error")
 	}
 }
 
 func TestFetchModelsHandlesModelNonSuccessStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case cpaManagementExternalAPIKeysEndpoint:
+		case cpaManagementAPIKeysEndpoint:
 			_, _ = w.Write([]byte(`{"api-keys":["normal-api-key"]}`))
 		case cpaModelsEndpoint:
 			http.Error(w, `{"error":"unavailable"}`, http.StatusBadGateway)
@@ -281,7 +325,7 @@ func TestFetchModelsHandlesModelNonSuccessStatus(t *testing.T) {
 func TestFetchModelsRejectsRedirectStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case cpaManagementExternalAPIKeysEndpoint:
+		case cpaManagementAPIKeysEndpoint:
 			_, _ = w.Write([]byte(`{"api-keys":["normal-api-key"]}`))
 		case cpaModelsEndpoint:
 			w.WriteHeader(http.StatusFound)
@@ -302,7 +346,7 @@ func TestFetchModelsRejectsRedirectStatus(t *testing.T) {
 func TestFetchModelsRejectsInvalidModelsJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case cpaManagementExternalAPIKeysEndpoint:
+		case cpaManagementAPIKeysEndpoint:
 			_, _ = w.Write([]byte(`{"api-keys":["normal-api-key"]}`))
 		case cpaModelsEndpoint:
 			w.WriteHeader(http.StatusOK)
@@ -524,7 +568,7 @@ func TestNewClientTLSSkipVerify(t *testing.T) {
 
 	t.Run("fails without skip verify", func(t *testing.T) {
 		client := NewClient(server.URL, "management-secret", 2*time.Second, false)
-		_, err := client.FetchExternalAPIKeys(context.Background())
+		_, err := client.FetchManagementAPIKeys(context.Background())
 		if err == nil {
 			t.Fatal("expected TLS certificate error, got nil")
 		}
@@ -536,7 +580,7 @@ func TestNewClientTLSSkipVerify(t *testing.T) {
 
 	t.Run("succeeds with skip verify", func(t *testing.T) {
 		client := NewClient(server.URL, "management-secret", 2*time.Second, true)
-		result, err := client.FetchExternalAPIKeys(context.Background())
+		result, err := client.FetchManagementAPIKeys(context.Background())
 		if err != nil {
 			t.Fatalf("expected success with tlsSkipVerify=true, got error: %v", err)
 		}
