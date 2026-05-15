@@ -170,24 +170,89 @@ func TestBuildUsageOverviewWithFilterFiltersByAPIGroupKey(t *testing.T) {
 	}
 }
 
-func TestListUsageAnalysisWithFilterFiltersByAPIGroupKey(t *testing.T) {
+func TestBuildAnalysisWithFilterUsesOverviewStatsWithoutUsageEvents(t *testing.T) {
 	db := openUsageTestDatabase(t)
-	insertAPIKeyFilterEvents(t, db)
+	bucket := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	if err := db.Create(&entities.UsageOverviewHourlyStat{
+		BucketStart:  bucket,
+		APIGroupKey:  "sk-target-key",
+		Model:        "claude-sonnet",
+		RequestCount: 2,
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalTokens:  30,
+	}).Error; err != nil {
+		t.Fatalf("insert hourly stat: %v", err)
+	}
+	if err := db.Migrator().DropTable(&entities.UsageEvent{}); err != nil {
+		t.Fatalf("drop usage_events: %v", err)
+	}
+	start := bucket
+	end := bucket.Add(time.Hour)
 
-	apiRows, modelRows, err := ListUsageAnalysisWithFilter(db, repodto.UsageQueryFilter{APIGroupKey: "sk-target-key"})
+	analysis, err := BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{StartTime: &start, EndTime: &end})
 	if err != nil {
-		t.Fatalf("ListUsageAnalysisWithFilter returned error: %v", err)
+		t.Fatalf("BuildAnalysisWithFilter returned error after dropping usage_events: %v", err)
 	}
-	if len(apiRows) != 1 || apiRows[0].APIGroupKey != "sk-target-key" || apiRows[0].TotalRequests != 2 || apiRows[0].TotalTokens != 70 {
-		t.Fatalf("expected only target key api aggregate, got %+v", apiRows)
+	if len(analysis.TokenUsage) != 1 || analysis.TokenUsage[0].TotalTokens != 30 || analysis.TokenUsage[0].Requests != 2 {
+		t.Fatalf("expected analysis to come from overview hourly stats, got %+v", analysis.TokenUsage)
 	}
-	if len(modelRows) != 2 {
-		t.Fatalf("expected target key models only, got %+v", modelRows)
+	if len(analysis.APIKeyComposition) != 1 || analysis.APIKeyComposition[0].Key != "sk-target-key" {
+		t.Fatalf("expected API composition from overview stats, got %+v", analysis.APIKeyComposition)
 	}
-	for _, model := range modelRows {
-		if model.Model == "claude-other" {
-			t.Fatalf("expected analysis to exclude other key model, got %+v", modelRows)
+}
+
+func TestBuildAnalysisWithFilterFillsTodayAndYesterdayHourlyBucketsFromStats(t *testing.T) {
+	db := openUsageTestDatabase(t)
+	start := time.Date(2026, 5, 14, 0, 0, 0, 0, time.Local)
+	end := time.Date(2026, 5, 14, 23, 59, 59, 0, time.Local)
+	if err := db.Create([]entities.UsageOverviewHourlyStat{
+		{
+			BucketStart:  start.Add(22 * time.Hour),
+			APIGroupKey:  "sk-target-key",
+			Model:        "claude-sonnet",
+			RequestCount: 3,
+			InputTokens:  12,
+			OutputTokens: 18,
+			TotalTokens:  30,
+		},
+		{
+			BucketStart:  start.Add(23 * time.Hour),
+			APIGroupKey:  "sk-target-key",
+			Model:        "claude-sonnet",
+			RequestCount: 4,
+			InputTokens:  20,
+			OutputTokens: 30,
+			TotalTokens:  50,
+		},
+	}).Error; err != nil {
+		t.Fatalf("insert hourly stats: %v", err)
+	}
+	if err := db.Migrator().DropTable(&entities.UsageEvent{}); err != nil {
+		t.Fatalf("drop usage_events: %v", err)
+	}
+
+	analysis, err := BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "yesterday", StartTime: &start, EndTime: &end})
+	if err != nil {
+		t.Fatalf("BuildAnalysisWithFilter returned error: %v", err)
+	}
+	if len(analysis.TokenUsage) != 25 {
+		t.Fatalf("expected 25 hourly boundary buckets, got %d: %+v", len(analysis.TokenUsage), analysis.TokenUsage)
+	}
+	for index, bucket := range analysis.TokenUsage {
+		expectedBucket := start.Add(time.Duration(index) * time.Hour)
+		if !bucket.Bucket.Equal(expectedBucket) {
+			t.Fatalf("expected bucket %d to be %s, got %s", index, expectedBucket, bucket.Bucket)
 		}
+	}
+	if analysis.TokenUsage[22].TotalTokens != 30 || analysis.TokenUsage[22].Requests != 3 {
+		t.Fatalf("expected existing stat row to remain in 22:00 bucket, got %+v", analysis.TokenUsage[22])
+	}
+	if analysis.TokenUsage[23].TotalTokens != 50 || analysis.TokenUsage[23].Requests != 4 {
+		t.Fatalf("expected 23:00 stat row to be included, got %+v", analysis.TokenUsage[23])
+	}
+	if analysis.TokenUsage[24].TotalTokens != 0 || analysis.TokenUsage[24].Requests != 0 {
+		t.Fatalf("expected empty 24:00 boundary bucket, got %+v", analysis.TokenUsage[24])
 	}
 }
 

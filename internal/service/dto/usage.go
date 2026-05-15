@@ -60,42 +60,6 @@ type UsageEventRecord struct {
 	TotalTokens         int64
 }
 
-// UsageAnalysisModelStat 是按模型聚合的分析结果。
-type UsageAnalysisModelStat struct {
-	Model              string
-	TotalRequests      int64
-	SuccessCount       int64
-	FailureCount       int64
-	TotalTokens        int64
-	InputTokens        int64
-	OutputTokens       int64
-	ReasoningTokens    int64
-	CachedTokens       int64
-	TotalLatencyMS     int64
-	LatencySampleCount int64
-}
-
-// UsageAnalysisAPIStat 是按 API 聚合的分析结果。
-type UsageAnalysisAPIStat struct {
-	APIKey          string
-	DisplayName     string
-	TotalRequests   int64
-	SuccessCount    int64
-	FailureCount    int64
-	TotalTokens     int64
-	InputTokens     int64
-	OutputTokens    int64
-	ReasoningTokens int64
-	CachedTokens    int64
-	Models          []UsageAnalysisModelStat
-}
-
-// UsageAnalysisSnapshot 是 analysis 的服务层结果。
-type UsageAnalysisSnapshot struct {
-	APIs   []UsageAnalysisAPIStat
-	Models []UsageAnalysisModelStat
-}
-
 // UsageOverviewSummary 是 overview summary 的服务层结果。
 type UsageOverviewSummary struct {
 	RequestCount    int64
