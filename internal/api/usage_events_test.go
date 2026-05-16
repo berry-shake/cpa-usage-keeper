@@ -56,7 +56,7 @@ func (s *usageEventsStub) ListUsageCredentialStats(_ context.Context, filter ser
 	return s.credentialStats, s.err
 }
 
-func (s *usageEventsStub) GetUsageAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
+func (s *usageEventsStub) GetAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisSnapshot, error) {
 	return nil, s.err
 }
 

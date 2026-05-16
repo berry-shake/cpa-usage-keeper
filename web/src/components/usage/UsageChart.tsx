@@ -2,7 +2,6 @@ import { useTranslation } from 'react-i18next';
 import type { ChartOptions } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import type { ChartData } from '@/utils/usage';
 import { getHourChartMinWidth } from '@/utils/usage/chartConfig';
 import styles from '@/pages/UsagePage.module.scss';
@@ -10,7 +9,6 @@ import styles from '@/pages/UsagePage.module.scss';
 export interface UsageChartProps {
   title: string;
   period: 'hour' | 'day';
-  onPeriodChange: (period: 'hour' | 'day') => void;
   chartData: ChartData;
   chartOptions: ChartOptions<'line'>;
   loading: boolean;
@@ -21,7 +19,6 @@ export interface UsageChartProps {
 export function UsageChart({
   title,
   period,
-  onPeriodChange,
   chartData,
   chartOptions,
   loading,
@@ -31,27 +28,7 @@ export function UsageChart({
   const { t } = useTranslation();
 
   return (
-    <Card
-      title={title}
-      extra={
-        <div className={styles.periodButtons}>
-          <Button
-            variant={period === 'hour' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => onPeriodChange('hour')}
-          >
-            {t('usage_stats.by_hour')}
-          </Button>
-          <Button
-            variant={period === 'day' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => onPeriodChange('day')}
-          >
-            {t('usage_stats.by_day')}
-          </Button>
-        </div>
-      }
-    >
+    <Card title={title}>
       {loading ? (
         <div className={styles.hint}>{t('common.loading')}</div>
       ) : chartData.labels.length > 0 ? (

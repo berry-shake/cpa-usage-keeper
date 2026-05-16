@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"cpa-usage-keeper/internal/redact"
@@ -11,43 +12,58 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type usageAnalysisResponse struct {
-	APIs   []usageAnalysisAPIPayload   `json:"apis"`
-	Models []usageAnalysisModelPayload `json:"models"`
+type analysisResponse struct {
+	Granularity       string                    `json:"granularity"`
+	Timezone          string                    `json:"timezone"`
+	RangeStart        *time.Time                `json:"range_start,omitempty"`
+	RangeEnd          *time.Time                `json:"range_end,omitempty"`
+	TokenUsage        []analysisTokenUsage      `json:"token_usage"`
+	APIKeyComposition []analysisCompositionItem `json:"api_key_composition"`
+	ModelComposition  []analysisCompositionItem `json:"model_composition"`
+	Heatmap           analysisHeatmap           `json:"heatmap"`
 }
 
-type usageAnalysisAPIPayload struct {
-	APIKey          string                      `json:"api_key"`
-	DisplayName     string                      `json:"display_name"`
-	TotalRequests   int64                       `json:"total_requests"`
-	SuccessCount    int64                       `json:"success_count"`
-	FailureCount    int64                       `json:"failure_count"`
-	InputTokens     int64                       `json:"input_tokens"`
-	OutputTokens    int64                       `json:"output_tokens"`
-	ReasoningTokens int64                       `json:"reasoning_tokens"`
-	CachedTokens    int64                       `json:"cached_tokens"`
-	TotalTokens     int64                       `json:"total_tokens"`
-	Models          []usageAnalysisModelPayload `json:"models"`
+type analysisTokenUsage struct {
+	Bucket          time.Time `json:"bucket"`
+	InputTokens     int64     `json:"input_tokens"`
+	OutputTokens    int64     `json:"output_tokens"`
+	CachedTokens    int64     `json:"cached_tokens"`
+	ReasoningTokens int64     `json:"reasoning_tokens"`
+	TotalTokens     int64     `json:"total_tokens"`
+	Requests        int64     `json:"requests"`
 }
 
-type usageAnalysisModelPayload struct {
-	Model              string `json:"model"`
-	TotalRequests      int64  `json:"total_requests"`
-	SuccessCount       int64  `json:"success_count"`
-	FailureCount       int64  `json:"failure_count"`
-	InputTokens        int64  `json:"input_tokens"`
-	OutputTokens       int64  `json:"output_tokens"`
-	ReasoningTokens    int64  `json:"reasoning_tokens"`
-	CachedTokens       int64  `json:"cached_tokens"`
-	TotalTokens        int64  `json:"total_tokens"`
-	TotalLatencyMS     int64  `json:"total_latency_ms"`
-	LatencySampleCount int64  `json:"latency_sample_count"`
+type analysisCompositionItem struct {
+	Key         string  `json:"key"`
+	Label       string  `json:"label"`
+	TotalTokens int64   `json:"total_tokens"`
+	Requests    int64   `json:"requests"`
+	Percent     float64 `json:"percent"`
 }
 
-func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageProvider) {
+type analysisHeatmap struct {
+	APIKeys []string              `json:"api_keys"`
+	Models  []string              `json:"models"`
+	Cells   []analysisHeatmapCell `json:"cells"`
+}
+
+type analysisHeatmapCell struct {
+	APIKey      string  `json:"api_key"`
+	Model       string  `json:"model"`
+	TotalTokens int64   `json:"total_tokens"`
+	Requests    int64   `json:"requests"`
+	Intensity   float64 `json:"intensity"`
+}
+
+type analysisAPIKeyInfo struct {
+	ID    int64
+	Label string
+}
+
+func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageProvider, cpaAPIKeyProvider service.CPAAPIKeyProvider) {
 	router.GET("/usage/analysis", func(c *gin.Context) {
 		if usageProvider == nil {
-			c.JSON(http.StatusOK, usageAnalysisResponse{APIs: []usageAnalysisAPIPayload{}, Models: []usageAnalysisModelPayload{}})
+			c.JSON(http.StatusOK, emptyAnalysisResponse())
 			return
 		}
 
@@ -57,72 +73,145 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 			return
 		}
 
-		analysis, err := usageProvider.GetUsageAnalysis(c.Request.Context(), filter)
+		analysis, err := usageProvider.GetAnalysis(c.Request.Context(), filter)
 		if err != nil {
-			writeInternalError(c, "get usage analysis failed", err)
+			writeInternalError(c, "get analysis failed", err)
+			return
+		}
+		apiKeyInfos, err := loadCPAAPIKeyInfos(c, cpaAPIKeyProvider)
+		if err != nil {
 			return
 		}
 
-		c.JSON(http.StatusOK, buildUsageAnalysisPayload(analysis))
+		c.JSON(http.StatusOK, buildAnalysisPayload(analysis, apiKeyInfos))
 	})
 }
 
-func buildUsageAnalysisPayload(snapshot *servicedto.UsageAnalysisSnapshot) usageAnalysisResponse {
+func emptyAnalysisResponse() analysisResponse {
+	return analysisResponse{
+		Granularity:       string(servicedto.AnalysisGranularityHourly),
+		Timezone:          time.Local.String(),
+		TokenUsage:        []analysisTokenUsage{},
+		APIKeyComposition: []analysisCompositionItem{},
+		ModelComposition:  []analysisCompositionItem{},
+		Heatmap:           analysisHeatmap{APIKeys: []string{}, Models: []string{}, Cells: []analysisHeatmapCell{}},
+	}
+}
+
+func loadCPAAPIKeyInfos(c *gin.Context, provider service.CPAAPIKeyProvider) (map[string]analysisAPIKeyInfo, error) {
+	if provider == nil {
+		return map[string]analysisAPIKeyInfo{}, nil
+	}
+	rows, err := provider.ListCPAAPIKeys(c.Request.Context())
+	if err != nil {
+		writeInternalError(c, "list api key options failed", err)
+		return nil, err
+	}
+	infos := make(map[string]analysisAPIKeyInfo, len(rows))
+	for _, row := range rows {
+		infos[row.APIKey] = analysisAPIKeyInfo{ID: row.ID, Label: cpaAPIKeyDisplayLabel(row)}
+	}
+	return infos, nil
+}
+
+func buildAnalysisPayload(snapshot *servicedto.AnalysisSnapshot, apiKeyInfos map[string]analysisAPIKeyInfo) analysisResponse {
 	if snapshot == nil {
-		return usageAnalysisResponse{APIs: []usageAnalysisAPIPayload{}, Models: []usageAnalysisModelPayload{}}
+		return emptyAnalysisResponse()
 	}
+	tokenUsage := make([]analysisTokenUsage, 0, len(snapshot.TokenUsage))
+	for _, bucket := range snapshot.TokenUsage {
+		tokenUsage = append(tokenUsage, analysisTokenUsage{
+			Bucket:          bucket.Bucket,
+			InputTokens:     bucket.InputTokens,
+			OutputTokens:    bucket.OutputTokens,
+			CachedTokens:    bucket.CachedTokens,
+			ReasoningTokens: bucket.ReasoningTokens,
+			TotalTokens:     bucket.TotalTokens,
+			Requests:        bucket.Requests,
+		})
+	}
+	apiComposition := buildAnalysisCompositionPayload(snapshot.APIKeyComposition, apiKeyInfos)
+	modelComposition := buildAnalysisCompositionPayload(snapshot.ModelComposition, nil)
+	return analysisResponse{
+		Granularity:       string(snapshot.Granularity),
+		Timezone:          time.Local.String(),
+		RangeStart:        snapshot.RangeStart,
+		RangeEnd:          snapshot.RangeEnd,
+		TokenUsage:        tokenUsage,
+		APIKeyComposition: apiComposition,
+		ModelComposition:  modelComposition,
+		Heatmap:           buildAnalysisHeatmapPayload(snapshot.Heatmap, apiKeyInfos),
+	}
+}
 
-	apis := make([]usageAnalysisAPIPayload, 0, len(snapshot.APIs))
-	for _, api := range snapshot.APIs {
-		models := make([]usageAnalysisModelPayload, 0, len(api.Models))
-		for _, model := range api.Models {
-			models = append(models, usageAnalysisModelPayload{
-				Model:              model.Model,
-				TotalRequests:      model.TotalRequests,
-				SuccessCount:       model.SuccessCount,
-				FailureCount:       model.FailureCount,
-				InputTokens:        model.InputTokens,
-				OutputTokens:       model.OutputTokens,
-				ReasoningTokens:    model.ReasoningTokens,
-				CachedTokens:       model.CachedTokens,
-				TotalTokens:        model.TotalTokens,
-				TotalLatencyMS:     model.TotalLatencyMS,
-				LatencySampleCount: model.LatencySampleCount,
-			})
+func buildAnalysisCompositionPayload(items []servicedto.AnalysisCompositionItem, apiKeyInfos map[string]analysisAPIKeyInfo) []analysisCompositionItem {
+	total := int64(0)
+	for _, item := range items {
+		total += item.TotalTokens
+	}
+	payload := make([]analysisCompositionItem, 0, len(items))
+	for _, item := range items {
+		key := analysisAPIKeyResponseKey(item.Key, apiKeyInfos)
+		label := item.Key
+		if apiKeyInfos != nil {
+			label = analysisAPIKeyLabel(item.Key, apiKeyInfos)
 		}
-		apiKey := redact.APIAlias(api.APIKey)
-		displayName := redact.APIKeyDisplayName(api.APIKey)
-		apis = append(apis, usageAnalysisAPIPayload{
-			APIKey:          apiKey,
-			DisplayName:     displayName,
-			TotalRequests:   api.TotalRequests,
-			SuccessCount:    api.SuccessCount,
-			FailureCount:    api.FailureCount,
-			InputTokens:     api.InputTokens,
-			OutputTokens:    api.OutputTokens,
-			ReasoningTokens: api.ReasoningTokens,
-			CachedTokens:    api.CachedTokens,
-			TotalTokens:     api.TotalTokens,
-			Models:          models,
+		percent := 0.0
+		if total > 0 {
+			percent = (float64(item.TotalTokens) / float64(total)) * 100
+		}
+		payload = append(payload, analysisCompositionItem{Key: key, Label: label, TotalTokens: item.TotalTokens, Requests: item.Requests, Percent: percent})
+	}
+	return payload
+}
+
+func analysisAPIKeyResponseKey(apiKey string, apiKeyInfos map[string]analysisAPIKeyInfo) string {
+	if info, ok := apiKeyInfos[apiKey]; ok && info.ID > 0 {
+		return strconv.FormatInt(info.ID, 10)
+	}
+	return redact.APIKeyDisplayName(apiKey)
+}
+
+func analysisAPIKeyLabel(apiKey string, apiKeyInfos map[string]analysisAPIKeyInfo) string {
+	if info, ok := apiKeyInfos[apiKey]; ok && info.Label != "" {
+		return info.Label
+	}
+	return redact.APIKeyDisplayName(apiKey)
+}
+
+func buildAnalysisHeatmapPayload(cells []servicedto.AnalysisHeatmapCell, apiKeyInfos map[string]analysisAPIKeyInfo) analysisHeatmap {
+	apiSeen := map[string]struct{}{}
+	modelSeen := map[string]struct{}{}
+	apiKeys := make([]string, 0)
+	models := make([]string, 0)
+	maxTokens := int64(0)
+	for _, cell := range cells {
+		apiKey := analysisAPIKeyLabel(cell.APIKey, apiKeyInfos)
+		if _, ok := apiSeen[apiKey]; !ok {
+			apiSeen[apiKey] = struct{}{}
+			apiKeys = append(apiKeys, apiKey)
+		}
+		if _, ok := modelSeen[cell.Model]; !ok {
+			modelSeen[cell.Model] = struct{}{}
+			models = append(models, cell.Model)
+		}
+		if cell.TotalTokens > maxTokens {
+			maxTokens = cell.TotalTokens
+		}
+	}
+	payloadCells := make([]analysisHeatmapCell, 0, len(cells))
+	for _, cell := range cells {
+		intensity := 0.0
+		if maxTokens > 0 {
+			intensity = float64(cell.TotalTokens) / float64(maxTokens)
+		}
+		payloadCells = append(payloadCells, analysisHeatmapCell{
+			APIKey:      analysisAPIKeyLabel(cell.APIKey, apiKeyInfos),
+			Model:       cell.Model,
+			TotalTokens: cell.TotalTokens,
+			Requests:    cell.Requests,
+			Intensity:   intensity,
 		})
 	}
-
-	models := make([]usageAnalysisModelPayload, 0, len(snapshot.Models))
-	for _, model := range snapshot.Models {
-		models = append(models, usageAnalysisModelPayload{
-			Model:              model.Model,
-			TotalRequests:      model.TotalRequests,
-			SuccessCount:       model.SuccessCount,
-			FailureCount:       model.FailureCount,
-			InputTokens:        model.InputTokens,
-			OutputTokens:       model.OutputTokens,
-			ReasoningTokens:    model.ReasoningTokens,
-			CachedTokens:       model.CachedTokens,
-			TotalTokens:        model.TotalTokens,
-			TotalLatencyMS:     model.TotalLatencyMS,
-			LatencySampleCount: model.LatencySampleCount,
-		})
-	}
-
-	return usageAnalysisResponse{APIs: apis, Models: models}
+	return analysisHeatmap{APIKeys: apiKeys, Models: models, Cells: payloadCells}
 }

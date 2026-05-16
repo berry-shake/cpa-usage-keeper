@@ -44,7 +44,7 @@ func (s *usageFilterStub) ListUsageCredentialStats(context.Context, servicedto.U
 	return nil, s.err
 }
 
-func (s *usageFilterStub) GetUsageAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
+func (s *usageFilterStub) GetAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisSnapshot, error) {
 	return nil, s.err
 }
 

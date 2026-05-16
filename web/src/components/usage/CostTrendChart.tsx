@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import type { ScriptableContext } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import { formatUsd } from '@/utils/usage';
 import { buildChartOptions, getHourChartMinWidth } from '@/utils/usage/chartConfig';
 import type { UsageOverviewPayload } from './hooks/useUsageData';
@@ -236,27 +235,7 @@ export function CostTrendChart({
   const showPricingHint = shouldShowCostPricingHint({ costAvailable, hasData });
 
   return (
-    <Card
-      title={t('usage_stats.cost_trend_title')}
-      extra={
-        <div className={styles.periodButtons}>
-          <Button
-            variant={period === 'hour' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setPeriod('hour')}
-          >
-            {t('usage_stats.by_hour')}
-          </Button>
-          <Button
-            variant={period === 'day' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setPeriod('day')}
-          >
-            {t('usage_stats.by_day')}
-          </Button>
-        </div>
-      }
-    >
+    <Card title={t('usage_stats.cost_trend_title')}>
       {loading ? (
         <div className={styles.hint}>{t('common.loading')}</div>
       ) : !shouldRenderChart ? (

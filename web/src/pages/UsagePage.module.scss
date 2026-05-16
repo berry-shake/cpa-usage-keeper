@@ -442,14 +442,6 @@
     margin 340ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.usageFilterBarCollapsed {
-  max-height: 0;
-  margin-top: -12px;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-8px);
-}
-
 .usageFilterField {
   display: flex;
   flex-direction: column;
@@ -463,13 +455,25 @@
   gap: 8px;
   width: fit-content;
   min-width: 0;
+  max-width: 280px;
   min-height: 46px;
   padding: 5px 6px 5px 12px;
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  opacity: 1;
+  overflow: hidden;
+  transform: translateX(0);
+  transition:
+    max-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-height 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 260ms ease,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+
 
 .apiKeyFilterField {
   flex: 0 0 auto;
@@ -503,8 +507,8 @@
 }
 
 .apiKeySelectControl {
-  width: 150px;
-  flex: 0 0 150px;
+  width: 172px;
+  flex: 0 0 172px;
 
   :global(button) {
     height: 34px;
@@ -564,6 +568,13 @@
   transform: translateX(0);
 }
 
+.usageRefreshSlot {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
 .usageFilterActions {
   display: flex;
   align-items: center;
@@ -601,25 +612,6 @@
     flex-wrap: wrap;
     width: 100%;
     border-radius: 24px;
-  }
-}
-
-.timeRangeGroupCollapsed {
-  max-width: 0;
-  min-height: 0;
-  padding-left: 0;
-  padding-right: 0;
-  border-width: 0;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(8px);
-
-  @include mobile {
-    width: 0;
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    flex-basis: 0;
   }
 }
 
@@ -759,8 +751,12 @@
     transform: translateY(0);
   }
 
-  .usageFilterActions {
+  .usageRefreshSlot {
     margin-left: auto;
+  }
+
+  .usageFilterActions {
+    margin-left: 0;
   }
 
   .timeRangeGroup {
@@ -791,6 +787,10 @@
 }
 
 @include mobile {
+  .tabPill {
+    white-space: nowrap;
+  }
+
   .toolbarRow {
     gap: 10px;
   }
@@ -801,6 +801,7 @@
   .usageFilterField,
   .customRangeFieldGroup,
   .customRangeField,
+  .usageRefreshSlot,
   .usageFilterActions,
   .refreshSwitcher,
   .refreshPill {
@@ -812,11 +813,16 @@
   }
 
   .apiKeyFilterField,
-  .rangeFilterField,
-  .apiKeySelectControl,
-  .rangeSelectControl {
+  .rangeFilterField {
     flex-basis: 100%;
     width: 100%;
+  }
+
+  .apiKeySelectControl,
+  .rangeSelectControl {
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 auto;
   }
 
   .apiKeyFilterField,
@@ -842,6 +848,7 @@
     width: 100%;
   }
 
+  .usageRefreshSlot,
   .usageFilterActions {
     margin-left: 0;
   }
@@ -1993,6 +2000,24 @@
 }
 
 @include mobile {
+  .apiKeySettingsCard:global(.card) {
+    height: auto;
+    overflow: visible;
+  }
+
+  .apiKeySettingsBody {
+    height: 480px;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .apiKeySettingsList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .apiKeySettingsItem {
     padding: 12px;
     gap: 12px;

@@ -13,5 +13,5 @@ type UsageProvider interface {
 	ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error)
 	ListUsageEventFilterOptions(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error)
 	ListUsageCredentialStats(context.Context, servicedto.UsageFilter) ([]servicedto.UsageCredentialStat, error)
-	GetUsageAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error)
+	GetAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisSnapshot, error)
 }

@@ -139,12 +139,12 @@ func TestUsageServiceResolvesAPIKeyIDForUsageQueries(t *testing.T) {
 	if overview.Summary.RequestCount != 2 || overview.Summary.TokenCount != 30 {
 		t.Fatalf("expected overview to use resolved API key, got %+v", overview.Summary)
 	}
-	analysis, err := provider.GetUsageAnalysis(context.Background(), servicedto.UsageFilter{APIKeyID: targetID})
+	analysis, err := provider.GetAnalysis(context.Background(), servicedto.UsageFilter{APIKeyID: targetID, Range: "custom", StartTime: &start, EndTime: &end})
 	if err != nil {
-		t.Fatalf("GetUsageAnalysis returned error: %v", err)
+		t.Fatalf("GetAnalysis returned error: %v", err)
 	}
-	if len(analysis.APIs) != 1 || analysis.APIs[0].APIKey != "sk-target-key" || analysis.APIs[0].TotalRequests != 2 {
-		t.Fatalf("expected analysis to use resolved API key, got %+v", analysis.APIs)
+	if len(analysis.APIKeyComposition) != 1 || analysis.APIKeyComposition[0].Key != "sk-target-key" || analysis.APIKeyComposition[0].TotalTokens != 30 {
+		t.Fatalf("expected analysis to use resolved API key, got %+v", analysis.APIKeyComposition)
 	}
 	events, err := provider.ListUsageEvents(context.Background(), servicedto.UsageFilter{APIKeyID: targetID, Page: 1, PageSize: 100, Limit: 100})
 	if err != nil {

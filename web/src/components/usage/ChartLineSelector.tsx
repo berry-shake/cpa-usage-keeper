@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -11,6 +10,35 @@ const formatDisplayName = (value: string, allTrafficLabel: string): string => {
   if (normalized === 'all') return allTrafficLabel;
   return normalized;
 };
+
+const buildAvailableChartLineValues = (modelNames: string[]) => ['all', ...modelNames];
+
+export const buildChartLineOptions = ({
+  allTrafficLabel,
+  modelNames,
+  selectedLines,
+  currentValue,
+}: {
+  allTrafficLabel: string;
+  modelNames: string[];
+  selectedLines: string[];
+  currentValue: string;
+}) => {
+  const selected = new Set(selectedLines.filter((line) => line !== currentValue));
+  return buildAvailableChartLineValues(modelNames)
+    .filter((value) => value === currentValue || !selected.has(value))
+    .map((value) => ({ value, label: formatDisplayName(value, allTrafficLabel) }));
+};
+
+export const canAddChartLine = ({
+  modelNames,
+  selectedLines,
+  maxLines,
+}: {
+  modelNames: string[];
+  selectedLines: string[];
+  maxLines: number;
+}) => selectedLines.length < maxLines && buildAvailableChartLineValues(modelNames).some((value) => !selectedLines.includes(value));
 
 export interface ChartLineSelectorProps {
   chartLines: string[];
@@ -26,15 +54,13 @@ export function ChartLineSelector({
   onChange
 }: ChartLineSelectorProps) {
   const { t } = useTranslation();
+  const canAddLine = canAddChartLine({ modelNames, selectedLines: chartLines, maxLines });
 
   const handleAdd = () => {
-    if (chartLines.length >= maxLines) return;
-    const unusedModel = modelNames.find((m) => !chartLines.includes(m));
-    if (unusedModel) {
-      onChange([...chartLines, unusedModel]);
-    } else {
-      onChange([...chartLines, 'all']);
-    }
+    if (!canAddLine) return;
+    const nextLine = buildAvailableChartLineValues(modelNames).find((value) => !chartLines.includes(value));
+    if (!nextLine) return;
+    onChange([...chartLines, nextLine]);
   };
 
   const handleRemove = (index: number) => {
@@ -51,13 +77,6 @@ export function ChartLineSelector({
   };
 
   const allTrafficLabel = t('usage_stats.chart_line_all_traffic');
-  const options = useMemo(
-    () => [
-      { value: 'all', label: allTrafficLabel },
-      ...modelNames.map((name) => ({ value: name, label: formatDisplayName(name, allTrafficLabel) }))
-    ],
-    [allTrafficLabel, modelNames]
-  );
 
   return (
     <Card
@@ -71,7 +90,8 @@ export function ChartLineSelector({
             variant="secondary"
             size="sm"
             onClick={handleAdd}
-            disabled={chartLines.length >= maxLines}
+            disabled={!canAddLine}
+            className={styles.usagePillAction}
           >
             {t('usage_stats.chart_line_add')}
           </Button>
@@ -86,7 +106,12 @@ export function ChartLineSelector({
             </span>
             <Select
               value={line}
-              options={options}
+              options={buildChartLineOptions({
+                allTrafficLabel,
+                modelNames,
+                selectedLines: chartLines,
+                currentValue: line,
+              })}
               onChange={(value) => handleChange(index, value)}
               className={styles.usagePillControl}
             />

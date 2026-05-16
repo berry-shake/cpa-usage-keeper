@@ -315,143 +315,6 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 	return rows, nil
 }
 
-// Analysis 第一步：按时间窗口做 API / model / API+model 聚合。
-func ListUsageAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dto.UsageAnalysisAPIStatRecord, []dto.UsageAnalysisModelStatRecord, error) {
-	if db == nil {
-		return nil, nil, fmt.Errorf("database is nil")
-	}
-
-	// 三组聚合共享同一个筛选条件，但每个 Scan 必须 clone session，避免 GORM 条件互相污染。
-	baseQuery := applyUsageAnalysisTabQuery(db.Model(&entities.UsageEvent{}), filter)
-
-	// 第一组：按 API key 汇总，用于 API Usage Breakdown 的一级列表。
-	apiQuery := baseQuery.Session(&gorm.Session{})
-	apiQuery = apiQuery.Select(strings.Join([]string{
-		"api_group_key AS api_group_key",
-		"COUNT(*) AS total_requests",
-		"SUM(CASE WHEN failed THEN 0 ELSE 1 END) AS success_count",
-		"SUM(CASE WHEN failed THEN 1 ELSE 0 END) AS failure_count",
-		"SUM(input_tokens) AS input_tokens",
-		"SUM(output_tokens) AS output_tokens",
-		"SUM(reasoning_tokens) AS reasoning_tokens",
-		"SUM(cached_tokens) AS cached_tokens",
-		"SUM(total_tokens) AS total_tokens",
-	}, ", "))
-	apiQuery = apiQuery.Group("api_group_key")
-	apiQuery = apiQuery.Order("total_requests DESC, api_group_key ASC")
-
-	var apiRows []dto.UsageAnalysisAPIStatRecord
-	if err := apiQuery.Scan(&apiRows).Error; err != nil {
-		return nil, nil, fmt.Errorf("load usage analysis api stats: %w", err)
-	}
-
-	// 第二组：按 model 汇总，用于模型维度的整体排行。
-	modelQuery := baseQuery.Session(&gorm.Session{})
-	modelQuery = modelQuery.Select(strings.Join([]string{
-		"model AS model",
-		"COUNT(*) AS total_requests",
-		"SUM(CASE WHEN failed THEN 0 ELSE 1 END) AS success_count",
-		"SUM(CASE WHEN failed THEN 1 ELSE 0 END) AS failure_count",
-		"SUM(input_tokens) AS input_tokens",
-		"SUM(output_tokens) AS output_tokens",
-		"SUM(reasoning_tokens) AS reasoning_tokens",
-		"SUM(cached_tokens) AS cached_tokens",
-		"SUM(total_tokens) AS total_tokens",
-		"SUM(latency_ms) AS total_latency_ms",
-		"SUM(CASE WHEN latency_ms > 0 THEN 1 ELSE 0 END) AS latency_sample_count",
-	}, ", "))
-	modelQuery = modelQuery.Group("model")
-	modelQuery = modelQuery.Order("total_requests DESC, model ASC")
-
-	var modelRows []dto.UsageAnalysisModelStatRecord
-	if err := modelQuery.Scan(&modelRows).Error; err != nil {
-		return nil, nil, fmt.Errorf("load usage analysis model stats: %w", err)
-	}
-
-	// 第三组：按 API key + model 汇总，挂回每个 API 的明细列表。
-	apiModelQuery := baseQuery.Session(&gorm.Session{})
-	apiModelQuery = apiModelQuery.Select(strings.Join([]string{
-		"api_group_key AS api_group_key",
-		"model AS model",
-		"COUNT(*) AS total_requests",
-		"SUM(CASE WHEN failed THEN 0 ELSE 1 END) AS success_count",
-		"SUM(CASE WHEN failed THEN 1 ELSE 0 END) AS failure_count",
-		"SUM(input_tokens) AS input_tokens",
-		"SUM(output_tokens) AS output_tokens",
-		"SUM(reasoning_tokens) AS reasoning_tokens",
-		"SUM(cached_tokens) AS cached_tokens",
-		"SUM(total_tokens) AS total_tokens",
-		"SUM(latency_ms) AS total_latency_ms",
-		"SUM(CASE WHEN latency_ms > 0 THEN 1 ELSE 0 END) AS latency_sample_count",
-	}, ", "))
-	apiModelQuery = apiModelQuery.Group("api_group_key, model")
-	apiModelQuery = apiModelQuery.Order("api_group_key ASC, total_requests DESC, model ASC")
-
-	var apiModelRows []struct {
-		APIGroupKey        string
-		Model              string
-		TotalRequests      int64
-		SuccessCount       int64
-		FailureCount       int64
-		InputTokens        int64
-		OutputTokens       int64
-		ReasoningTokens    int64
-		CachedTokens       int64
-		TotalTokens        int64
-		TotalLatencyMS     int64
-		LatencySampleCount int64
-	}
-	if err := apiModelQuery.Scan(&apiModelRows).Error; err != nil {
-		return nil, nil, fmt.Errorf("load usage analysis api model stats: %w", err)
-	}
-
-	// 把 API+model 查询结果先按 API key 分组，避免外层 API 行二次查库。
-	modelsByAPI := make(map[string][]dto.UsageAnalysisModelStatRecord, len(apiRows))
-	for _, row := range apiModelRows {
-		modelsByAPI[row.APIGroupKey] = append(modelsByAPI[row.APIGroupKey], dto.UsageAnalysisModelStatRecord{
-			Model:              row.Model,
-			TotalRequests:      row.TotalRequests,
-			SuccessCount:       row.SuccessCount,
-			FailureCount:       row.FailureCount,
-			InputTokens:        row.InputTokens,
-			OutputTokens:       row.OutputTokens,
-			ReasoningTokens:    row.ReasoningTokens,
-			CachedTokens:       row.CachedTokens,
-			TotalTokens:        row.TotalTokens,
-			TotalLatencyMS:     row.TotalLatencyMS,
-			LatencySampleCount: row.LatencySampleCount,
-		})
-	}
-	normalize := func(value string) string {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			return "unknown"
-		}
-		return trimmed
-	}
-
-	// 最终输出前统一兜底 unknown，保持和 Overview/Snapshot 的维度命名一致。
-	resultAPIs := make([]dto.UsageAnalysisAPIStatRecord, 0, len(apiRows))
-	for _, row := range apiRows {
-		row.APIGroupKey = normalize(row.APIGroupKey)
-		row.DisplayName = row.APIGroupKey
-		models := modelsByAPI[strings.TrimSpace(row.APIGroupKey)]
-		if len(models) == 0 {
-			models = modelsByAPI[row.APIGroupKey]
-		}
-		for index := range models {
-			models[index].Model = normalize(models[index].Model)
-		}
-		row.Models = models
-		resultAPIs = append(resultAPIs, row)
-	}
-	for index := range modelRows {
-		modelRows[index].Model = normalize(modelRows[index].Model)
-	}
-
-	return resultAPIs, modelRows, nil
-}
-
 // Snapshot 先读事件，再按时间窗口在内存里汇总。
 func BuildUsageSnapshotWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.StatisticsSnapshot, error) {
 	if db == nil {
@@ -464,6 +327,199 @@ func BuildUsageSnapshotWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dt
 	}
 
 	return buildUsageSnapshotFromEvents(events), nil
+}
+
+func BuildAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.AnalysisRecord, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database is nil")
+	}
+	if filter.StartTime == nil || filter.EndTime == nil {
+		return nil, fmt.Errorf("analysis requires start_time and end_time")
+	}
+	windowMinutes := computeWindowMinutes(filter)
+	bucketByDay := windowMinutes > 24*60
+	record := &dto.AnalysisRecord{
+		Granularity: func() dto.AnalysisGranularity {
+			if bucketByDay {
+				return dto.AnalysisGranularityDaily
+			}
+			return dto.AnalysisGranularityHourly
+		}(),
+		RangeStart: filter.StartTime,
+		RangeEnd:   filter.EndTime,
+	}
+
+	fullStart, fullEnd := usageOverviewFullHourWindow(*filter.StartTime, *filter.EndTime)
+	fullEnd = analysisHourlyStatsEnd(filter, fullEnd)
+	if !fullEnd.After(fullStart) {
+		return record, nil
+	}
+	if bucketByDay {
+		fullDayStart, fullDayEnd := usageOverviewFullDayWindow(fullStart, fullEnd)
+		if fullDayEnd.After(fullDayStart) {
+			rows, err := loadAnalysisOverviewDailyStatsWithFilter(db, filter, fullDayStart, fullDayEnd)
+			if err != nil {
+				return nil, err
+			}
+			applyAnalysisDailyRows(record, rows)
+		}
+		return record, nil
+	}
+	rows, err := loadAnalysisOverviewHourlyStatsWithFilter(db, filter, fullStart, fullEnd)
+	if err != nil {
+		return nil, err
+	}
+	applyAnalysisHourlyRows(record, rows)
+	fillAnalysisFullDayHourlyBuckets(record, filter)
+	return record, nil
+}
+
+func analysisHourlyStatsEnd(filter dto.UsageQueryFilter, fullEnd time.Time) time.Time {
+	if filter.StartTime == nil || filter.EndTime == nil {
+		return fullEnd
+	}
+	if filter.Range != "today" && filter.Range != "yesterday" {
+		return fullEnd
+	}
+	start := timeutil.NormalizeStorageTime(*filter.StartTime).Truncate(time.Hour)
+	dayBoundaryEnd := start.Add(24 * time.Hour)
+	if dayBoundaryEnd.After(fullEnd) {
+		return dayBoundaryEnd
+	}
+	return fullEnd
+}
+
+type analysisHeatmapKey struct {
+	apiKey string
+	model  string
+}
+
+func applyAnalysisHourlyRows(record *dto.AnalysisRecord, rows []entities.UsageOverviewHourlyStat) {
+	bucketTotals := map[time.Time]*dto.AnalysisTokenUsageBucketRecord{}
+	apiTotals := map[string]*dto.AnalysisCompositionRecord{}
+	modelTotals := map[string]*dto.AnalysisCompositionRecord{}
+	heatmapTotals := map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord{}
+	for _, row := range rows {
+		bucket := timeutil.NormalizeStorageTime(row.BucketStart).Truncate(time.Hour)
+		applyAnalysisRow(record, bucketTotals, apiTotals, modelTotals, heatmapTotals, bucket, row.APIGroupKey, row.Model, row.RequestCount, row.InputTokens, row.OutputTokens, row.CachedTokens, row.ReasoningTokens, row.TotalTokens)
+	}
+	finalizeAnalysisRecord(record, bucketTotals, apiTotals, modelTotals, heatmapTotals)
+}
+
+func applyAnalysisDailyRows(record *dto.AnalysisRecord, rows []entities.UsageOverviewDailyStat) {
+	bucketTotals := map[time.Time]*dto.AnalysisTokenUsageBucketRecord{}
+	apiTotals := map[string]*dto.AnalysisCompositionRecord{}
+	modelTotals := map[string]*dto.AnalysisCompositionRecord{}
+	heatmapTotals := map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord{}
+	for _, row := range rows {
+		bucket := timeutil.NormalizeStorageTime(row.BucketStart)
+		applyAnalysisRow(record, bucketTotals, apiTotals, modelTotals, heatmapTotals, bucket, row.APIGroupKey, row.Model, row.RequestCount, row.InputTokens, row.OutputTokens, row.CachedTokens, row.ReasoningTokens, row.TotalTokens)
+	}
+	finalizeAnalysisRecord(record, bucketTotals, apiTotals, modelTotals, heatmapTotals)
+}
+
+func applyAnalysisRow(_ *dto.AnalysisRecord, bucketTotals map[time.Time]*dto.AnalysisTokenUsageBucketRecord, apiTotals, modelTotals map[string]*dto.AnalysisCompositionRecord, heatmapTotals map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord, bucket time.Time, apiGroupKey, model string, requests, inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens int64) {
+	apiKey := normalizeUsageOverviewDimension(apiGroupKey)
+	modelName := normalizeUsageOverviewDimension(model)
+	bucketTotal := bucketTotals[bucket]
+	if bucketTotal == nil {
+		bucketTotal = &dto.AnalysisTokenUsageBucketRecord{Bucket: bucket}
+		bucketTotals[bucket] = bucketTotal
+	}
+	bucketTotal.Requests += requests
+	bucketTotal.InputTokens += inputTokens
+	bucketTotal.OutputTokens += outputTokens
+	bucketTotal.CachedTokens += cachedTokens
+	bucketTotal.ReasoningTokens += reasoningTokens
+	bucketTotal.TotalTokens += totalTokens
+
+	apiTotal := apiTotals[apiKey]
+	if apiTotal == nil {
+		apiTotal = &dto.AnalysisCompositionRecord{Key: apiKey}
+		apiTotals[apiKey] = apiTotal
+	}
+	applyAnalysisCompositionTotals(apiTotal, requests, inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens)
+
+	modelTotal := modelTotals[modelName]
+	if modelTotal == nil {
+		modelTotal = &dto.AnalysisCompositionRecord{Key: modelName}
+		modelTotals[modelName] = modelTotal
+	}
+	applyAnalysisCompositionTotals(modelTotal, requests, inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens)
+
+	heatmapKey := analysisHeatmapKey{apiKey: apiKey, model: modelName}
+	heatmapTotal := heatmapTotals[heatmapKey]
+	if heatmapTotal == nil {
+		heatmapTotal = &dto.AnalysisHeatmapRecord{APIKey: apiKey, Model: modelName}
+		heatmapTotals[heatmapKey] = heatmapTotal
+	}
+	heatmapTotal.Requests += requests
+	heatmapTotal.TotalTokens += totalTokens
+}
+
+func applyAnalysisCompositionTotals(item *dto.AnalysisCompositionRecord, requests, inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens int64) {
+	item.Requests += requests
+	item.InputTokens += inputTokens
+	item.OutputTokens += outputTokens
+	item.CachedTokens += cachedTokens
+	item.ReasoningTokens += reasoningTokens
+	item.TotalTokens += totalTokens
+}
+
+func fillAnalysisFullDayHourlyBuckets(record *dto.AnalysisRecord, filter dto.UsageQueryFilter) {
+	if record == nil || record.Granularity != dto.AnalysisGranularityHourly || filter.StartTime == nil {
+		return
+	}
+	if filter.Range != "today" && filter.Range != "yesterday" {
+		return
+	}
+	start := timeutil.NormalizeStorageTime(*filter.StartTime).Truncate(time.Hour)
+	bucketByTime := make(map[time.Time]dto.AnalysisTokenUsageBucketRecord, len(record.TokenUsage)+24)
+	for _, bucket := range record.TokenUsage {
+		bucketByTime[timeutil.NormalizeStorageTime(bucket.Bucket).Truncate(time.Hour)] = bucket
+	}
+	record.TokenUsage = record.TokenUsage[:0]
+	for hour := 0; hour <= 24; hour++ {
+		bucketTime := start.Add(time.Duration(hour) * time.Hour)
+		bucket, ok := bucketByTime[bucketTime]
+		if !ok {
+			bucket = dto.AnalysisTokenUsageBucketRecord{Bucket: bucketTime}
+		}
+		record.TokenUsage = append(record.TokenUsage, bucket)
+	}
+}
+
+func finalizeAnalysisRecord(record *dto.AnalysisRecord, bucketTotals map[time.Time]*dto.AnalysisTokenUsageBucketRecord, apiTotals, modelTotals map[string]*dto.AnalysisCompositionRecord, heatmapTotals map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord) {
+	for _, bucket := range bucketTotals {
+		record.TokenUsage = append(record.TokenUsage, *bucket)
+	}
+	sort.Slice(record.TokenUsage, func(i, j int) bool { return record.TokenUsage[i].Bucket.Before(record.TokenUsage[j].Bucket) })
+	for _, item := range apiTotals {
+		record.APIKeyComposition = append(record.APIKeyComposition, *item)
+	}
+	sortAnalysisComposition(record.APIKeyComposition)
+	for _, item := range modelTotals {
+		record.ModelComposition = append(record.ModelComposition, *item)
+	}
+	sortAnalysisComposition(record.ModelComposition)
+	for _, cell := range heatmapTotals {
+		record.Heatmap = append(record.Heatmap, *cell)
+	}
+	sort.Slice(record.Heatmap, func(i, j int) bool {
+		if record.Heatmap[i].APIKey == record.Heatmap[j].APIKey {
+			return record.Heatmap[i].Model < record.Heatmap[j].Model
+		}
+		return record.Heatmap[i].APIKey < record.Heatmap[j].APIKey
+	})
+}
+
+func sortAnalysisComposition(items []dto.AnalysisCompositionRecord) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].TotalTokens == items[j].TotalTokens {
+			return items[i].Key < items[j].Key
+		}
+		return items[i].TotalTokens > items[j].TotalTokens
+	})
 }
 
 // Overview 使用预聚合完整小时，并用原始事件补偿窗口边界以保持非整点查询精确。
@@ -725,10 +781,21 @@ func usageOverviewEventInsideWindow(event entities.UsageEvent, start, end time.T
 
 // loadUsageOverviewHourlyStatsWithFilter 读取完整小时 stats，并复用 Overview 的 API key 过滤条件。
 func loadUsageOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewHourlyStat, error) {
+	return loadUsageOverviewHourlyStats(db, filter, start, end, false)
+}
+
+func loadAnalysisOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewHourlyStat, error) {
+	return loadUsageOverviewHourlyStats(db, filter, start, end, true)
+}
+
+func loadUsageOverviewHourlyStats(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, activeCPAAPIKeysOnly bool) ([]entities.UsageOverviewHourlyStat, error) {
 	var rows []entities.UsageOverviewHourlyStat
 	query := db.Model(&entities.UsageOverviewHourlyStat{}).
 		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end)).
 		Order("bucket_start asc")
+	if activeCPAAPIKeysOnly {
+		query = query.Joins("INNER JOIN cpa_api_keys ON cpa_api_keys.api_key = usage_overview_hourly_stats.api_group_key AND cpa_api_keys.is_deleted = ?", false)
+	}
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}
@@ -740,10 +807,21 @@ func loadUsageOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFi
 
 // loadUsageOverviewDailyStatsWithFilter 读取完整本地天 stats，并复用 Overview 的 API key 过滤条件。
 func loadUsageOverviewDailyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewDailyStat, error) {
+	return loadUsageOverviewDailyStats(db, filter, start, end, false)
+}
+
+func loadAnalysisOverviewDailyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewDailyStat, error) {
+	return loadUsageOverviewDailyStats(db, filter, start, end, true)
+}
+
+func loadUsageOverviewDailyStats(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, activeCPAAPIKeysOnly bool) ([]entities.UsageOverviewDailyStat, error) {
 	var rows []entities.UsageOverviewDailyStat
 	query := db.Model(&entities.UsageOverviewDailyStat{}).
 		Where("bucket_start >= ? AND bucket_start < ?", timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end)).
 		Order("bucket_start asc")
+	if activeCPAAPIKeysOnly {
+		query = query.Joins("INNER JOIN cpa_api_keys ON cpa_api_keys.api_key = usage_overview_daily_stats.api_group_key AND cpa_api_keys.is_deleted = ?", false)
+	}
 	if apiGroupKey := strings.TrimSpace(filter.APIGroupKey); apiGroupKey != "" {
 		query = query.Where("api_group_key = ?", apiGroupKey)
 	}

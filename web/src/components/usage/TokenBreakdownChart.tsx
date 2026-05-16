@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { Line } from 'react-chartjs-2';
 import type { ChartOptions } from 'chart.js';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
 import { formatCompactTokenValue, type TokenCategory } from '@/utils/usage';
 import { buildChartOptions, getHourChartMinWidth } from '@/utils/usage/chartConfig';
 import type { UsageOverviewPayload } from './hooks/useUsageData';
@@ -232,27 +231,7 @@ export function TokenBreakdownChart({
   }, [usage, period, isDark, isMobile, hourWindowHours, endMs, includeFinalHourBucket, t]);
 
   return (
-    <Card
-      title={t('usage_stats.token_breakdown_title')}
-      extra={
-        <div className={styles.periodButtons}>
-          <Button
-            variant={period === 'hour' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setPeriod('hour')}
-          >
-            {t('usage_stats.by_hour')}
-          </Button>
-          <Button
-            variant={period === 'day' ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setPeriod('day')}
-          >
-            {t('usage_stats.by_day')}
-          </Button>
-        </div>
-      }
-    >
+    <Card title={t('usage_stats.token_breakdown_title')}>
       {loading ? (
         <div className={styles.hint}>{t('common.loading')}</div>
       ) : chartData.labels.length > 0 ? (

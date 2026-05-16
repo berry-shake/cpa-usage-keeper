@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration } from './UsagePage';
+import { buildCustomDateRangeQuery, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration } from './UsagePage';
 import { filterUsageByWindow, type UsageFilterWindow } from '@/utils/usage';
 import type { UsageSnapshot } from '@/lib/types';
 
@@ -294,6 +294,18 @@ for (const [tab, expected] of [
   });
 }
 
+for (const [tab, expected] of [
+  ['overview', true],
+  ['analysis', true],
+  ['events', true],
+  ['credentials', false],
+  ['settings', false],
+] as const) {
+  it(`returns ${expected} for ${tab} API Key filter visibility`, () => {
+    expect(shouldShowApiKeyFilter(tab)).toBe(expected);
+  });
+}
+
 describe('UsagePage time range options', () => {
   it('includes rolling 24h, local Today, Yesterday, and 30d ranges', () => {
     const options = getTimeRangeOptions((key) => `translated:${key}`);
@@ -392,7 +404,7 @@ describe('UsagePage Overview chart window', () => {
     })).toBe(Date.parse('2026-04-24T00:00:00.000Z'));
   });
 
-  it('uses Yesterday hourly chart buckets through the resolved range end', () => {
+  it('uses Yesterday hourly chart buckets through the next day boundary', () => {
     const filterWindow: UsageFilterWindow = {
       startMs: Date.parse('2026-04-23T00:00:00.000Z'),
       endMs: Date.parse('2026-04-23T23:59:59.999Z'),
@@ -406,7 +418,7 @@ describe('UsagePage Overview chart window', () => {
       filterWindow,
       fallbackEndMs: Date.parse('2026-04-24T12:34:56.000Z'),
       resolvedRangeEndMs,
-    })).toBe(resolvedRangeEndMs);
+    })).toBe(Date.parse('2026-04-24T00:00:00.000Z'));
   });
 });
 
@@ -416,9 +428,9 @@ describe('UsagePage tab labels', () => {
 
     expect(labels).toEqual([
       'translated:usage_stats.tab_overview',
-      'translated:usage_stats.tab_credentials',
-      'translated:usage_stats.tab_events',
       'translated:usage_stats.tab_analysis',
+      'translated:usage_stats.tab_events',
+      'translated:usage_stats.tab_credentials',
       'translated:usage_stats.tab_settings',
     ]);
   });

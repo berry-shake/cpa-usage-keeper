@@ -7,16 +7,31 @@ import (
 	"testing"
 	"time"
 
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/redact"
 	"cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
 type usageAnalysisStub struct {
-	analysis      *servicedto.UsageAnalysisSnapshot
+	analysis      *servicedto.AnalysisSnapshot
 	err           error
 	lastFilter    servicedto.UsageFilter
 	analysisCalls int
+}
+
+type usageAnalysisAPIKeyStub struct {
+	rows []entities.CPAAPIKey
+	err  error
+}
+
+func (s usageAnalysisAPIKeyStub) ListCPAAPIKeys(context.Context) ([]entities.CPAAPIKey, error) {
+	return s.rows, s.err
+}
+
+func (s usageAnalysisAPIKeyStub) UpdateCPAAPIKeyAlias(context.Context, int64, string) (entities.CPAAPIKey, error) {
+	return entities.CPAAPIKey{}, service.ErrInvalidID
 }
 
 func (s *usageAnalysisStub) GetUsageWithFilter(context.Context, servicedto.UsageFilter) (*dto.StatisticsSnapshot, error) {
@@ -39,47 +54,40 @@ func (s *usageAnalysisStub) ListUsageCredentialStats(context.Context, servicedto
 	return nil, nil
 }
 
-func (s *usageAnalysisStub) GetUsageAnalysis(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
+func (s *usageAnalysisStub) GetAnalysis(_ context.Context, filter servicedto.UsageFilter) (*servicedto.AnalysisSnapshot, error) {
 	s.lastFilter = filter
 	s.analysisCalls++
 	return s.analysis, s.err
 }
 
 func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
-	provider := &usageAnalysisStub{analysis: &servicedto.UsageAnalysisSnapshot{
-		APIs: []servicedto.UsageAnalysisAPIStat{{
-			APIKey:        "provider-a",
-			DisplayName:   "provider-a",
-			TotalRequests: 2,
-			SuccessCount:  1,
-			FailureCount:  1,
-			TotalTokens:   42,
-			Models: []servicedto.UsageAnalysisModelStat{{
-				Model:              "claude-sonnet",
-				TotalRequests:      2,
-				SuccessCount:       1,
-				FailureCount:       1,
-				InputTokens:        30,
-				OutputTokens:       9,
-				ReasoningTokens:    2,
-				CachedTokens:       1,
-				TotalTokens:        42,
-				TotalLatencyMS:     350,
-				LatencySampleCount: 2,
-			}},
+	bucket := time.Date(2026, 4, 22, 10, 0, 0, 0, time.Local)
+	provider := &usageAnalysisStub{analysis: &servicedto.AnalysisSnapshot{
+		Granularity: servicedto.AnalysisGranularityHourly,
+		TokenUsage: []servicedto.AnalysisTokenUsageBucket{{
+			Bucket:          bucket,
+			InputTokens:     30,
+			OutputTokens:    9,
+			CachedTokens:    1,
+			ReasoningTokens: 2,
+			TotalTokens:     42,
+			Requests:        2,
 		}},
-		Models: []servicedto.UsageAnalysisModelStat{{
-			Model:              "claude-sonnet",
-			TotalRequests:      2,
-			SuccessCount:       1,
-			FailureCount:       1,
-			InputTokens:        30,
-			OutputTokens:       9,
-			ReasoningTokens:    2,
-			CachedTokens:       1,
-			TotalTokens:        42,
-			TotalLatencyMS:     350,
-			LatencySampleCount: 2,
+		APIKeyComposition: []servicedto.AnalysisCompositionItem{{
+			Key:         "provider-a",
+			TotalTokens: 42,
+			Requests:    2,
+		}},
+		ModelComposition: []servicedto.AnalysisCompositionItem{{
+			Key:         "claude-sonnet",
+			TotalTokens: 42,
+			Requests:    2,
+		}},
+		Heatmap: []servicedto.AnalysisHeatmapCell{{
+			APIKey:      "provider-a",
+			Model:       "claude-sonnet",
+			TotalTokens: 42,
+			Requests:    2,
 		}},
 	}}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
@@ -92,26 +100,72 @@ func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"apis":[`) || !contains(body, `"models":[`) {
+	if !contains(body, `"granularity":"hourly"`) || !contains(body, `"token_usage":[`) || !contains(body, `"heatmap":`) {
 		t.Fatalf("unexpected response body: %s", body)
 	}
-	if !contains(body, `"display_name":"prov**er-a"`) {
-		t.Fatalf("expected display name in response body: %s", body)
+	if !contains(body, `"api_key_composition":[`) || !contains(body, `"model_composition":[`) {
+		t.Fatalf("expected composition payloads in response body: %s", body)
 	}
-	if !contains(body, `"api_key":"`+redact.APIAlias("provider-a")+`"`) {
-		t.Fatalf("expected redacted api key alias in response body: %s", body)
+	if !contains(body, `"key":"prov**er-a"`) || !contains(body, `"label":"prov**er-a"`) {
+		t.Fatalf("expected redacted api key composition in response body: %s", body)
 	}
-	if !contains(body, `"model":"claude-sonnet"`) || !contains(body, `"latency_sample_count":2`) || !contains(body, `"total_latency_ms":350`) {
-		t.Fatalf("expected model latency aggregates in response body: %s", body)
+	if !contains(body, `"model":"claude-sonnet"`) || !contains(body, `"intensity":1`) {
+		t.Fatalf("expected heatmap cell in response body: %s", body)
 	}
 	if provider.analysisCalls != 1 {
-		t.Fatalf("expected GetUsageAnalysis to be called once, got %d", provider.analysisCalls)
+		t.Fatalf("expected GetAnalysis to be called once, got %d", provider.analysisCalls)
 	}
 	if provider.lastFilter.Range != "24h" {
 		t.Fatalf("expected range to be passed through, got %+v", provider.lastFilter)
 	}
 	if provider.lastFilter.StartTime == nil || provider.lastFilter.EndTime == nil {
 		t.Fatalf("expected resolved time bounds in filter, got %+v", provider.lastFilter)
+	}
+}
+
+func TestUsageAnalysisUsesCPAAPIKeyOptionLabels(t *testing.T) {
+	bucket := time.Date(2026, 4, 22, 10, 0, 0, 0, time.Local)
+	lastSyncedAt := time.Date(2026, 5, 13, 10, 0, 0, 0, time.Local)
+	provider := &usageAnalysisStub{analysis: &servicedto.AnalysisSnapshot{
+		Granularity: servicedto.AnalysisGranularityHourly,
+		TokenUsage:  []servicedto.AnalysisTokenUsageBucket{{Bucket: bucket, TotalTokens: 42, Requests: 2}},
+		APIKeyComposition: []servicedto.AnalysisCompositionItem{{
+			Key:         "sk-alpha123456",
+			TotalTokens: 42,
+			Requests:    2,
+		}},
+		ModelComposition: []servicedto.AnalysisCompositionItem{{Key: "claude-sonnet", TotalTokens: 42, Requests: 2}},
+		Heatmap: []servicedto.AnalysisHeatmapCell{{
+			APIKey:      "sk-alpha123456",
+			Model:       "claude-sonnet",
+			TotalTokens: 42,
+			Requests:    2,
+		}},
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{CPAAPIKeys: usageAnalysisAPIKeyStub{rows: []entities.CPAAPIKey{{
+		ID:           1,
+		APIKey:       "sk-alpha123456",
+		DisplayKey:   "sk-*********123456",
+		KeyAlias:     "Primary Key",
+		LastSyncedAt: &lastSyncedAt,
+	}}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/analysis?range=24h&api_key_id=1", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"key":"1"`) || !contains(body, `"label":"Primary Key"`) || !contains(body, `"api_key":"Primary Key"`) {
+		t.Fatalf("expected analysis payload to use CPA API key id and display label, got %s", body)
+	}
+	if contains(body, "sk-alpha123456") || contains(body, redact.APIAlias("sk-alpha123456")) {
+		t.Fatalf("expected raw and alias key values to stay hidden when a CPA key label exists, got %s", body)
+	}
+	if provider.lastFilter.APIKeyID != "1" {
+		t.Fatalf("expected API key id to pass into usage filter, got %+v", provider.lastFilter)
 	}
 }
 
