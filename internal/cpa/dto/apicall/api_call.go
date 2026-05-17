@@ -10,6 +10,21 @@ type Request struct {
 	Data      any               `json:"data,omitempty"`
 }
 
+func (r Request) MarshalJSON() ([]byte, error) {
+	type alias Request
+	encoded := alias(r)
+	if r.Data != nil {
+		if _, ok := r.Data.(string); !ok {
+			dataBytes, err := json.Marshal(r.Data)
+			if err != nil {
+				return nil, err
+			}
+			encoded.Data = string(dataBytes)
+		}
+	}
+	return json.Marshal(encoded)
+}
+
 type Response struct {
 	StatusCode int             `json:"statusCode"`
 	BodyText   string          `json:"bodyText"`

@@ -152,9 +152,16 @@ func TestCallManagementAPIPostsWrappedRequest(t *testing.T) {
 		if !ok || header["Chatgpt-Account-Id"] != "acct_123" {
 			t.Fatalf("unexpected api-call header body: %#v", body["header"])
 		}
-		data, ok := body["data"].(map[string]any)
-		if !ok || data["project"] != "project-123" {
-			t.Fatalf("unexpected api-call data body: %#v", body["data"])
+		data, ok := body["data"].(string)
+		if !ok {
+			t.Fatalf("expected api-call data to be JSON string, got %#v", body["data"])
+		}
+		var decodedData map[string]string
+		if err := json.Unmarshal([]byte(data), &decodedData); err != nil {
+			t.Fatalf("decode api-call data string: %v", err)
+		}
+		if decodedData["project"] != "project-123" {
+			t.Fatalf("unexpected api-call data body: %#v", decodedData)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
