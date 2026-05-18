@@ -357,17 +357,27 @@ func BuildAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.Ana
 	}
 	if bucketByDay {
 		fullDayStart, fullDayEnd := usageOverviewFullDayWindow(fullStart, fullEnd)
+		var dailyRows []entities.UsageOverviewDailyStat
 		if fullDayEnd.After(fullDayStart) {
-			rows, err := loadAnalysisOverviewDailyStatsWithFilter(db, filter, fullDayStart, fullDayEnd)
+			var err error
+			dailyRows, err = loadAnalysisOverviewDailyStatsWithFilter(db, filter, fullDayStart, fullDayEnd)
 			if err != nil {
 				return nil, err
 			}
-			identityLookup, err := loadAnalysisDailyIdentityLookup(db, rows)
-			if err != nil {
-				return nil, err
-			}
-			applyAnalysisDailyRows(record, rows, identityLookup)
 		}
+		hourlyRows, err := loadAnalysisDailyBoundaryHourlyStatsWithFilter(db, filter, fullStart, fullDayStart, fullDayEnd, fullEnd)
+		if err != nil {
+			return nil, err
+		}
+		dailyIdentityLookup, err := loadAnalysisDailyIdentityLookup(db, dailyRows)
+		if err != nil {
+			return nil, err
+		}
+		hourlyIdentityLookup, err := loadAnalysisHourlyIdentityLookup(db, hourlyRows)
+		if err != nil {
+			return nil, err
+		}
+		applyAnalysisDailyAndBoundaryHourlyRows(record, dailyRows, dailyIdentityLookup, hourlyRows, hourlyIdentityLookup)
 		return record, nil
 	}
 	rows, err := loadAnalysisOverviewHourlyStatsWithFilter(db, filter, fullStart, fullEnd)
@@ -480,16 +490,26 @@ func applyAnalysisHourlyRows(record *dto.AnalysisRecord, rows []entities.UsageOv
 }
 
 func applyAnalysisDailyRows(record *dto.AnalysisRecord, rows []entities.UsageOverviewDailyStat, identityLookup analysisIdentityLookup) {
+	applyAnalysisDailyAndBoundaryHourlyRows(record, rows, identityLookup, nil, analysisIdentityLookup{})
+}
+
+func applyAnalysisDailyAndBoundaryHourlyRows(record *dto.AnalysisRecord, dailyRows []entities.UsageOverviewDailyStat, dailyIdentityLookup analysisIdentityLookup, hourlyRows []entities.UsageOverviewHourlyStat, hourlyIdentityLookup analysisIdentityLookup) {
 	bucketTotals := map[time.Time]*dto.AnalysisTokenUsageBucketRecord{}
 	apiTotals := map[string]*dto.AnalysisCompositionRecord{}
 	modelTotals := map[string]*dto.AnalysisCompositionRecord{}
 	authFileTotals := map[string]*dto.AnalysisCompositionRecord{}
 	aiProviderTotals := map[string]*dto.AnalysisCompositionRecord{}
 	heatmapTotals := map[analysisHeatmapKey]*dto.AnalysisHeatmapRecord{}
-	for _, row := range rows {
+	for _, row := range dailyRows {
 		bucket := timeutil.NormalizeStorageTime(row.BucketStart)
 		applyAnalysisRow(record, bucketTotals, apiTotals, modelTotals, heatmapTotals, bucket, row.APIGroupKey, row.Model, row.RequestCount, row.InputTokens, row.OutputTokens, row.CachedTokens, row.ReasoningTokens, row.TotalTokens)
-		applyAnalysisIdentityComposition(identityLookup, authFileTotals, aiProviderTotals, row.AuthIndex, row.RequestCount, row.InputTokens, row.OutputTokens, row.CachedTokens, row.ReasoningTokens, row.TotalTokens)
+		applyAnalysisIdentityComposition(dailyIdentityLookup, authFileTotals, aiProviderTotals, row.AuthIndex, row.RequestCount, row.InputTokens, row.OutputTokens, row.CachedTokens, row.ReasoningTokens, row.TotalTokens)
+	}
+	for _, row := range hourlyRows {
+		bucketStart := timeutil.NormalizeStorageTime(row.BucketStart)
+		bucket := time.Date(bucketStart.Year(), bucketStart.Month(), bucketStart.Day(), 0, 0, 0, 0, bucketStart.Location())
+		applyAnalysisRow(record, bucketTotals, apiTotals, modelTotals, heatmapTotals, bucket, row.APIGroupKey, row.Model, row.RequestCount, row.InputTokens, row.OutputTokens, row.CachedTokens, row.ReasoningTokens, row.TotalTokens)
+		applyAnalysisIdentityComposition(hourlyIdentityLookup, authFileTotals, aiProviderTotals, row.AuthIndex, row.RequestCount, row.InputTokens, row.OutputTokens, row.CachedTokens, row.ReasoningTokens, row.TotalTokens)
 	}
 	finalizeAnalysisRecord(record, bucketTotals, apiTotals, modelTotals, authFileTotals, aiProviderTotals, heatmapTotals)
 }
@@ -901,6 +921,38 @@ func loadUsageOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFi
 
 func loadAnalysisOverviewHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time) ([]entities.UsageOverviewHourlyStat, error) {
 	return loadUsageOverviewHourlyStats(db, filter, start, end, true)
+}
+
+func loadAnalysisDailyBoundaryHourlyStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, fullStart, fullDayStart, fullDayEnd, fullEnd time.Time) ([]entities.UsageOverviewHourlyStat, error) {
+	windows := analysisDailyBoundaryHourlyWindows(fullStart, fullDayStart, fullDayEnd, fullEnd)
+	rows := make([]entities.UsageOverviewHourlyStat, 0)
+	for _, window := range windows {
+		windowRows, err := loadAnalysisOverviewHourlyStatsWithFilter(db, filter, window.start, window.end)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, windowRows...)
+	}
+	return rows, nil
+}
+
+func analysisDailyBoundaryHourlyWindows(fullStart, fullDayStart, fullDayEnd, fullEnd time.Time) []usageOverviewRawEventWindow {
+	windows := make([]usageOverviewRawEventWindow, 0, 2)
+	leftEnd := fullDayStart
+	if fullEnd.Before(leftEnd) {
+		leftEnd = fullEnd
+	}
+	if fullStart.Before(leftEnd) {
+		windows = append(windows, usageOverviewRawEventWindow{start: fullStart, end: leftEnd})
+	}
+	rightStart := fullDayEnd
+	if rightStart.Before(fullStart) {
+		rightStart = fullStart
+	}
+	if rightStart.Before(fullEnd) {
+		windows = append(windows, usageOverviewRawEventWindow{start: rightStart, end: fullEnd})
+	}
+	return mergeUsageOverviewRawEventWindows(windows)
 }
 
 func loadUsageOverviewHourlyStats(db *gorm.DB, filter dto.UsageQueryFilter, start, end time.Time, activeCPAAPIKeysOnly bool) ([]entities.UsageOverviewHourlyStat, error) {

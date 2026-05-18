@@ -1,6 +1,6 @@
 import { useMemo, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ChartData, ChartOptions, Plugin } from 'chart.js';
+import type { Chart, ChartData, ChartOptions, Plugin, TooltipModel } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import type { AnalysisCompositionItem, AnalysisHeatmapCell, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
 import { formatCompactNumber } from '@/utils/usage';
@@ -56,6 +56,9 @@ const TOKEN_COLORS = {
   reasoning: { base: '#8b5cf6', light: '#d8b4fe' },
   requests: '#ff5a40',
 };
+const COMPOSITION_TOOLTIP_ID = 'analysis-composition-tooltip';
+const COMPOSITION_TOOLTIP_MAX_WIDTH = 400;
+const COMPOSITION_TOOLTIP_VIEWPORT_PADDING = 8;
 type TokenLabels = {
   input: string;
   output: string;
@@ -120,6 +123,19 @@ const getHeatmapCellGradient = (intensity: number) => {
     ? interpolateColor([250, 244, 230], [214, 162, 76], clampedIntensity / 0.5)
     : interpolateColor([214, 162, 76], [198, 87, 70], (clampedIntensity - 0.5) / 0.5);
   return `linear-gradient(180deg, rgb(${top.join(', ')}) 0%, rgb(${bottom.join(', ')}) 100%)`;
+};
+
+const getHeatmapCellTextColor = (intensity: number) => {
+  const clampedIntensity = Math.max(0, Math.min(1, intensity));
+  const color = interpolateColor([107, 71, 35], [48, 24, 16], clampedIntensity);
+  const opacity = 0.58 + clampedIntensity * 0.28;
+  return `rgba(${color.join(', ')}, ${opacity})`;
+};
+
+const getHeatmapVisualIntensity = (value: number, maxValue: number) => {
+  if (value <= 0 || maxValue <= 0) return 0;
+  const rawIntensity = value / maxValue;
+  return 0.05 + 0.95 * Math.pow(rawIntensity, 0.65);
 };
 
 const formatBucketLabel = (bucket: string, granularity: AnalysisResponse['granularity']) => {
@@ -266,6 +282,70 @@ function buildCompositionChartData(items: AnalysisCompositionItem[]): ChartData<
   };
 }
 
+function getCompositionTooltipElement() {
+  let tooltipEl = document.getElementById(COMPOSITION_TOOLTIP_ID) as HTMLDivElement | null;
+  if (tooltipEl) return tooltipEl;
+  tooltipEl = document.createElement('div');
+  tooltipEl.id = COMPOSITION_TOOLTIP_ID;
+  document.body.appendChild(tooltipEl);
+  return tooltipEl;
+}
+
+function createCompositionTooltipHandler(chartTheme: ChartTheme): (args: { chart: Chart; tooltip: TooltipModel<'doughnut'> }) => void {
+  return ({ chart, tooltip }) => {
+    if (typeof document === 'undefined') return;
+    const tooltipEl = getCompositionTooltipElement();
+    if (tooltip.opacity === 0) {
+      tooltipEl.style.opacity = '0';
+      return;
+    }
+
+    tooltipEl.replaceChildren();
+    const title = document.createElement('div');
+    title.textContent = tooltip.title.join(' ');
+    title.style.color = chartTheme.textPrimary;
+    title.style.fontWeight = '800';
+    title.style.marginBottom = '4px';
+    tooltipEl.appendChild(title);
+
+    for (const bodyItem of tooltip.body) {
+      for (const line of bodyItem.lines) {
+        const body = document.createElement('div');
+        body.textContent = line;
+        body.style.color = chartTheme.tooltipBody;
+        tooltipEl.appendChild(body);
+      }
+    }
+
+    const viewportWidth = window.innerWidth;
+    const maxWidth = Math.min(COMPOSITION_TOOLTIP_MAX_WIDTH, viewportWidth - COMPOSITION_TOOLTIP_VIEWPORT_PADDING * 2);
+    tooltipEl.style.position = 'fixed';
+    tooltipEl.style.zIndex = '1000';
+    tooltipEl.style.pointerEvents = 'none';
+    tooltipEl.style.opacity = '1';
+    tooltipEl.style.maxWidth = `${maxWidth}px`;
+    tooltipEl.style.padding = '10px 12px';
+    tooltipEl.style.border = `1px solid ${chartTheme.tooltipBorder}`;
+    tooltipEl.style.borderRadius = '12px';
+    tooltipEl.style.background = chartTheme.tooltipBg;
+    tooltipEl.style.boxShadow = '0 16px 36px rgba(0, 0, 0, 0.18)';
+    tooltipEl.style.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    tooltipEl.style.lineHeight = '1.35';
+    tooltipEl.style.whiteSpace = 'normal';
+    tooltipEl.style.overflowWrap = 'anywhere';
+
+    const canvasRect = chart.canvas.getBoundingClientRect();
+    const tooltipWidth = tooltipEl.offsetWidth;
+    const tooltipHeight = tooltipEl.offsetHeight;
+    const rawLeft = canvasRect.left + tooltip.caretX - tooltipWidth / 2;
+    const left = Math.max(COMPOSITION_TOOLTIP_VIEWPORT_PADDING, Math.min(rawLeft, viewportWidth - tooltipWidth - COMPOSITION_TOOLTIP_VIEWPORT_PADDING));
+    const topAbove = canvasRect.top + tooltip.caretY - tooltipHeight - 12;
+    const top = topAbove >= COMPOSITION_TOOLTIP_VIEWPORT_PADDING ? topAbove : canvasRect.top + tooltip.caretY + 12;
+    tooltipEl.style.left = `${left}px`;
+    tooltipEl.style.top = `${top}px`;
+  };
+}
+
 function buildCompositionChartOptions(chartTheme: ChartTheme): ChartOptions<'doughnut'> {
   return {
     responsive: true,
@@ -274,6 +354,8 @@ function buildCompositionChartOptions(chartTheme: ChartTheme): ChartOptions<'dou
     plugins: {
       legend: { display: false },
       tooltip: {
+        enabled: false,
+        external: createCompositionTooltipHandler(chartTheme),
         backgroundColor: chartTheme.tooltipBg,
         titleColor: chartTheme.textPrimary,
         bodyColor: chartTheme.tooltipBody,
@@ -283,7 +365,7 @@ function buildCompositionChartOptions(chartTheme: ChartTheme): ChartOptions<'dou
         displayColors: true,
         usePointStyle: true,
         callbacks: {
-          label: (context) => `${context.label}: ${formatCompactNumber(Number(context.parsed ?? 0))}`,
+          label: (context) => formatCompactNumber(Number(context.parsed ?? 0)),
         },
       },
     },
@@ -376,6 +458,7 @@ function CompositionDonutChart({ title, items, loading, isDark }: { title: strin
 function Heatmap({ cells, apiKeys, models, loading }: { cells: AnalysisHeatmapCell[]; apiKeys: string[]; models: string[]; loading: boolean }) {
   const { t } = useTranslation();
   const cellMap = useMemo(() => new Map(cells.map((cell) => [`${cell.api_key}\0${cell.model}`, cell])), [cells]);
+  const maxHeatmapTokens = useMemo(() => Math.max(0, ...cells.map((cell) => toNumber(cell.total_tokens))), [cells]);
   return (
     <section className={`${styles.analysisCard} ${styles.heatmapCard}`}>
       <div className={styles.cardHeader}>
@@ -406,19 +489,27 @@ function Heatmap({ cells, apiKeys, models, loading }: { cells: AnalysisHeatmapCe
                     </div>
                     {models.map((model) => {
                       const cell = cellMap.get(`${apiKey}\0${model}`);
-                      const intensity = Math.max(0, Math.min(1, toNumber(cell?.intensity)));
+                      const heatmapTokens = toNumber(cell?.total_tokens);
+                      const heatmapRequests = toNumber(cell?.requests);
+                      const intensity = getHeatmapVisualIntensity(heatmapTokens, maxHeatmapTokens);
                       return (
                         <div
                           key={`${apiKey}-${model}`}
                           className={styles.heatmapCell}
-                          style={{ background: getHeatmapCellGradient(intensity) } as CSSProperties}
+                          style={{ background: getHeatmapCellGradient(intensity), color: getHeatmapCellTextColor(intensity) } as CSSProperties}
                           title={t('usage_stats.analysis_heatmap_cell_title', {
-                            apiKey,
                             model,
-                            tokens: formatCompactNumber(toNumber(cell?.total_tokens)),
-                            requests: formatCompactNumber(toNumber(cell?.requests)),
+                            tokens: formatCompactNumber(heatmapTokens),
+                            requests: formatCompactNumber(heatmapRequests),
                           })}
-                        />
+                        >
+                          <span className={styles.heatmapCellTokenValue}>
+                            {t('usage_stats.analysis_heatmap_tokens_prefix')}: {formatCompactNumber(heatmapTokens)}
+                          </span>
+                          <span className={styles.heatmapCellRequestValue}>
+                            {t('usage_stats.analysis_heatmap_requests_prefix')}: {formatCompactNumber(heatmapRequests)}
+                          </span>
+                        </div>
                       );
                     })}
                   </div>

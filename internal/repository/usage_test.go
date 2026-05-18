@@ -483,6 +483,75 @@ func TestBuildAnalysisWithFilterFillsTodayAndYesterdayHourlyBucketsFromStats(t *
 	}
 }
 
+func TestBuildAnalysisWithFilterIncludesPartialCurrentDayInDailyRanges(t *testing.T) {
+	withRepositoryTestLocation(t, "UTC")
+	db := openUsageTestDatabase(t)
+	start := time.Date(2026, 5, 11, 10, 15, 0, 0, time.UTC)
+	end := time.Date(2026, 5, 18, 18, 30, 0, 0, time.UTC)
+	yesterday := time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC)
+	currentDayHour := time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC)
+	if err := db.Create(&entities.CPAAPIKey{APIKey: "sk-target-key", DisplayKey: "sk-*********target"}).Error; err != nil {
+		t.Fatalf("insert CPA API key: %v", err)
+	}
+	if err := db.Create(&entities.UsageOverviewDailyStat{
+		BucketStart:  yesterday,
+		APIGroupKey:  "sk-target-key",
+		Model:        "claude-sonnet",
+		RequestCount: 2,
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalTokens:  30,
+	}).Error; err != nil {
+		t.Fatalf("insert daily stat: %v", err)
+	}
+	if err := db.Create([]entities.UsageOverviewHourlyStat{
+		{
+			BucketStart:  yesterday.Add(9 * time.Hour),
+			APIGroupKey:  "sk-target-key",
+			Model:        "claude-sonnet",
+			RequestCount: 8,
+			InputTokens:  80,
+			OutputTokens: 90,
+			TotalTokens:  170,
+		},
+		{
+			BucketStart:  currentDayHour,
+			APIGroupKey:  "sk-target-key",
+			Model:        "claude-sonnet",
+			RequestCount: 4,
+			InputTokens:  40,
+			OutputTokens: 50,
+			TotalTokens:  90,
+		},
+	}).Error; err != nil {
+		t.Fatalf("insert hourly stats: %v", err)
+	}
+	if err := db.Migrator().DropTable(&entities.UsageEvent{}); err != nil {
+		t.Fatalf("drop usage_events: %v", err)
+	}
+
+	analysis, err := BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{Range: "7d", StartTime: &start, EndTime: &end})
+	if err != nil {
+		t.Fatalf("BuildAnalysisWithFilter returned error: %v", err)
+	}
+
+	if analysis.Granularity != "daily" {
+		t.Fatalf("expected daily granularity, got %q", analysis.Granularity)
+	}
+	if len(analysis.TokenUsage) != 2 {
+		t.Fatalf("expected yesterday and current-day buckets, got %+v", analysis.TokenUsage)
+	}
+	if !analysis.TokenUsage[0].Bucket.Equal(yesterday) || analysis.TokenUsage[0].TotalTokens != 30 || analysis.TokenUsage[0].Requests != 2 {
+		t.Fatalf("expected yesterday daily stats first, got %+v", analysis.TokenUsage[0])
+	}
+	if !analysis.TokenUsage[1].Bucket.Equal(time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)) || analysis.TokenUsage[1].TotalTokens != 90 || analysis.TokenUsage[1].Requests != 4 {
+		t.Fatalf("expected current-day hourly stats to be folded into daily bucket, got %+v", analysis.TokenUsage[1])
+	}
+	if len(analysis.APIKeyComposition) != 1 || analysis.APIKeyComposition[0].TotalTokens != 120 || analysis.APIKeyComposition[0].Requests != 6 {
+		t.Fatalf("expected compositions to include daily and current-day hourly stats, got %+v", analysis.APIKeyComposition)
+	}
+}
+
 func TestListUsageEventsWithFilterFiltersByAPIGroupKey(t *testing.T) {
 	db := openUsageTestDatabase(t)
 	insertAPIKeyFilterEvents(t, db)

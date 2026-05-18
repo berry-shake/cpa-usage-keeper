@@ -39,13 +39,15 @@ describe('Credential section styles', () => {
     expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialQuotaBarBlock\s*\{[\s\S]*?min-width:\s*0;/)
   })
 
-  it('lets the Total Requests metric grow without changing the other metric widths', () => {
-    expect(credentialStyles).toMatch(/\.credentialMetricGroup\s*\{[\s\S]*?grid-template-columns:\s*minmax\(109px, max-content\) repeat\(3, 95px\);/)
-    expect(credentialStyles).toMatch(/\.credentialRequestMetric\s*\{[\s\S]*?align-items:\s*center;/)
-    expect(credentialStyles).toMatch(/\.credentialRequestMetric\s*\{[\s\S]*?white-space:\s*nowrap;/)
+  it('keeps Total Requests fixed and wraps the breakdown only when it overflows', () => {
+    expect(credentialStyles).toMatch(/\.credentialMetricGroup\s*\{[\s\S]*?grid-template-columns:\s*109px repeat\(3, 95px\);/)
+    expect(credentialStyles).toMatch(/\.credentialRequestMetric\s*\{[\s\S]*?align-items:\s*baseline;/)
+    expect(credentialStyles).toMatch(/\.credentialRequestMetric\s*\{[\s\S]*?flex-wrap:\s*wrap;/)
+    expect(credentialStyles).toMatch(/\.credentialRequestMetric\s*\{[\s\S]*?white-space:\s*normal;/)
     expect(credentialStyles).toMatch(/\.credentialRequestBreakdown\s*\{[\s\S]*?display:\s*inline-flex;/)
-    expect(credentialStyles).toMatch(/\.credentialRequestBreakdown\s*\{[\s\S]*?align-items:\s*center;/)
-    expect(credentialStyles).toMatch(/\.credentialRequestBreakdown\s*\{[\s\S]*?line-height:\s*1;/)
+    expect(credentialStyles).toMatch(/\.credentialRequestBreakdown\s*\{[\s\S]*?white-space:\s*nowrap;/)
+    expect(credentialStyles).not.toMatch(/\.credentialRequestBreakdown\s*\{[\s\S]*?flex-basis:\s*100%;/)
+    expect(credentialStyles).toMatch(/\.credentialRequestBreakdown\s*\{[\s\S]*?line-height:\s*1\.2;/)
   })
 
   it('uses a fixed centered pagination bar height', () => {

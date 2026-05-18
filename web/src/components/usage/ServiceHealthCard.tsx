@@ -49,8 +49,13 @@ function formatDateTime(timestamp: number): string {
   return `${month}/${day} ${h}:${m}`;
 }
 
-function parseTime(value?: string): number {
+export function parseTime(value?: string): number {
   if (!value) return 0;
+  const nanosecondBoundary = value.match(/^(.*T\d{2}:\d{2}:\d{2})\.9{4,}(Z|[+-]\d{2}:\d{2})$/);
+  if (nanosecondBoundary) {
+    const rounded = Date.parse(`${nanosecondBoundary[1]}${nanosecondBoundary[2]}`) + 1000;
+    return Number.isFinite(rounded) ? rounded : 0;
+  }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
