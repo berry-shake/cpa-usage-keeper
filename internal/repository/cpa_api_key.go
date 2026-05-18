@@ -111,6 +111,12 @@ func FindActiveCPAAPIKeyByID(db *gorm.DB, id int64) (entities.CPAAPIKey, error) 
 	return row, err
 }
 
+func FindActiveCPAAPIKeyByValue(db *gorm.DB, apiKey string) (entities.CPAAPIKey, error) {
+	var row entities.CPAAPIKey
+	err := db.Where("api_key = ? AND is_deleted = ?", apiKey, false).First(&row).Error
+	return row, err
+}
+
 func UpdateCPAAPIKeyAlias(db *gorm.DB, id int64, keyAlias string) error {
 	result := db.Model(&entities.CPAAPIKey{}).Where("id = ? AND is_deleted = ?", id, false).Update("key_alias", strings.TrimSpace(keyAlias))
 	if result.Error != nil {

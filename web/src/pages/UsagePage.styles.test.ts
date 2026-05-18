@@ -55,6 +55,13 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).toContain("const USAGE_TAB_OPTIONS = ['overview', 'analysis', 'events', 'credentials', 'settings'] as const")
   })
 
+  it('keeps Sign out as the rightmost header action after Check Updates', () => {
+    expect(usagePageSource).toContain("import { ApiError, fetchAnalysis, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, logout, updateCpaApiKeyAlias } from '@/lib/api';")
+    expect(usagePageSource.indexOf("t('usage_stats.check_updates')")).toBeLessThan(usagePageSource.indexOf("t('common.logout')"))
+    expect(usagePageStyles).toContain('.signOutSwitcher')
+    expect(usagePageStyles).toContain('.signOutPill')
+  })
+
   it('keeps mobile tab labels on one line without changing desktop tab sizing', () => {
     const desktopTabPillBlock = usagePageStyles.slice(
       usagePageStyles.indexOf('.tabPill {'),

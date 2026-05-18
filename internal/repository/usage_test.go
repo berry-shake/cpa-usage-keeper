@@ -338,6 +338,67 @@ func TestBuildAnalysisWithFilterExcludesMissingAndDeletedCPAAPIKeys(t *testing.T
 	}
 }
 
+func TestBuildAnalysisWithFilterBuildsIdentityCompositionsFromActiveUsageIdentities(t *testing.T) {
+	db := openUsageTestDatabase(t)
+	bucket := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	deletedAt := bucket.Add(time.Hour)
+	if err := db.Create([]entities.CPAAPIKey{
+		{APIKey: "sk-active-key", DisplayKey: "sk-*********active"},
+		{APIKey: "sk-deleted-key", DisplayKey: "sk-*********deleted", IsDeleted: true, LastSyncedAt: &deletedAt},
+	}).Error; err != nil {
+		t.Fatalf("insert CPA API keys: %v", err)
+	}
+	if err := db.Create([]entities.UsageIdentity{
+		{AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "auth_file", Identity: "auth-file-1", Name: "Auth File One"},
+		{AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "auth_file", Identity: "auth-file-deleted", Name: "Deleted Auth File", IsDeleted: true},
+		{AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "ai_provider", Identity: "provider-1", Name: "Provider One", Prefix: "Team Prefix", BaseURL: "https://api.openai.com/v1/"},
+		{AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "ai_provider", Identity: "shared-index", Name: "Provider Shared", Prefix: "Shared Prefix"},
+		{AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "auth_file", Identity: "shared-index", Name: "Auth Shared"},
+	}).Error; err != nil {
+		t.Fatalf("insert usage identities: %v", err)
+	}
+	if err := db.Create([]entities.UsageOverviewHourlyStat{
+		{BucketStart: bucket, APIGroupKey: "sk-active-key", Model: "claude-sonnet", AuthIndex: "auth-file-1", RequestCount: 2, InputTokens: 10, OutputTokens: 20, TotalTokens: 30},
+		{BucketStart: bucket, APIGroupKey: "sk-active-key", Model: "claude-3-sonnet", AuthIndex: "auth-file-1", RequestCount: 1, InputTokens: 5, OutputTokens: 5, TotalTokens: 10},
+		{BucketStart: bucket, APIGroupKey: "sk-active-key", Model: "claude-opus", AuthIndex: "provider-1", RequestCount: 3, InputTokens: 40, OutputTokens: 20, TotalTokens: 60},
+		{BucketStart: bucket, APIGroupKey: "sk-active-key", Model: "claude-haiku", AuthIndex: "auth-file-deleted", RequestCount: 4, InputTokens: 50, OutputTokens: 10, TotalTokens: 60},
+		{BucketStart: bucket, APIGroupKey: "sk-active-key", Model: "gpt-4", AuthIndex: "missing-index", RequestCount: 5, InputTokens: 60, OutputTokens: 20, TotalTokens: 80},
+		{BucketStart: bucket, APIGroupKey: "sk-active-key", Model: "claude-sonnet", AuthIndex: "shared-index", ModelAlias: "alias-a", RequestCount: 6, InputTokens: 70, OutputTokens: 20, TotalTokens: 90},
+		{BucketStart: bucket, APIGroupKey: "sk-deleted-key", Model: "claude-sonnet", AuthIndex: "provider-1", RequestCount: 7, InputTokens: 80, OutputTokens: 20, TotalTokens: 100},
+	}).Error; err != nil {
+		t.Fatalf("insert hourly stats: %v", err)
+	}
+	if err := db.Migrator().DropTable(&entities.UsageEvent{}); err != nil {
+		t.Fatalf("drop usage_events: %v", err)
+	}
+	start := bucket
+	end := bucket.Add(time.Hour)
+
+	analysis, err := BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{StartTime: &start, EndTime: &end})
+	if err != nil {
+		t.Fatalf("BuildAnalysisWithFilter returned error: %v", err)
+	}
+
+	if len(analysis.AuthFilesComposition) != 2 {
+		t.Fatalf("expected two auth file composition rows, got %+v", analysis.AuthFilesComposition)
+	}
+	if analysis.AuthFilesComposition[0].Key != "shared-index" || analysis.AuthFilesComposition[0].Label != "Auth Shared" || analysis.AuthFilesComposition[0].TotalTokens != 90 {
+		t.Fatalf("expected shared auth file row first, got %+v", analysis.AuthFilesComposition)
+	}
+	if analysis.AuthFilesComposition[1].Key != "auth-file-1" || analysis.AuthFilesComposition[1].Label != "Auth File One" || analysis.AuthFilesComposition[1].TotalTokens != 40 || analysis.AuthFilesComposition[1].Requests != 3 {
+		t.Fatalf("expected merged auth file row second, got %+v", analysis.AuthFilesComposition)
+	}
+	if len(analysis.AIProviderComposition) != 2 {
+		t.Fatalf("expected two ai provider composition rows, got %+v", analysis.AIProviderComposition)
+	}
+	if analysis.AIProviderComposition[0].Key != "shared-index" || analysis.AIProviderComposition[0].Label != "Provider Shared(Shared Prefix)" || analysis.AIProviderComposition[0].TotalTokens != 90 {
+		t.Fatalf("expected shared provider row first, got %+v", analysis.AIProviderComposition)
+	}
+	if analysis.AIProviderComposition[1].Key != "provider-1" || analysis.AIProviderComposition[1].Label != "Provider One(Team Prefix @ api.openai.com)" || analysis.AIProviderComposition[1].TotalTokens != 60 {
+		t.Fatalf("expected active provider row second, got %+v", analysis.AIProviderComposition)
+	}
+}
+
 func TestBuildAnalysisWithFilterKeepsHeatmapPairsSeparateWhenValuesContainDelimiter(t *testing.T) {
 	db := openUsageTestDatabase(t)
 	bucket := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)

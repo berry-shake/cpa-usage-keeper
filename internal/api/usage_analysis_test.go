@@ -30,6 +30,14 @@ func (s usageAnalysisAPIKeyStub) ListCPAAPIKeys(context.Context) ([]entities.CPA
 	return s.rows, s.err
 }
 
+func (s usageAnalysisAPIKeyStub) FindActiveCPAAPIKeyByValue(context.Context, string) (entities.CPAAPIKey, error) {
+	return entities.CPAAPIKey{}, service.ErrInvalidID
+}
+
+func (s usageAnalysisAPIKeyStub) FindActiveCPAAPIKeyByID(context.Context, int64) (entities.CPAAPIKey, error) {
+	return entities.CPAAPIKey{}, service.ErrInvalidID
+}
+
 func (s usageAnalysisAPIKeyStub) UpdateCPAAPIKeyAlias(context.Context, int64, string) (entities.CPAAPIKey, error) {
 	return entities.CPAAPIKey{}, service.ErrInvalidID
 }
@@ -83,6 +91,18 @@ func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
 			TotalTokens: 42,
 			Requests:    2,
 		}},
+		AuthFilesComposition: []servicedto.AnalysisCompositionItem{{
+			Key:         "auth-file-1",
+			Label:       "Auth File One",
+			TotalTokens: 30,
+			Requests:    1,
+		}},
+		AIProviderComposition: []servicedto.AnalysisCompositionItem{{
+			Key:         "provider-1",
+			Label:       "Provider One",
+			TotalTokens: 12,
+			Requests:    1,
+		}},
 		Heatmap: []servicedto.AnalysisHeatmapCell{{
 			APIKey:      "provider-a",
 			Model:       "claude-sonnet",
@@ -103,11 +123,17 @@ func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
 	if !contains(body, `"granularity":"hourly"`) || !contains(body, `"token_usage":[`) || !contains(body, `"heatmap":`) {
 		t.Fatalf("unexpected response body: %s", body)
 	}
-	if !contains(body, `"api_key_composition":[`) || !contains(body, `"model_composition":[`) {
+	if !contains(body, `"api_key_composition":[`) || !contains(body, `"model_composition":[`) || !contains(body, `"auth_files_composition":[`) || !contains(body, `"ai_provider_composition":[`) {
 		t.Fatalf("expected composition payloads in response body: %s", body)
 	}
 	if !contains(body, `"key":"prov**er-a"`) || !contains(body, `"label":"prov**er-a"`) {
 		t.Fatalf("expected redacted api key composition in response body: %s", body)
+	}
+	if !contains(body, `"key":"auth***le-1"`) || !contains(body, `"label":"Auth File One"`) || !contains(body, `"percent":100`) {
+		t.Fatalf("expected auth file composition in response body: %s", body)
+	}
+	if !contains(body, `"key":"prov**er-1"`) || !contains(body, `"label":"Provider One"`) {
+		t.Fatalf("expected ai provider composition in response body: %s", body)
 	}
 	if !contains(body, `"model":"claude-sonnet"`) || !contains(body, `"intensity":1`) {
 		t.Fatalf("expected heatmap cell in response body: %s", body)
@@ -166,6 +192,21 @@ func TestUsageAnalysisUsesCPAAPIKeyOptionLabels(t *testing.T) {
 	}
 	if provider.lastFilter.APIKeyID != "1" {
 		t.Fatalf("expected API key id to pass into usage filter, got %+v", provider.lastFilter)
+	}
+}
+
+func TestBuildAnalysisHeatmapPayloadSortsKeysByRequests(t *testing.T) {
+	payload := buildAnalysisHeatmapPayload([]servicedto.AnalysisHeatmapCell{
+		{APIKey: "sk-low", Model: "model-low", Requests: 1, TotalTokens: 100},
+		{APIKey: "sk-high", Model: "model-high", Requests: 5, TotalTokens: 50},
+		{APIKey: "sk-high", Model: "model-low", Requests: 2, TotalTokens: 20},
+	}, nil)
+
+	if got := payload.APIKeys; len(got) != 2 || got[0] != redact.APIKeyDisplayName("sk-high") || got[1] != redact.APIKeyDisplayName("sk-low") {
+		t.Fatalf("expected api keys sorted by total requests desc, got %+v", got)
+	}
+	if got := payload.Models; len(got) != 2 || got[0] != "model-high" || got[1] != "model-low" {
+		t.Fatalf("expected models sorted by total requests desc, got %+v", got)
 	}
 }
 

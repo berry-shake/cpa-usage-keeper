@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 	"cpa-usage-keeper/internal/timeutil"
@@ -236,7 +237,7 @@ func usageSourceFilterOptionFromIdentity(identity entities.UsageIdentity) (usage
 			return usageSourceFilterOption{}, false
 		}
 		label := strings.TrimSpace(identity.Name)
-		displayName := usageIdentityDisplayName(identity)
+		displayName := helper.UsageIdentityDisplayName(identity)
 		return usageSourceFilterOption{Value: value, Label: label, DisplayName: displayName}, true
 	default:
 		return usageSourceFilterOption{}, false

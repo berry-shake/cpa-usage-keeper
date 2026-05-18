@@ -7,13 +7,26 @@ import (
 	"time"
 )
 
+type Role string
+
+const (
+	RoleAdmin        Role = "admin"
+	RoleAPIKeyViewer Role = "api_key_viewer"
+)
+
+type Session struct {
+	Role        Role
+	CPAAPIKeyID int64
+	ExpiresAt   time.Time
+}
+
 type SessionManager struct {
 	ttl      time.Duration
 	now      func() time.Time
 	generate func() (string, error)
 
 	mu       sync.RWMutex
-	sessions map[string]time.Time
+	sessions map[string]Session
 }
 
 func NewSessionManager(ttl time.Duration) *SessionManager {
@@ -21,11 +34,19 @@ func NewSessionManager(ttl time.Duration) *SessionManager {
 		ttl:      ttl,
 		now:      time.Now,
 		generate: generateToken,
-		sessions: make(map[string]time.Time),
+		sessions: make(map[string]Session),
 	}
 }
 
 func (m *SessionManager) Create() (string, time.Time, error) {
+	return m.create(Session{Role: RoleAdmin})
+}
+
+func (m *SessionManager) CreateAPIKeyViewer(cpaAPIKeyID int64) (string, time.Time, error) {
+	return m.create(Session{Role: RoleAPIKeyViewer, CPAAPIKeyID: cpaAPIKeyID})
+}
+
+func (m *SessionManager) create(session Session) (string, time.Time, error) {
 	token, err := m.generate()
 	if err != nil {
 		return "", time.Time{}, err
@@ -36,27 +57,33 @@ func (m *SessionManager) Create() (string, time.Time, error) {
 
 	m.cleanupExpiredLocked()
 	expiresAt := m.now().Add(m.ttl)
-	m.sessions[token] = expiresAt
+	session.ExpiresAt = expiresAt
+	m.sessions[token] = session
 
 	return token, expiresAt, nil
 }
 
 func (m *SessionManager) Validate(token string) bool {
+	_, ok := m.Get(token)
+	return ok
+}
+
+func (m *SessionManager) Get(token string) (Session, bool) {
 	if token == "" {
-		return false
+		return Session{}, false
 	}
 
 	m.mu.RLock()
-	expiresAt, ok := m.sessions[token]
+	session, ok := m.sessions[token]
 	m.mu.RUnlock()
 	if !ok {
-		return false
+		return Session{}, false
 	}
-	if !expiresAt.After(m.now()) {
+	if !session.ExpiresAt.After(m.now()) {
 		m.Delete(token)
-		return false
+		return Session{}, false
 	}
-	return true
+	return session, true
 }
 
 func (m *SessionManager) Delete(token string) {
@@ -76,8 +103,8 @@ func (m *SessionManager) CleanupExpired() {
 
 func (m *SessionManager) cleanupExpiredLocked() {
 	now := m.now()
-	for token, expiresAt := range m.sessions {
-		if !expiresAt.After(now) {
+	for token, session := range m.sessions {
+		if !session.ExpiresAt.After(now) {
 			delete(m.sessions, token)
 		}
 	}

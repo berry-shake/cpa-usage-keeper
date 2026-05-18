@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/redact"
 	"cpa-usage-keeper/internal/service"
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,10 @@ type usageIdentityResponse struct {
 	Identity                   string                         `json:"identity"`
 	Type                       string                         `json:"type"`
 	Provider                   string                         `json:"provider"`
+	Prefix                     string                         `json:"prefix"`
+	Priority                   *int                           `json:"priority,omitempty"`
+	Disabled                   bool                           `json:"disabled"`
+	Note                       *string                        `json:"note,omitempty"`
 	PlanType                   *string                        `json:"plan_type,omitempty"`
 	ActiveStart                *time.Time                     `json:"active_start,omitempty"`
 	ActiveUntil                *time.Time                     `json:"active_until,omitempty"`
@@ -109,7 +114,15 @@ func parseUsageIdentitiesPageRequest(c *gin.Context) (service.ListUsageIdentitie
 	// page/page_size 做宽松兜底，auth_type 做严格校验，避免前端分区拿到混合数据。
 	page := positiveQueryInt(c, "page", 1)
 	pageSize := positiveQueryInt(c, "page_size", 10)
-	request := service.ListUsageIdentitiesRequest{Page: page, PageSize: pageSize}
+	request := service.ListUsageIdentitiesRequest{Page: page, PageSize: pageSize, Sort: c.Query("sort")}
+	if rawActiveOnly := c.Query("active_only"); rawActiveOnly != "" {
+		activeOnly, err := strconv.ParseBool(rawActiveOnly)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "active_only must be true or false"})
+			return service.ListUsageIdentitiesRequest{}, false
+		}
+		request.ActiveOnly = &activeOnly
+	}
 	if rawAuthType := c.Query("auth_type"); rawAuthType != "" {
 		value, err := strconv.Atoi(rawAuthType)
 		if err != nil || (value != int(entities.UsageIdentityAuthTypeAuthFile) && value != int(entities.UsageIdentityAuthTypeAIProvider)) {
@@ -144,15 +157,24 @@ func mapUsageIdentityResponse(item entities.UsageIdentity) usageIdentityResponse
 		identity = redact.APIKeyDisplayName(item.Identity)
 	}
 
+	disabled := false
+	if item.Disabled != nil {
+		disabled = *item.Disabled
+	}
+
 	return usageIdentityResponse{
 		ID:                         strconv.FormatInt(item.ID, 10),
 		Name:                       item.Name,
-		DisplayName:                usageIdentityDisplayName(item),
+		DisplayName:                helper.UsageIdentityDisplayName(item),
 		AuthType:                   item.AuthType,
 		AuthTypeName:               item.AuthTypeName,
 		Identity:                   identity,
 		Type:                       item.Type,
 		Provider:                   item.Provider,
+		Prefix:                     item.Prefix,
+		Priority:                   item.Priority,
+		Disabled:                   disabled,
+		Note:                       item.Note,
 		PlanType:                   item.PlanType,
 		ActiveStart:                item.ActiveStart,
 		ActiveUntil:                item.ActiveUntil,

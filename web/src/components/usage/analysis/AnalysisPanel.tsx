@@ -442,6 +442,8 @@ export function AnalysisPanel({ analysis, loading, isDark, isMobile }: AnalysisP
   const tokenRows = useMemo(() => buildTokenUsageRows(analysis?.token_usage ?? [], analysis?.granularity ?? 'hourly'), [analysis]);
   const apiComposition = useMemo(() => takeMajorComposition(analysis?.api_key_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
   const modelComposition = useMemo(() => takeMajorComposition(analysis?.model_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
+  const authFilesComposition = useMemo(() => takeMajorComposition(analysis?.auth_files_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
+  const aiProviderComposition = useMemo(() => takeMajorComposition(analysis?.ai_provider_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
 
   return (
     <div className={styles.analysisPanel}>
@@ -449,6 +451,8 @@ export function AnalysisPanel({ analysis, loading, isDark, isMobile }: AnalysisP
       <div className={styles.compositionGrid}>
         <CompositionDonutChart title={t('usage_stats.analysis_api_key_composition_title')} items={apiComposition} loading={loading} isDark={isDark} />
         <CompositionDonutChart title={t('usage_stats.analysis_model_composition_title')} items={modelComposition} loading={loading} isDark={isDark} />
+        <CompositionDonutChart title={t('usage_stats.analysis_auth_files_composition_title')} items={authFilesComposition} loading={loading} isDark={isDark} />
+        <CompositionDonutChart title={t('usage_stats.analysis_ai_provider_composition_title')} items={aiProviderComposition} loading={loading} isDark={isDark} />
       </div>
       <Heatmap cells={analysis?.heatmap.cells ?? []} apiKeys={analysis?.heatmap.api_keys ?? []} models={analysis?.heatmap.models ?? []} loading={loading} />
     </div>

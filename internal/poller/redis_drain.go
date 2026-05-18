@@ -12,8 +12,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Redis inbox pull/process 都使用单 goroutine 串行 loop；每轮执行完成后再等待 1 秒，避免任务重入。
-const redisInboxProcessInterval = time.Second
+// Redis inbox pull/process 都使用单 goroutine 串行 loop；每轮执行完成后再等待固定间隔，避免任务重入。
+const redisInboxProcessInterval = 3 * time.Second
 
 type RedisBatchSyncer interface {
 	PullRedisUsageInbox(ctx context.Context) (*servicedto.RedisInboxPullResult, error)
@@ -230,7 +230,7 @@ func (d *RedisDrain) runRedisInboxProcessLoop(ctx context.Context) {
 				d.logBatchFailure(result, err)
 			}
 		}
-		// 每轮 Process 完成后固定等待 1s；如果处理耗时超过 1s，下一轮自然顺延且不会重入。
+		// 每轮 Process 完成后固定等待 3s；如果处理耗时超过 3s，下一轮自然顺延且不会重入。
 		if !d.sleep(ctx, redisInboxProcessInterval) {
 			// sleep 被 ctx 打断表示服务正在停止，直接退出 Process loop。
 			return

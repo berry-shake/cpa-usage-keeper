@@ -160,6 +160,14 @@ func mapAnalysisRecord(record *repodto.AnalysisRecord) *servicedto.AnalysisSnaps
 	for _, item := range record.ModelComposition {
 		models = append(models, mapAnalysisCompositionRecord(item))
 	}
+	authFiles := make([]servicedto.AnalysisCompositionItem, 0, len(record.AuthFilesComposition))
+	for _, item := range record.AuthFilesComposition {
+		authFiles = append(authFiles, mapAnalysisCompositionRecord(item))
+	}
+	aiProviders := make([]servicedto.AnalysisCompositionItem, 0, len(record.AIProviderComposition))
+	for _, item := range record.AIProviderComposition {
+		aiProviders = append(aiProviders, mapAnalysisCompositionRecord(item))
+	}
 	heatmap := make([]servicedto.AnalysisHeatmapCell, 0, len(record.Heatmap))
 	for _, cell := range record.Heatmap {
 		heatmap = append(heatmap, servicedto.AnalysisHeatmapCell{
@@ -170,19 +178,22 @@ func mapAnalysisRecord(record *repodto.AnalysisRecord) *servicedto.AnalysisSnaps
 		})
 	}
 	return &servicedto.AnalysisSnapshot{
-		Granularity:       servicedto.AnalysisGranularity(record.Granularity),
-		RangeStart:        record.RangeStart,
-		RangeEnd:          record.RangeEnd,
-		TokenUsage:        tokenUsage,
-		APIKeyComposition: apiKeys,
-		ModelComposition:  models,
-		Heatmap:           heatmap,
+		Granularity:           servicedto.AnalysisGranularity(record.Granularity),
+		RangeStart:            record.RangeStart,
+		RangeEnd:              record.RangeEnd,
+		TokenUsage:            tokenUsage,
+		APIKeyComposition:     apiKeys,
+		ModelComposition:      models,
+		AuthFilesComposition:  authFiles,
+		AIProviderComposition: aiProviders,
+		Heatmap:               heatmap,
 	}
 }
 
 func mapAnalysisCompositionRecord(item repodto.AnalysisCompositionRecord) servicedto.AnalysisCompositionItem {
 	return servicedto.AnalysisCompositionItem{
 		Key:             item.Key,
+		Label:           item.Label,
 		TotalTokens:     item.TotalTokens,
 		Requests:        item.Requests,
 		InputTokens:     item.InputTokens,

@@ -43,6 +43,52 @@ func TestAggregateUsageOverviewStatsAggregatesIncrementallyAndIdempotently(t *te
 	assertUsageOverviewCheckpoint(t, db, 3)
 }
 
+func TestAggregateUsageOverviewStatsSplitsHourlyAndDailyByAuthIndexAndModelAlias(t *testing.T) {
+	db := openTestDatabase(t)
+	defer closeTestDatabase(t, db)
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	modelAlias := "alias-a"
+	blankAlias := "  "
+
+	eventTime := time.Date(2026, 5, 14, 10, 5, 0, 0, time.UTC)
+	events := []entities.UsageEvent{
+		usageOverviewAggregationEvent("event-auth-1", "api-a", "claude-sonnet", eventTime, false, 10, 20, 0, 0, 0, 0, 30),
+		usageOverviewAggregationEvent("event-auth-2", "api-a", "claude-sonnet", eventTime, false, 1, 2, 0, 0, 0, 0, 3),
+		usageOverviewAggregationEvent("event-auth-3", "api-a", "claude-sonnet", eventTime, false, 3, 4, 0, 0, 0, 0, 7),
+	}
+	events[0].AuthIndex = "auth-a"
+	events[0].ModelAlias = &modelAlias
+	events[1].AuthIndex = "auth-b"
+	events[1].ModelAlias = &modelAlias
+	events[2].AuthIndex = "auth-a"
+	events[2].ModelAlias = &blankAlias
+	insertUsageOverviewAggregationEvents(t, db, events)
+
+	if err := AggregateUsageOverviewStats(context.Background(), db, now); err != nil {
+		t.Fatalf("AggregateUsageOverviewStats returned error: %v", err)
+	}
+
+	bucket := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	dayBucket := usageOverviewAggregationDayBucket(2026, 5, 14)
+	assertUsageOverviewHourlyStatWithDimensions(t, db, bucket, "api-a", "claude-sonnet", "auth-a", "alias-a", 1, 1, 0, 10, 20, 0, 0, 0, 0, 30)
+	assertUsageOverviewHourlyStatWithDimensions(t, db, bucket, "api-a", "claude-sonnet", "auth-b", "alias-a", 1, 1, 0, 1, 2, 0, 0, 0, 0, 3)
+	assertUsageOverviewHourlyStatWithDimensions(t, db, bucket, "api-a", "claude-sonnet", "auth-a", "", 1, 1, 0, 3, 4, 0, 0, 0, 0, 7)
+	assertUsageOverviewDailyStatWithDimensions(t, db, dayBucket, "api-a", "claude-sonnet", "auth-a", "alias-a", 1, 1, 0, 10, 20, 0, 0, 0, 0, 30)
+
+	var healthRows []entities.UsageOverviewHealthStat
+	if err := db.Find(&healthRows).Error; err != nil {
+		t.Fatalf("load health rows: %v", err)
+	}
+	if len(healthRows) != 2 {
+		t.Fatalf("expected health to remain split only by span/api/bucket, got %+v", healthRows)
+	}
+	for _, row := range healthRows {
+		if row.SuccessCount != 3 || row.FailureCount != 0 {
+			t.Fatalf("expected health rows to aggregate all auth/model alias dimensions, got %+v", row)
+		}
+	}
+}
+
 func TestAggregateUsageOverviewStatsNormalizesBlankDimensionsAndWritesHealthSpans(t *testing.T) {
 	db := openTestDatabase(t)
 	defer closeTestDatabase(t, db)
@@ -130,18 +176,28 @@ func insertUsageOverviewAggregationEvents(t *testing.T, db *gorm.DB, events []en
 
 func assertUsageOverviewHourlyStat(t *testing.T, db *gorm.DB, bucketStart time.Time, apiGroupKey, model string, requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens int64) {
 	t.Helper()
+	assertUsageOverviewHourlyStatWithDimensions(t, db, bucketStart, apiGroupKey, model, "", "", requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens)
+}
+
+func assertUsageOverviewHourlyStatWithDimensions(t *testing.T, db *gorm.DB, bucketStart time.Time, apiGroupKey, model, authIndex, modelAlias string, requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens int64) {
+	t.Helper()
 	var row entities.UsageOverviewHourlyStat
-	if err := db.Where("bucket_start = ? AND api_group_key = ? AND model = ?", timeutil.FormatStorageTime(bucketStart), apiGroupKey, model).First(&row).Error; err != nil {
-		t.Fatalf("load hourly stat %s/%s/%s: %v", bucketStart, apiGroupKey, model, err)
+	if err := db.Where("bucket_start = ? AND api_group_key = ? AND model = ? AND auth_index = ? AND model_alias = ?", timeutil.FormatStorageTime(bucketStart), apiGroupKey, model, authIndex, modelAlias).First(&row).Error; err != nil {
+		t.Fatalf("load hourly stat %s/%s/%s/%s/%s: %v", bucketStart, apiGroupKey, model, authIndex, modelAlias, err)
 	}
 	assertUsageOverviewStatValues(t, "hourly", row.RequestCount, row.SuccessCount, row.FailureCount, row.InputTokens, row.OutputTokens, row.ReasoningTokens, row.CachedTokens, row.CacheReadTokens, row.CacheCreationTokens, row.TotalTokens, requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens)
 }
 
 func assertUsageOverviewDailyStat(t *testing.T, db *gorm.DB, bucketStart time.Time, apiGroupKey, model string, requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens int64) {
 	t.Helper()
+	assertUsageOverviewDailyStatWithDimensions(t, db, bucketStart, apiGroupKey, model, "", "", requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens)
+}
+
+func assertUsageOverviewDailyStatWithDimensions(t *testing.T, db *gorm.DB, bucketStart time.Time, apiGroupKey, model, authIndex, modelAlias string, requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens int64) {
+	t.Helper()
 	var row entities.UsageOverviewDailyStat
-	if err := db.Where("bucket_start = ? AND api_group_key = ? AND model = ?", timeutil.FormatStorageTime(bucketStart), apiGroupKey, model).First(&row).Error; err != nil {
-		t.Fatalf("load daily stat %s/%s/%s: %v", bucketStart, apiGroupKey, model, err)
+	if err := db.Where("bucket_start = ? AND api_group_key = ? AND model = ? AND auth_index = ? AND model_alias = ?", timeutil.FormatStorageTime(bucketStart), apiGroupKey, model, authIndex, modelAlias).First(&row).Error; err != nil {
+		t.Fatalf("load daily stat %s/%s/%s/%s/%s: %v", bucketStart, apiGroupKey, model, authIndex, modelAlias, err)
 	}
 	assertUsageOverviewStatValues(t, "daily", row.RequestCount, row.SuccessCount, row.FailureCount, row.InputTokens, row.OutputTokens, row.ReasoningTokens, row.CachedTokens, row.CacheReadTokens, row.CacheCreationTokens, row.TotalTokens, requestCount, successCount, failureCount, inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheReadTokens, cacheCreationTokens, totalTokens)
 }

@@ -21,6 +21,7 @@ type AnalysisTokenUsageBucketRecord struct {
 
 type AnalysisCompositionRecord struct {
 	Key             string
+	Label           string
 	TotalTokens     int64
 	Requests        int64
 	InputTokens     int64
@@ -37,11 +38,13 @@ type AnalysisHeatmapRecord struct {
 }
 
 type AnalysisRecord struct {
-	Granularity       AnalysisGranularity
-	RangeStart        *time.Time
-	RangeEnd          *time.Time
-	TokenUsage        []AnalysisTokenUsageBucketRecord
-	APIKeyComposition []AnalysisCompositionRecord
-	ModelComposition  []AnalysisCompositionRecord
-	Heatmap           []AnalysisHeatmapRecord
+	Granularity           AnalysisGranularity
+	RangeStart            *time.Time
+	RangeEnd              *time.Time
+	TokenUsage            []AnalysisTokenUsageBucketRecord
+	APIKeyComposition     []AnalysisCompositionRecord
+	ModelComposition      []AnalysisCompositionRecord
+	AuthFilesComposition  []AnalysisCompositionRecord
+	AIProviderComposition []AnalysisCompositionRecord
+	Heatmap               []AnalysisHeatmapRecord
 }

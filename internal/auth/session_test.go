@@ -30,6 +30,56 @@ func TestSessionManagerCreateValidateDelete(t *testing.T) {
 	}
 }
 
+func TestSessionManagerCreateReturnsAdminSessionMetadata(t *testing.T) {
+	manager := NewSessionManager(2 * time.Hour)
+	manager.now = func() time.Time { return time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC) }
+	manager.generate = func() (string, error) { return "token-admin", nil }
+
+	token, expiresAt, err := manager.Create()
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	session, ok := manager.Get(token)
+	if !ok {
+		t.Fatal("expected session metadata to be available")
+	}
+	if session.Role != RoleAdmin {
+		t.Fatalf("expected admin role, got %q", session.Role)
+	}
+	if session.CPAAPIKeyID != 0 {
+		t.Fatalf("expected admin session to have no API key binding, got %d", session.CPAAPIKeyID)
+	}
+	if !session.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("expected session expiry %s, got %s", expiresAt, session.ExpiresAt)
+	}
+}
+
+func TestSessionManagerCreateAPIKeyViewerBindsKeyID(t *testing.T) {
+	manager := NewSessionManager(2 * time.Hour)
+	manager.now = func() time.Time { return time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC) }
+	manager.generate = func() (string, error) { return "token-viewer", nil }
+
+	token, expiresAt, err := manager.CreateAPIKeyViewer(42)
+	if err != nil {
+		t.Fatalf("CreateAPIKeyViewer returned error: %v", err)
+	}
+
+	session, ok := manager.Get(token)
+	if !ok {
+		t.Fatal("expected viewer session metadata to be available")
+	}
+	if session.Role != RoleAPIKeyViewer {
+		t.Fatalf("expected api key viewer role, got %q", session.Role)
+	}
+	if session.CPAAPIKeyID != 42 {
+		t.Fatalf("expected API key binding 42, got %d", session.CPAAPIKeyID)
+	}
+	if !session.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("expected session expiry %s, got %s", expiresAt, session.ExpiresAt)
+	}
+}
+
 func TestSessionManagerRejectsExpiredSessions(t *testing.T) {
 	baseTime := time.Date(2026, 4, 17, 10, 0, 0, 0, time.UTC)
 	manager := NewSessionManager(30 * time.Minute)
@@ -58,7 +108,7 @@ func TestSessionManagerCleanupExpired(t *testing.T) {
 	}
 
 	manager.mu.Lock()
-	manager.sessions["expired"] = baseTime.Add(-time.Minute)
+	manager.sessions["expired"] = Session{Role: RoleAdmin, ExpiresAt: baseTime.Add(-time.Minute)}
 	manager.mu.Unlock()
 
 	manager.CleanupExpired()

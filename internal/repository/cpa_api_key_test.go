@@ -123,6 +123,15 @@ func TestCPAAPIKeyQueriesFilterDeletedRows(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected deleted id to be hidden, got %v", err)
 	}
+
+	row, err := FindActiveCPAAPIKeyByValue(db, "sk-alpha123456")
+	if err != nil || row.ID != 1 {
+		t.Fatalf("expected active key lookup by value to return row 1, got %+v err=%v", row, err)
+	}
+	_, err = FindActiveCPAAPIKeyByValue(db, "sk-beta654321")
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected deleted value lookup to be hidden, got %v", err)
+	}
 }
 
 func TestSyncCPAAPIKeysDoesNotConsumeIDsForExistingKeys(t *testing.T) {

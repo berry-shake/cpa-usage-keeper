@@ -61,7 +61,7 @@ const applyTheme = (resolved: AppliedTheme) => {
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set, get) => ({
-      theme: 'white',
+      theme: 'auto',
       resolvedTheme: 'light',
 
       setTheme: (theme) => {

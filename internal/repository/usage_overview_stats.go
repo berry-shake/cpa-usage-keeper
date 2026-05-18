@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
@@ -78,7 +79,7 @@ func aggregateUsageOverviewStatsBatch(ctx context.Context, db *gorm.DB, now time
 		}
 
 		var events []entities.UsageEvent
-		if err := tx.Select("id, api_group_key, model, timestamp, failed, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens").
+		if err := tx.Select("id, api_group_key, model, model_alias, auth_index, timestamp, failed, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens").
 			Where("id > ?", checkpoint.LastAggregatedUsageEventID).
 			Order("id asc").
 			Limit(limit).
@@ -127,6 +128,8 @@ type usageOverviewStatsKey struct {
 	BucketStart time.Time
 	APIGroupKey string
 	Model       string
+	AuthIndex   string
+	ModelAlias  string
 }
 
 type usageOverviewHealthStatsKey struct {
@@ -148,18 +151,23 @@ func buildUsageOverviewStatsRows(events []entities.UsageEvent, now time.Time) ([
 		timestamp := timeutil.NormalizeStorageTime(event.Timestamp)
 		apiGroupKey := normalizeUsageOverviewDimension(event.APIGroupKey)
 		model := normalizeUsageOverviewDimension(event.Model)
+		authIndex := normalizeUsageOverviewOptionalDimension(event.AuthIndex)
+		modelAlias := ""
+		if event.ModelAlias != nil {
+			modelAlias = normalizeUsageOverviewOptionalDimension(*event.ModelAlias)
+		}
 		hourBucket := timestamp.Truncate(time.Hour)
 		dayBucket := time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day(), 0, 0, 0, 0, timestamp.Location())
 
-		hourKey := usageOverviewStatsKey{BucketStart: hourBucket, APIGroupKey: apiGroupKey, Model: model}
+		hourKey := usageOverviewStatsKey{BucketStart: hourBucket, APIGroupKey: apiGroupKey, Model: model, AuthIndex: authIndex, ModelAlias: modelAlias}
 		if _, ok := hourly[hourKey]; !ok {
-			hourly[hourKey] = &entities.UsageOverviewHourlyStat{BucketStart: hourBucket, APIGroupKey: apiGroupKey, Model: model}
+			hourly[hourKey] = &entities.UsageOverviewHourlyStat{BucketStart: hourBucket, APIGroupKey: apiGroupKey, Model: model, AuthIndex: authIndex, ModelAlias: modelAlias}
 		}
 		addUsageOverviewEventToStats(hourly[hourKey], event)
 
-		dayKey := usageOverviewStatsKey{BucketStart: dayBucket, APIGroupKey: apiGroupKey, Model: model}
+		dayKey := usageOverviewStatsKey{BucketStart: dayBucket, APIGroupKey: apiGroupKey, Model: model, AuthIndex: authIndex, ModelAlias: modelAlias}
 		if _, ok := daily[dayKey]; !ok {
-			daily[dayKey] = &entities.UsageOverviewDailyStat{BucketStart: dayBucket, APIGroupKey: apiGroupKey, Model: model}
+			daily[dayKey] = &entities.UsageOverviewDailyStat{BucketStart: dayBucket, APIGroupKey: apiGroupKey, Model: model, AuthIndex: authIndex, ModelAlias: modelAlias}
 		}
 		addUsageOverviewEventToStats(daily[dayKey], event)
 
@@ -192,6 +200,10 @@ func buildUsageOverviewStatsRows(events []entities.UsageEvent, now time.Time) ([
 		healthRows = append(healthRows, *row)
 	}
 	return hourlyRows, dailyRows, healthRows, maxEventID
+}
+
+func normalizeUsageOverviewOptionalDimension(value string) string {
+	return strings.TrimSpace(value)
 }
 
 type usageOverviewTokenStat interface {
@@ -284,7 +296,7 @@ func applyUsageOverviewHealthStats(tx *gorm.DB, rows []entities.UsageOverviewHea
 // applyUsageOverviewHourlyStat 使用 update-first 写入小时 stats，避免 upsert 冲突路径消耗自增 ID。
 func applyUsageOverviewHourlyStat(tx *gorm.DB, row entities.UsageOverviewHourlyStat, now time.Time) error {
 	updates := usageOverviewTokenStatUpdates(row.RequestCount, row.SuccessCount, row.FailureCount, row.InputTokens, row.OutputTokens, row.ReasoningTokens, row.CachedTokens, row.CacheReadTokens, row.CacheCreationTokens, row.TotalTokens, now)
-	result := tx.Model(&entities.UsageOverviewHourlyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model).Updates(updates)
+	result := tx.Model(&entities.UsageOverviewHourlyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ? AND auth_index = ? AND model_alias = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model, row.AuthIndex, row.ModelAlias).Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("update usage overview hourly stat: %w", result.Error)
 	}
@@ -294,7 +306,7 @@ func applyUsageOverviewHourlyStat(tx *gorm.DB, row entities.UsageOverviewHourlyS
 	row.CreatedAt = now
 	row.UpdatedAt = now
 	if err := tx.Create(&row).Error; err != nil {
-		if retryErr := tx.Model(&entities.UsageOverviewHourlyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model).Updates(updates).Error; retryErr != nil {
+		if retryErr := tx.Model(&entities.UsageOverviewHourlyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ? AND auth_index = ? AND model_alias = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model, row.AuthIndex, row.ModelAlias).Updates(updates).Error; retryErr != nil {
 			return fmt.Errorf("insert usage overview hourly stat: %w; retry update: %v", err, retryErr)
 		}
 	}
@@ -304,7 +316,7 @@ func applyUsageOverviewHourlyStat(tx *gorm.DB, row entities.UsageOverviewHourlyS
 // applyUsageOverviewDailyStat 使用 update-first 写入天 stats，支撑长窗口完整天查询。
 func applyUsageOverviewDailyStat(tx *gorm.DB, row entities.UsageOverviewDailyStat, now time.Time) error {
 	updates := usageOverviewTokenStatUpdates(row.RequestCount, row.SuccessCount, row.FailureCount, row.InputTokens, row.OutputTokens, row.ReasoningTokens, row.CachedTokens, row.CacheReadTokens, row.CacheCreationTokens, row.TotalTokens, now)
-	result := tx.Model(&entities.UsageOverviewDailyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model).Updates(updates)
+	result := tx.Model(&entities.UsageOverviewDailyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ? AND auth_index = ? AND model_alias = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model, row.AuthIndex, row.ModelAlias).Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("update usage overview daily stat: %w", result.Error)
 	}
@@ -314,7 +326,7 @@ func applyUsageOverviewDailyStat(tx *gorm.DB, row entities.UsageOverviewDailySta
 	row.CreatedAt = now
 	row.UpdatedAt = now
 	if err := tx.Create(&row).Error; err != nil {
-		if retryErr := tx.Model(&entities.UsageOverviewDailyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model).Updates(updates).Error; retryErr != nil {
+		if retryErr := tx.Model(&entities.UsageOverviewDailyStat{}).Where("bucket_start = ? AND api_group_key = ? AND model = ? AND auth_index = ? AND model_alias = ?", timeutil.FormatStorageTime(row.BucketStart), row.APIGroupKey, row.Model, row.AuthIndex, row.ModelAlias).Updates(updates).Error; retryErr != nil {
 			return fmt.Errorf("insert usage overview daily stat: %w; retry update: %v", err, retryErr)
 		}
 	}

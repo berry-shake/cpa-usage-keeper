@@ -35,6 +35,8 @@ const (
 	migrationAddUsageEventPlainDimensionIndexes     = "20260514_add_usage_event_plain_dimension_indexes"
 	migrationCreateUsageOverviewStats               = "20260514_create_usage_overview_stats"
 	migrationRemoveUsageEventEventKeyUniqueIndex    = "20260514_remove_usage_event_event_key_unique_index"
+	migrationAddUsageIdentitySyncMetadataFields     = "20260517_add_usage_identity_sync_metadata_fields"
+	migrationUsageOverviewRollupDimensions          = "20260518_usage_overview_rollup_dimensions"
 )
 
 type schemaMigration struct {
@@ -47,8 +49,9 @@ func (schemaMigration) TableName() string {
 }
 
 type databaseMigration struct {
-	version string
-	run     func(*gorm.DB) error
+	version            string
+	run                func(*gorm.DB) error
+	disableTransaction bool
 }
 
 func Run(db *gorm.DB) error {
@@ -113,31 +116,44 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationAddUsageEventPlainDimensionIndexes, run: addUsageEventPlainDimensionIndexesMigration},
 		{version: migrationCreateUsageOverviewStats, run: createUsageOverviewStatsMigration},
 		{version: migrationRemoveUsageEventEventKeyUniqueIndex, run: removeUsageEventEventKeyUniqueIndexMigration},
+		{version: migrationAddUsageIdentitySyncMetadataFields, run: addUsageIdentitySyncMetadataFieldsMigration},
+		{version: migrationUsageOverviewRollupDimensions, run: usageOverviewRollupDimensionsMigration, disableTransaction: true},
 	}
 }
 
 func runSchemaMigration(db *gorm.DB, migration databaseMigration) error {
+	if migration.disableTransaction {
+		return runSchemaMigrationWithoutTransaction(db, migration)
+	}
 	return db.Transaction(func(tx *gorm.DB) error {
-		logger := logrus.WithField("version", migration.version)
-		var count int64
-		if err := tx.Table("schema_migrations").Where("version = ?", migration.version).Count(&count).Error; err != nil {
-			logger.WithError(err).Error("schema migration failed")
-			return fmt.Errorf("check schema migration %s: %w", migration.version, err)
-		}
-		if count > 0 {
-			logger.Info("schema migration skipped")
-			return nil
-		}
-		logger.Info("schema migration started")
-		if err := migration.run(tx); err != nil {
-			logger.WithError(err).Error("schema migration failed")
-			return fmt.Errorf("run schema migration %s: %w", migration.version, err)
-		}
-		if err := tx.Create(&schemaMigration{Version: migration.version, AppliedAt: timeutil.NormalizeStorageTime(time.Now())}).Error; err != nil {
-			logger.WithError(err).Error("schema migration failed")
-			return fmt.Errorf("record schema migration %s: %w", migration.version, err)
-		}
-		logger.Info("schema migration applied")
-		return nil
+		return runSchemaMigrationBody(tx, migration)
 	})
+}
+
+func runSchemaMigrationWithoutTransaction(db *gorm.DB, migration databaseMigration) error {
+	return runSchemaMigrationBody(db, migration)
+}
+
+func runSchemaMigrationBody(db *gorm.DB, migration databaseMigration) error {
+	logger := logrus.WithField("version", migration.version)
+	var count int64
+	if err := db.Table("schema_migrations").Where("version = ?", migration.version).Count(&count).Error; err != nil {
+		logger.WithError(err).Error("schema migration failed")
+		return fmt.Errorf("check schema migration %s: %w", migration.version, err)
+	}
+	if count > 0 {
+		logger.Info("schema migration skipped")
+		return nil
+	}
+	logger.Info("schema migration started")
+	if err := migration.run(db); err != nil {
+		logger.WithError(err).Error("schema migration failed")
+		return fmt.Errorf("run schema migration %s: %w", migration.version, err)
+	}
+	if err := db.Create(&schemaMigration{Version: migration.version, AppliedAt: timeutil.NormalizeStorageTime(time.Now())}).Error; err != nil {
+		logger.WithError(err).Error("schema migration failed")
+		return fmt.Errorf("record schema migration %s: %w", migration.version, err)
+	}
+	logger.Info("schema migration applied")
+	return nil
 }
