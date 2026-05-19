@@ -24,6 +24,7 @@ export interface CredentialRow {
   failure: number;
   total: number;
   successRate: number;
+  tokens: number;
   cost: number;
   costAvailable: boolean;
   models: CredentialModelRow[];
@@ -34,6 +35,7 @@ export interface CredentialModelRow {
   success: number;
   failure: number;
   total: number;
+  successRate: number;
   tokens: number;
   cost: number;
   costAvailable: boolean;
@@ -50,6 +52,7 @@ export function buildCredentialModelRows(models: UsageCredential['models'] = [])
         success,
         failure,
         total,
+        successRate: total > 0 ? (success / total) * 100 : 100,
         tokens: Number(model.total_tokens) || 0,
         cost: Number(model.total_cost) || 0,
         costAvailable: model.cost_available === true,
@@ -80,6 +83,7 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
         failure,
         total,
         successRate: total > 0 ? (success / total) * 100 : 100,
+        tokens: Number(credential.total_tokens) || 0,
         cost,
         costAvailable,
         models: buildCredentialModelRows(credential.models),
@@ -199,6 +203,10 @@ export function CredentialStatsCard({ credentials, loading }: CredentialStatsCar
                   value={formatCredentialPercent(row.successRate)}
                   valueClassName={successRateValueClass(row.successRate)}
                 />
+                <MetricPill
+                  label={t('usage_stats.tokens_count')}
+                  value={formatCompactNumber(row.tokens)}
+                />
                 {showCost && (
                   <MetricPill label={t('usage_stats.total_cost')} value={formatCredentialCost(row)} />
                 )}
@@ -217,6 +225,12 @@ export function CredentialStatsCard({ credentials, loading }: CredentialStatsCar
                         <span className={styles.modelMetricLabel}>{t('usage_stats.requests_count')}</span>
                         <span className={styles.modelMetricValue}>
                           <RequestMetricValue total={model.total} success={model.success} failure={model.failure} />
+                        </span>
+                      </span>
+                      <span className={styles.modelMetric}>
+                        <span className={styles.modelMetricLabel}>{t('usage_stats.success_rate')}</span>
+                        <span className={`${styles.modelMetricValue} ${successRateValueClass(model.successRate)}`.trim()}>
+                          {formatCredentialPercent(model.successRate)}
                         </span>
                       </span>
                       <span className={styles.modelMetric}>
