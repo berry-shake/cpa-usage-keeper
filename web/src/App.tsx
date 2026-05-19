@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import './index.css';
+import './App.css';
 import { ApiError, appPath, getSession, login, loginWithCPAAPIKey } from './lib/api';
 import type { AuthRole, AuthSessionAPIKeySummary } from './lib/types';
+import { AppFooter } from './components/AppFooter';
 import { KeyOverviewPage } from './pages/KeyOverviewPage';
 import { LoginPage } from './pages/LoginPage';
 import { UsagePage } from './pages/UsagePage';
@@ -120,19 +122,23 @@ function App() {
     }
   }, [clearSession, loadSession, t]);
 
+  let page: ReactNode;
   if (authState === 'checking') {
-    return <div style={{ minHeight: '100vh', background: 'var(--bg-secondary)' }} aria-busy="true" />;
+    page = <div className="app-checking" aria-busy="true" />;
+  } else if (authState === 'unauthenticated') {
+    page = <LoginPage loading={submitting} adminError={adminLoginError} apiKeyError={apiKeyLoginError} onPasswordSubmit={handlePasswordLogin} onAPIKeySubmit={handleAPIKeyLogin} />;
+  } else if (authRole === 'api_key_viewer') {
+    page = <KeyOverviewPage apiKey={sessionAPIKey} onAuthRequired={clearSession} />;
+  } else {
+    page = <UsagePage onAuthRequired={clearSession} />;
   }
 
-  if (authState === 'unauthenticated') {
-    return <LoginPage loading={submitting} adminError={adminLoginError} apiKeyError={apiKeyLoginError} onPasswordSubmit={handlePasswordLogin} onAPIKeySubmit={handleAPIKeyLogin} />;
-  }
-
-  if (authRole === 'api_key_viewer') {
-    return <KeyOverviewPage apiKey={sessionAPIKey} onAuthRequired={clearSession} />;
-  }
-
-  return <UsagePage onAuthRequired={clearSession} />;
+  return (
+    <div className="app-frame">
+      <main className="app-main">{page}</main>
+      <AppFooter />
+    </div>
+  );
 }
 
 export default App;

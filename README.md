@@ -6,22 +6,36 @@
 
 它依赖 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 作为后端 CPA 数据来源，目标是在 CPA 之上补充持久化存储与统计分析能力。服务会从 CPA Redis usage 队列消费事件并写入 SQLite，定时拉取 CPA metadata，暴露聚合 API，并提供内置 Web Dashboard 用于查看 usage、pricing、request health 和 model/API 维度的统计信息。
 
-> 使用前请确认 CPA 配置已开启 usage 统计：`usage-statistics-enabled: true`。
-
 <p float="left">
-  <img src="https://images.bitskyline.com/i/2026/05/3lgvpz.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/05/3lgenc.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/govoah.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/fu4lec.png" width="49%" />
+</p>
+<p float="left">
+  <img src="https://images.bitskyline.com/i/2026/05/fu43px.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/fu4gh3.png" width="49%" />
 </p>
 
 ## 功能特性
 
-- CPA usage 数据持久化到 SQLite
-- usage 聚合 API 与 pricing API
-- 内置 React Dashboard
+- 持久保存 CPA usage 数据
+- Dashboard 查看请求量、Token、成本、缓存命中率、成功率和延迟趋势
+- 支持按时间范围、模型、API Key 和来源筛选用量明细
+- 分析页面提供 Token 用量趋势、模型/API Key/AI Provider 构成和时段热力图
+- API Key 独立查询页，可按 CPA API Key 查看专属用量
+- 凭证页面展示 Auth File 与 AI Provider 使用情况，支持凭证限额查询与刷新
+- 可维护模型价格，用于成本估算和统计展示
 - 可选密码登录保护
 - SQLite 数据库本地备份与保留策略
 - Linux systemd 服务文件
 - Docker / Docker Compose 部署
+
+## 快速开始
+
+> 使用前请确认 CPA 配置已开启 usage 统计：`usage-statistics-enabled: true`。
+
+如果你需要快速启动，只需要使用本文 [Docker Compose](#docker-compose) 的配置示例，直接部署 CPA + Keeper。这是最快的部署方式。你也可以使用二进制版本，只需要配置 `CPA_BASE_URL`、`CPA_MANAGEMENT_KEY`、`WORK_DIR` 即可使用。
+
+如果你需要部署在公网环境，请启用`AUTH_ENABLED`，并配置`LOGIN_PASSWORD`以保护你的数据。
 
 ## 项目结构
 
@@ -31,9 +45,11 @@ internal/api/            HTTP 路由与处理器
 internal/app/            应用装配与启动
 internal/auth/           内存 session 鉴权
 internal/backup/         SQLite 数据库备份管理
+internal/benchmark/      聚合性能基准测试辅助
 internal/config/         环境配置加载
 internal/cpa/            CPA 客户端与类型定义
 internal/entities/       GORM 数据模型
+internal/helper/         后端通用辅助方法
 internal/logging/        日志初始化与保留策略
 internal/poller/         后台队列消费与 metadata 同步
 internal/quota/          quota 缓存、刷新与查询服务
@@ -42,7 +58,8 @@ internal/repository/     SQLite 访问与聚合逻辑
 internal/service/        usage、pricing 与身份数据服务
 internal/timeutil/       项目时区与时间工具
 internal/updatecheck/    GitHub Release 更新检查
-deploy/                  systemd、Docker 与部署资源
+internal/version/        构建版本信息
+deploy/linux/            Linux systemd 服务文件
 web/                     React + TypeScript 前端
 ```
 
@@ -66,7 +83,7 @@ cp .env.example .env
 | `TLS_CERT_FILE` | 启用 TLS 时必填 | - | HTTPS 证书文件路径 |
 | `TLS_KEY_FILE` | 启用 TLS 时必填 | - | HTTPS 私钥文件路径 |
 | `APP_BASE_PATH` | 否 | 根路径 | 子路径部署前缀，例如 `/cpa`；留空表示 `/` |
-| `TZ` | 否 | `Asia/Shanghai` | 项目业务时区，影响 Today、按天聚合、定时任务和日志时间 |
+| `TZ` | 否 | `Asia/Shanghai` | 统计和展示使用的时区；Today、按天统计、页面时间、日志时间和每日清理时间都会按这个时区计算 |
 | `REDIS_QUEUE_ADDR` | 否 | `CPA_BASE_URL` 主机名 + `8317` | CPA Redis/RESP TCP 地址；留空时会使用 `CPA_BASE_URL` 的主机名和默认端口 `8317`，且当 `CPA_BASE_URL` 为 https 时自动启用 TLS；非默认端口时填写 `host:port` |
 | `REDIS_QUEUE_TLS` | 否 | `false` | 是否使用 TLS 连接 Redis 队列；仅在 `REDIS_QUEUE_ADDR` 留空且 `CPA_BASE_URL` 为 https 时自动启用；如果显式设置了 `REDIS_QUEUE_ADDR`，需手动设为 `true` |
 | `REDIS_QUEUE_BATCH_SIZE` | 否 | `1000` | 每次最多拉取的队列记录数 |
@@ -279,7 +296,7 @@ docker compose down
 
 CPA 文件放在 `./cpa`，CPA Usage Keeper 数据放在 `./keeper`。
 
-## 子路径反代
+## Nginx反代
 
 部署到 `/cpa` 时设置 `APP_BASE_PATH=/cpa`，并在反向代理中保留该前缀：
 
@@ -291,6 +308,13 @@ location /cpa/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
+
+## Star History
+
+<p>
+  <img src="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&legend=top-left" />
+</p>
+
 
 ## License
 

@@ -6,22 +6,36 @@ CPA Usage Keeper is a standalone CPA usage persistence and dashboard service.
 
 It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) as the backend CPA data source and adds persistent storage and statistical analysis capabilities on top of CPA. The service consumes events from the CPA Redis usage queue into SQLite, periodically pulls CPA metadata, exposes aggregation APIs, and serves a built-in web dashboard for usage, pricing, request health, and model/API statistics.
 
-> Before using CPA Usage Keeper, make sure CPA usage statistics are enabled: `usage-statistics-enabled: true`.
-
 <p float="left">
-  <img src="https://images.bitskyline.com/i/2026/05/3lgvpz.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/05/3lgenc.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/govoah.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/fu4lec.png" width="49%" />
+</p>
+<p float="left">
+  <img src="https://images.bitskyline.com/i/2026/05/fu43px.png" width="49%" />
+  <img src="https://images.bitskyline.com/i/2026/05/fu4gh3.png" width="49%" />
 </p>
 
 ## Features
 
-- CPA usage persistence in SQLite
-- Aggregated usage and pricing APIs
-- Built-in React dashboard
+- Persist CPA usage data
+- Dashboard for request volume, tokens, cost, cache hit rate, success rate, and latency trends
+- Filter usage details by time range, model, API Key, and source
+- Analysis page for token trends, model/API Key/AI Provider composition, and hourly heatmaps
+- Standalone API Key usage page for querying usage by CPA API Key
+- Credentials page for Auth File and AI Provider usage, with credential quota lookup and refresh
+- Maintain model prices for cost estimation and reporting
 - Optional password login protection
 - Local SQLite database backups with retention
 - Linux systemd service file
 - Docker / Docker Compose deployment
+
+## Quick Start
+
+> Before using CPA Usage Keeper, make sure CPA usage statistics are enabled: `usage-statistics-enabled: true`.
+
+For the fastest setup, use the [Docker Compose](#docker-compose) example in this README to deploy CPA + Keeper together. You can also use the binary release; configure only `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY`, and `WORK_DIR` to get started.
+
+For public deployments, enable `AUTH_ENABLED` and configure `LOGIN_PASSWORD` to protect your data.
 
 ## Project Structure
 
@@ -31,9 +45,11 @@ internal/api/            HTTP routes and handlers
 internal/app/            App wiring and startup
 internal/auth/           In-memory session auth
 internal/backup/         SQLite database backup management
+internal/benchmark/      Aggregation benchmark helpers
 internal/config/         Environment config loading
 internal/cpa/            CPA client and types
 internal/entities/       GORM data models
+internal/helper/         Shared backend helpers
 internal/logging/        Logging setup and retention
 internal/poller/         Background queue consumption and metadata sync
 internal/quota/          Quota cache, refresh, and query services
@@ -42,7 +58,8 @@ internal/repository/     SQLite access and aggregations
 internal/service/        Usage, pricing, and identity services
 internal/timeutil/       Project timezone and time helpers
 internal/updatecheck/    GitHub Release update checks
-deploy/                  systemd, Docker, and deployment assets
+internal/version/        Build version metadata
+deploy/linux/            Linux systemd service file
 web/                     React + TypeScript frontend
 ```
 
@@ -66,7 +83,7 @@ cp .env.example .env
 | `TLS_CERT_FILE` | Required when TLS is enabled | - | HTTPS certificate file path |
 | `TLS_KEY_FILE` | Required when TLS is enabled | - | HTTPS private key file path |
 | `APP_BASE_PATH` | No | root path | Subpath prefix such as `/cpa`; empty means `/` |
-| `TZ` | No | `Asia/Shanghai` | Project business timezone; affects Today, daily aggregation, scheduled tasks, and log timestamps |
+| `TZ` | No | `Asia/Shanghai` | Timezone used for statistics and display; Today, daily totals, page timestamps, log timestamps, and daily cleanup are calculated in this timezone |
 | `REDIS_QUEUE_ADDR` | No | `CPA_BASE_URL` hostname + `8317` | CPA Redis/RESP TCP address; when empty, uses the `CPA_BASE_URL` hostname with port `8317` and auto-detects TLS from whether `CPA_BASE_URL` is https; set `host:port` for non-default ports |
 | `REDIS_QUEUE_TLS` | No | `false` | Use TLS for Redis queue connection; when `REDIS_QUEUE_ADDR` is set explicitly, enable this with `true` to use TLS |
 | `REDIS_QUEUE_BATCH_SIZE` | No | `1000` | Maximum queue records per pull |
@@ -279,7 +296,7 @@ docker compose down
 
 CPA files are stored under `./cpa`, and CPA Usage Keeper data is stored under `./keeper`.
 
-## Subpath reverse proxy
+## Nginx reverse proxy
 
 When serving under `/cpa`, set `APP_BASE_PATH=/cpa` and keep the prefix in your reverse proxy:
 
@@ -291,6 +308,12 @@ location /cpa/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
+
+## Star History
+
+<p>
+  <img src="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&legend=top-left" />
+</p>
 
 ## License
 
