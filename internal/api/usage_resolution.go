@@ -6,7 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// loadUsageResolutionData 为 Request Events 和 Credentials 加载 source 解析所需的活跃 usage identities。
+// loadUsageResolutionData 为 Request Events 和 Credentials 加载 source 解析所需的全部 usage identities（含软删除）。
+// Credentials 端 resolver 会把活跃/已删除分流到独立索引以保留历史可见性，Request Events 下拉自带 IsDeleted 过滤。
 func loadUsageResolutionData(
 	c *gin.Context,
 	usageIdentityProvider service.UsageIdentityProvider,
@@ -15,6 +16,5 @@ func loadUsageResolutionData(
 		return []entities.UsageIdentity{}, nil
 	}
 
-	// Request Events 的 Source 下拉和 Credentials 的展示解析只需要活跃身份，直接调用 SQL 层 active-only 查询。
-	return usageIdentityProvider.ListActiveUsageIdentities(c.Request.Context())
+	return usageIdentityProvider.ListUsageIdentities(c.Request.Context())
 }

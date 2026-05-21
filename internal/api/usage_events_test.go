@@ -460,16 +460,19 @@ func TestUsageCredentialsShowsDeletedProviderIdentityByName(t *testing.T) {
 		Failed:       false,
 		RequestCount: 2,
 	}}}
-	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
-		ID:           77,
-		Name:         "old-claude-account",
-		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
-		AuthTypeName: "apikey",
-		Identity:     "deleted-provider-identity",
-		Type:         "claude",
-		Provider:     "claude",
-		IsDeleted:    true,
-	}}}})
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{
+		activeItems: []entities.UsageIdentity{},
+		items: []entities.UsageIdentity{{
+			ID:           77,
+			Name:         "old-claude-account",
+			AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+			AuthTypeName: "apikey",
+			Identity:     "deleted-provider-identity",
+			Type:         "claude",
+			Provider:     "claude",
+			IsDeleted:    true,
+		}},
+	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
 	resp := httptest.NewRecorder()
 
@@ -499,16 +502,19 @@ func TestUsageCredentialsShowsDeletedProviderByAuthIndex(t *testing.T) {
 		Failed:       false,
 		RequestCount: 4,
 	}}}
-	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
-		ID:           88,
-		Name:         "retired-claude-account",
-		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
-		AuthTypeName: "apikey",
-		Identity:     "deleted-auth-idx",
-		Type:         "claude",
-		Provider:     "claude",
-		IsDeleted:    true,
-	}}}})
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{
+		activeItems: []entities.UsageIdentity{},
+		items: []entities.UsageIdentity{{
+			ID:           88,
+			Name:         "retired-claude-account",
+			AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+			AuthTypeName: "apikey",
+			Identity:     "deleted-auth-idx",
+			Type:         "claude",
+			Provider:     "claude",
+			IsDeleted:    true,
+		}},
+	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
 	resp := httptest.NewRecorder()
 
@@ -537,16 +543,19 @@ func TestUsageCredentialsShowsDeletedAuthFileIdentity(t *testing.T) {
 		Failed:       false,
 		RequestCount: 1,
 	}}}
-	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
-		ID:           99,
-		Name:         "old-user@example.com",
-		AuthType:     entities.UsageIdentityAuthTypeAuthFile,
-		AuthTypeName: "authfile",
-		Identity:     "deleted-authfile-hash",
-		Type:         "codex",
-		Provider:     "codex",
-		IsDeleted:    true,
-	}}}})
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{
+		activeItems: []entities.UsageIdentity{},
+		items: []entities.UsageIdentity{{
+			ID:           99,
+			Name:         "old-user@example.com",
+			AuthType:     entities.UsageIdentityAuthTypeAuthFile,
+			AuthTypeName: "authfile",
+			Identity:     "deleted-authfile-hash",
+			Type:         "codex",
+			Provider:     "codex",
+			IsDeleted:    true,
+		}},
+	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
 	resp := httptest.NewRecorder()
 
