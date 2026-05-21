@@ -468,14 +468,75 @@ func TestUsageCredentialsIgnoresDeletedUsageIdentityResolution(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"credentials":[`) || !contains(body, `"total_count":2`) {
-		t.Fatalf("unexpected response body: %s", body)
+	if body != `{"credentials":[]}` {
+		t.Fatalf("expected deleted credential row to be omitted, got %s", body)
 	}
-	if contains(body, `Deleted Provider`) || contains(body, `"source_key":"provider:77"`) {
-		t.Fatalf("expected deleted identity resolution to be ignored, got %s", body)
+}
+
+func TestUsageCredentialsResolvesProviderByAuthIndex(t *testing.T) {
+	// cli-proxy-api 把原始 API key 写到 source 字段，auth_index 才等于 identity 哈希。
+	// resolver 必须能靠 auth_index 命中活跃 AI provider 身份，否则会落回 openai 兜底。
+	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
+		Source:       "sk-c883a149e217490bb3c2ad02ac445721",
+		AuthIndex:    "2c00929dd6383c3d",
+		Model:        "claude-sonnet",
+		Failed:       false,
+		RequestCount: 5,
+		TotalTokens:  500,
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
+		ID:           42,
+		Name:         "claude-account",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "2c00929dd6383c3d",
+		Type:         "claude",
+		Provider:     "claude",
+	}}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
-	if contains(body, `sk-deleted-provider-key`) {
-		t.Fatalf("expected raw API key to stay redacted when deleted identity is ignored, got %s", body)
+	body := resp.Body.String()
+	if !contains(body, `"source_key":"provider:42"`) {
+		t.Fatalf("expected provider:42 bucket from auth_index fallback, got %s", body)
+	}
+	if !contains(body, `"source_type":"claude"`) {
+		t.Fatalf("expected claude source type, got %s", body)
+	}
+	if contains(body, `"source":"openai"`) || contains(body, `provider:fallback:openai`) {
+		t.Fatalf("expected no openai fallback bucket, got %s", body)
+	}
+	if contains(body, `sk-c883a149e217490bb3c2ad02ac445721`) {
+		t.Fatalf("expected raw API key to be redacted, got %s", body)
+	}
+}
+
+func TestUsageCredentialsSkipsRowsWithoutActiveIdentity(t *testing.T) {
+	// 既没有 source 命中、也没有 auth_index 命中时，应当直接丢弃，不再走 sk-/openai 猜测桶。
+	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
+		Source:       "sk-stranger-key",
+		AuthIndex:    "orphan-auth-index",
+		Model:        "gpt-4",
+		Failed:       false,
+		RequestCount: 3,
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if body != `{"credentials":[]}` {
+		t.Fatalf("expected orphan row to be omitted, got %s", body)
 	}
 }
 
