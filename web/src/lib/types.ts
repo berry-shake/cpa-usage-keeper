@@ -151,6 +151,7 @@ export interface UsageEvent {
   id?: string
   timestamp: string
   model: string
+  reasoning_effort?: string
   source: string
   source_raw?: string
   source_type?: string

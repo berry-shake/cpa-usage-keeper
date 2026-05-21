@@ -39,6 +39,7 @@ type RequestEventRow = {
   timestampMs: number;
   timestampLabel: string;
   model: string;
+  reasoningEffort: string;
   sourceRaw: string;
   source: string;
   sourceType: string;
@@ -153,6 +154,7 @@ export function RequestEventsDetailsCard({
       const source = String(event.source ?? '').trim() || '-';
       const sourceType = String(event.source_type ?? '').trim();
       const model = String(event.model ?? '').trim() || '-';
+      const reasoningEffort = String(event.reasoning_effort ?? '').trim() || '-';
       const inputTokens = Math.max(toNumber(event.tokens?.input_tokens), 0);
       const outputTokens = Math.max(toNumber(event.tokens?.output_tokens), 0);
       const reasoningTokens = Math.max(toNumber(event.tokens?.reasoning_tokens), 0);
@@ -184,6 +186,7 @@ export function RequestEventsDetailsCard({
         timestampMs: Number.isNaN(timestampMs) ? 0 : timestampMs,
         timestampLabel: formatRequestEventTimestamp(timestamp),
         model,
+        reasoningEffort,
         sourceRaw: sourceRaw || '-',
         source,
         sourceType,
@@ -281,6 +284,7 @@ export function RequestEventsDetailsCard({
     const csvHeader = [
       'timestamp',
       'model',
+      'reasoning_effort',
       'source',
       'source_raw',
       'auth_index',
@@ -298,6 +302,7 @@ export function RequestEventsDetailsCard({
       [
         row.timestamp,
         row.model,
+        row.reasoningEffort === '-' ? '' : row.reasoningEffort,
         row.source,
         row.sourceRaw,
         row.authIndex,
@@ -328,6 +333,7 @@ export function RequestEventsDetailsCard({
     const payload = rows.map((row) => ({
       timestamp: row.timestamp,
       model: row.model,
+      reasoning_effort: row.reasoningEffort === '-' ? '' : row.reasoningEffort,
       source: row.source,
       source_raw: row.sourceRaw,
       auth_index: row.authIndex,
@@ -438,6 +444,7 @@ export function RequestEventsDetailsCard({
                 <tr>
                   <th>{t('usage_stats.request_events_timestamp')}</th>
                   <th>{t('usage_stats.model_name')}</th>
+                  <th>{t('usage_stats.reasoning_effort')}</th>
                   <th>{t('usage_stats.request_events_source')}</th>
                   <th>{t('usage_stats.request_events_result')}</th>
                   {hasLatencyData && <th title={latencyHint}>{t('usage_stats.time')}</th>}
@@ -457,6 +464,7 @@ export function RequestEventsDetailsCard({
                       {row.timestampLabel}
                     </td>
                     <td className={styles.modelCell}>{row.model}</td>
+                    <td>{row.reasoningEffort}</td>
                     <td className={styles.requestEventsSourceCell} title={row.source}>
                       <span className={styles.requestEventsSourceStack}>
                         <span className={styles.requestEventsSourceValue}>{row.source}</span>
