@@ -400,7 +400,14 @@ func analysisHourlyStatsEnd(filter dto.UsageQueryFilter, fullEnd time.Time) time
 	if filter.StartTime == nil || filter.EndTime == nil {
 		return fullEnd
 	}
-	if filter.Range != "today" && filter.Range != "yesterday" {
+	switch filter.Range {
+	case "4h", "8h", "12h", "24h":
+		if timeutil.NormalizeStorageTime(*filter.EndTime).After(fullEnd) {
+			return fullEnd.Add(time.Hour)
+		}
+		return fullEnd
+	case "today", "yesterday":
+	default:
 		return fullEnd
 	}
 	start := timeutil.NormalizeStorageTime(*filter.StartTime).Truncate(time.Hour)

@@ -192,7 +192,7 @@ export function PriceSettingsCard({
           {t('usage_stats.model_price_sync')}
         </Button>
       }
-      className={`${styles.detailsFixedCard} ${styles.priceSettingsCard}`}
+      className={`${styles.detailsFixedCard} ${styles.pricingFixedCard}`}
     >
       <div className={styles.pricingSection}>
         {loading && modelNames.length === 0 && Object.keys(modelPrices).length === 0 ? (
