@@ -66,6 +66,7 @@ func usageSourceResolutionFromIdentity(item entities.UsageIdentity, fallbackIden
 		identityType,
 		redact.APIKeyDisplayName(fallbackIdentity),
 	)
+	displayName = appendIdentityQualifierIfGeneric(item, displayName)
 	sourceKey := "provider:" + uintToString(item.ID)
 	if item.ID == 0 {
 		sourceKey = "provider:" + redact.APIKeyDisplayName(fallbackIdentity)
@@ -75,6 +76,31 @@ func usageSourceResolutionFromIdentity(item entities.UsageIdentity, fallbackIden
 		SourceType:  identityType,
 		SourceKey:   sourceKey,
 	}
+}
+
+// appendIdentityQualifierIfGeneric 兜底场景：AI provider 身份 name 是裸的 provider/type 名（如 "claude"），
+// 且 base_url/prefix 都空（helper 退化到裸 name），无辨识度。拼上 identity 前 8 字符避免多桶看起来一模一样。
+// 已删除身份在生产里大概率走这条路径，因为 base_url/prefix 字段都为 NULL。
+func appendIdentityQualifierIfGeneric(item entities.UsageIdentity, displayName string) string {
+	trimmed := strings.TrimSpace(displayName)
+	if trimmed == "" || strings.Contains(trimmed, "(") {
+		return displayName
+	}
+	lower := strings.ToLower(trimmed)
+	provider := strings.ToLower(strings.TrimSpace(item.Provider))
+	typ := strings.ToLower(strings.TrimSpace(item.Type))
+	if lower != provider && lower != typ {
+		return displayName
+	}
+	identity := strings.TrimSpace(item.Identity)
+	if identity == "" || looksLikeRawAPIKey(identity) {
+		return displayName
+	}
+	qualifier := identity
+	if runes := []rune(qualifier); len(runes) > 8 {
+		qualifier = string(runes[:8])
+	}
+	return trimmed + "(" + qualifier + ")"
 }
 
 // resolve 命中活跃 identity 时返回解析结果，活跃未命中再查已删除身份；都未命中由调用方丢弃，避免猜测桶（openai/raw 等）污染 Credentials。
@@ -157,6 +183,13 @@ func isSensitiveUsageIdentityValue(value, rawIdentity string) bool {
 	if raw := strings.TrimSpace(rawIdentity); raw != "" && strings.Contains(trimmed, raw) {
 		return true
 	}
-	lower := strings.ToLower(trimmed)
+	return looksLikeRawAPIKey(trimmed)
+}
+
+func looksLikeRawAPIKey(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
 	return strings.Contains(lower, "sk-") || strings.Contains(lower, "aiza") || strings.Contains(lower, "cr_") || strings.Contains(lower, "cr-")
 }

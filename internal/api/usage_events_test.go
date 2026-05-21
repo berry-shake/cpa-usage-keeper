@@ -573,6 +573,80 @@ func TestUsageCredentialsShowsDeletedAuthFileIdentity(t *testing.T) {
 	}
 }
 
+func TestUsageCredentialsQualifiesGenericProviderNameWithIdentity(t *testing.T) {
+	// 生产场景：被删除的 AI provider 身份 name 直接是 "claude"，prefix/base_url 全空，
+	// 多条同名记录在 UI 上完全看不出差别。resolver 在这种情况下应拼上 identity 前 8 字符。
+	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
+		Source:       "9bcac0e86c96ee0b",
+		Model:        "claude-sonnet",
+		Failed:       false,
+		RequestCount: 7,
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{
+		activeItems: []entities.UsageIdentity{},
+		items: []entities.UsageIdentity{{
+			ID:           19,
+			Name:         "claude",
+			AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+			AuthTypeName: "apikey",
+			Identity:     "9bcac0e86c96ee0b",
+			Type:         "claude",
+			Provider:     "claude",
+			IsDeleted:    true,
+		}},
+	}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"source":"claude(9bcac0e8)"`) {
+		t.Fatalf("expected generic name qualified with identity prefix, got %s", body)
+	}
+	if !contains(body, `"source_key":"provider:19"`) {
+		t.Fatalf("expected provider:19 bucket key, got %s", body)
+	}
+}
+
+func TestUsageCredentialsKeepsBaseURLQualifierForActiveProvider(t *testing.T) {
+	// 活跃身份带 base_url 时 helper 已经拼好 qualifier，resolver 不应再追加 identity 后缀。
+	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
+		Source:       "2c00929dd6383c3d",
+		Model:        "claude-sonnet",
+		Failed:       false,
+		RequestCount: 3,
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
+		ID:           99364,
+		Name:         "claude",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "2c00929dd6383c3d",
+		Type:         "claude",
+		Provider:     "claude",
+		BaseURL:      "https://api.deepseek.com/anthropic",
+	}}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"source":"claude(api.deepseek.com/anthropic)"`) {
+		t.Fatalf("expected base_url qualifier preserved, got %s", body)
+	}
+	if contains(body, `claude(api.deepseek.com/anthropic)(2c00929d)`) {
+		t.Fatalf("expected no double qualifier appended, got %s", body)
+	}
+}
+
 func TestUsageCredentialsResolvesProviderByAuthIndex(t *testing.T) {
 	// cli-proxy-api 把原始 API key 写到 source 字段，auth_index 才等于 identity 哈希。
 	// resolver 必须能靠 auth_index 命中活跃 AI provider 身份，否则会落回 openai 兜底。
