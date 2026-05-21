@@ -452,13 +452,24 @@ func TestUsageEventSourceFilterOptionsReturnsIdentitySources(t *testing.T) {
 		t.Fatalf("expected deleted source filter options to be omitted, got %s", body)
 	}
 }
-func TestUsageCredentialsIgnoresDeletedUsageIdentityResolution(t *testing.T) {
+func TestUsageCredentialsShowsDeletedProviderIdentityByName(t *testing.T) {
+	// 软删除的身份依然在 usage_identities 表里完整保留，凭证统计页应按 name 显示，
+	// 否则历史 events 会因为 identity 被删而彻底失踪。
 	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
-		Source:       "sk-deleted-provider-key",
+		Source:       "deleted-provider-identity",
 		Failed:       false,
 		RequestCount: 2,
 	}}}
-	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{ID: 77, Name: "Deleted Provider", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "sk-deleted-provider-key", Type: "openai", Provider: "Deleted Provider", IsDeleted: true}}}})
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
+		ID:           77,
+		Name:         "old-claude-account",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "deleted-provider-identity",
+		Type:         "claude",
+		Provider:     "claude",
+		IsDeleted:    true,
+	}}}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
 	resp := httptest.NewRecorder()
 
@@ -468,8 +479,88 @@ func TestUsageCredentialsIgnoresDeletedUsageIdentityResolution(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	body := resp.Body.String()
-	if body != `{"credentials":[]}` {
-		t.Fatalf("expected deleted credential row to be omitted, got %s", body)
+	if !contains(body, `"source":"old-claude-account"`) {
+		t.Fatalf("expected deleted identity name as display, got %s", body)
+	}
+	if !contains(body, `"source_key":"provider:77"`) {
+		t.Fatalf("expected provider:77 bucket key for deleted identity, got %s", body)
+	}
+	if !contains(body, `"source_type":"claude"`) {
+		t.Fatalf("expected claude source_type for deleted identity, got %s", body)
+	}
+}
+
+func TestUsageCredentialsShowsDeletedProviderByAuthIndex(t *testing.T) {
+	// cli-proxy-api 把原始 API key 写到 source 字段，identity 被删后仍要能靠 auth_index 命中。
+	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
+		Source:       "sk-deleted-raw-key",
+		AuthIndex:    "deleted-auth-idx",
+		Model:        "claude-sonnet",
+		Failed:       false,
+		RequestCount: 4,
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
+		ID:           88,
+		Name:         "retired-claude-account",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "deleted-auth-idx",
+		Type:         "claude",
+		Provider:     "claude",
+		IsDeleted:    true,
+	}}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"source":"retired-claude-account"`) {
+		t.Fatalf("expected deleted identity name as display via auth_index, got %s", body)
+	}
+	if !contains(body, `"source_key":"provider:88"`) {
+		t.Fatalf("expected provider:88 bucket key, got %s", body)
+	}
+	if contains(body, `sk-deleted-raw-key`) {
+		t.Fatalf("expected raw API key to be redacted, got %s", body)
+	}
+}
+
+func TestUsageCredentialsShowsDeletedAuthFileIdentity(t *testing.T) {
+	// 已删除的 auth-file identity 也要保留可见性，按 name 显示。
+	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
+		AuthIndex:    "deleted-authfile-hash",
+		Model:        "gpt-4",
+		Failed:       false,
+		RequestCount: 1,
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
+		ID:           99,
+		Name:         "old-user@example.com",
+		AuthType:     entities.UsageIdentityAuthTypeAuthFile,
+		AuthTypeName: "authfile",
+		Identity:     "deleted-authfile-hash",
+		Type:         "codex",
+		Provider:     "codex",
+		IsDeleted:    true,
+	}}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"source":"old-user@example.com"`) {
+		t.Fatalf("expected deleted auth-file name as display, got %s", body)
+	}
+	if !contains(body, `"source_key":"auth:deleted-authfile-hash"`) {
+		t.Fatalf("expected auth: bucket key, got %s", body)
 	}
 }
 

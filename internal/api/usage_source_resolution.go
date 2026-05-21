@@ -10,33 +10,45 @@ import (
 )
 
 type usageSourceResolver struct {
-	authIdentities     map[string]entities.UsageIdentity
-	providerIdentities map[string]entities.UsageIdentity
+	authIdentities            map[string]entities.UsageIdentity
+	providerIdentities        map[string]entities.UsageIdentity
+	deletedAuthIdentities     map[string]entities.UsageIdentity
+	deletedProviderIdentities map[string]entities.UsageIdentity
 }
 
-// newUsageSourceResolver 把活跃 usage identity 建成内存索引，供 Credentials 展示快速解析 source。
+// newUsageSourceResolver 把 usage identity 建成内存索引，供 Credentials 展示快速解析 source。
+// 活跃身份优先；已删除身份单独建索引，活跃路径未命中时再兜底，保留历史 events 可见性。
 func newUsageSourceResolver(identities []entities.UsageIdentity) usageSourceResolver {
 	authIdentities := make(map[string]entities.UsageIdentity, len(identities))
 	providerIdentities := make(map[string]entities.UsageIdentity, len(identities))
+	deletedAuthIdentities := make(map[string]entities.UsageIdentity)
+	deletedProviderIdentities := make(map[string]entities.UsageIdentity)
 	for _, identity := range identities {
-		if identity.IsDeleted {
-			continue
-		}
 		key := strings.TrimSpace(identity.Identity)
 		if key == "" {
 			continue
 		}
 		switch identity.AuthType {
 		case entities.UsageIdentityAuthTypeAuthFile:
-			authIdentities[key] = identity
+			if identity.IsDeleted {
+				deletedAuthIdentities[key] = identity
+			} else {
+				authIdentities[key] = identity
+			}
 		case entities.UsageIdentityAuthTypeAIProvider:
-			providerIdentities[key] = identity
+			if identity.IsDeleted {
+				deletedProviderIdentities[key] = identity
+			} else {
+				providerIdentities[key] = identity
+			}
 		}
 	}
 
 	return usageSourceResolver{
-		authIdentities:     authIdentities,
-		providerIdentities: providerIdentities,
+		authIdentities:            authIdentities,
+		providerIdentities:        providerIdentities,
+		deletedAuthIdentities:     deletedAuthIdentities,
+		deletedProviderIdentities: deletedProviderIdentities,
 	}
 }
 
@@ -65,7 +77,7 @@ func usageSourceResolutionFromIdentity(item entities.UsageIdentity, fallbackIden
 	}
 }
 
-// resolve 只在命中活跃 identity 时返回解析结果，未命中行由调用方丢弃，避免猜测桶（openai/raw 等）污染 Credentials。
+// resolve 命中活跃 identity 时返回解析结果，活跃未命中再查已删除身份；都未命中由调用方丢弃，避免猜测桶（openai/raw 等）污染 Credentials。
 func (r usageSourceResolver) resolve(rawSource string, authIndex string) (usageSourceResolution, bool) {
 	normalizedSource := strings.TrimSpace(rawSource)
 	normalizedAuthIndex := strings.TrimSpace(authIndex)
@@ -82,16 +94,34 @@ func (r usageSourceResolver) resolve(rawSource string, authIndex string) (usageS
 			return usageSourceResolutionFromIdentity(item, normalizedAuthIndex), true
 		}
 		if identity, ok := r.authIdentities[normalizedAuthIndex]; ok {
-			displayName := firstNonEmptyString(identity.Name, normalizedAuthIndex)
-			return usageSourceResolution{
-				DisplayName: displayName,
-				SourceType:  firstNonEmptyString(identity.Type, identity.Provider),
-				SourceKey:   "auth:" + normalizedAuthIndex,
-			}, true
+			return resolveAuthFileIdentity(identity, normalizedAuthIndex), true
+		}
+	}
+
+	if normalizedSource != "" {
+		if item, ok := r.deletedProviderIdentities[normalizedSource]; ok {
+			return usageSourceResolutionFromIdentity(item, normalizedSource), true
+		}
+	}
+	if normalizedAuthIndex != "" {
+		if item, ok := r.deletedProviderIdentities[normalizedAuthIndex]; ok {
+			return usageSourceResolutionFromIdentity(item, normalizedAuthIndex), true
+		}
+		if identity, ok := r.deletedAuthIdentities[normalizedAuthIndex]; ok {
+			return resolveAuthFileIdentity(identity, normalizedAuthIndex), true
 		}
 	}
 
 	return usageSourceResolution{}, false
+}
+
+func resolveAuthFileIdentity(identity entities.UsageIdentity, normalizedAuthIndex string) usageSourceResolution {
+	displayName := firstNonEmptyString(identity.Name, normalizedAuthIndex)
+	return usageSourceResolution{
+		DisplayName: displayName,
+		SourceType:  firstNonEmptyString(identity.Type, identity.Provider),
+		SourceKey:   "auth:" + normalizedAuthIndex,
+	}
 }
 
 func uintToString(value int64) string {
