@@ -272,9 +272,10 @@ func TestRedisIngestRunnerInboxWriteFailureDoesNotConsumeFallbackSource(t *testi
 	defer cancel()
 	go func() { _ = runner.Run(ctx) }()
 
-	_ = waitForStatus(t, runner, func(status poller.Status) bool {
-		return strings.Contains(status.LastError, "redis ingest inbox write failed")
-	})
+	attempt := writer.waitForAttempt(t)
+	if attempt.source != poller.RedisIngestSourceRedisPull {
+		t.Fatalf("expected failed write attempt from Redis source, got %q", attempt.source)
+	}
 	cancel()
 	if calls := httpSource.callCount(); calls != 0 {
 		t.Fatalf("expected writer failure not to consume HTTP fallback source, got %d calls", calls)
@@ -381,26 +382,39 @@ type fakeInboxInsert struct {
 }
 
 type fakeInboxWriter struct {
-	mu      sync.Mutex
-	inserts []fakeInboxInsert
-	ch      chan fakeInboxInsert
-	err     error
+	mu       sync.Mutex
+	inserts  []fakeInboxInsert
+	attempts chan fakeInboxInsert
+	ch       chan fakeInboxInsert
+	err      error
 }
 
 func newFakeInboxWriter() *fakeInboxWriter {
-	return &fakeInboxWriter{ch: make(chan fakeInboxInsert, 10)}
+	return &fakeInboxWriter{attempts: make(chan fakeInboxInsert, 10), ch: make(chan fakeInboxInsert, 10)}
 }
 
 func (w *fakeInboxWriter) Insert(_ context.Context, source string, messages []string, _ time.Time) (int, error) {
+	entry := fakeInboxInsert{source: source, messages: append([]string(nil), messages...)}
+	w.attempts <- entry
 	if w.err != nil {
 		return 0, w.err
 	}
-	entry := fakeInboxInsert{source: source, messages: append([]string(nil), messages...)}
 	w.mu.Lock()
 	w.inserts = append(w.inserts, entry)
 	w.mu.Unlock()
 	w.ch <- entry
 	return len(messages), nil
+}
+
+func (w *fakeInboxWriter) waitForAttempt(t *testing.T) fakeInboxInsert {
+	t.Helper()
+	select {
+	case entry := <-w.attempts:
+		return entry
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for write attempt")
+		return fakeInboxInsert{}
+	}
 }
 
 func (w *fakeInboxWriter) waitForInsert(t *testing.T) fakeInboxInsert {

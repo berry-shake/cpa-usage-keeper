@@ -33,6 +33,7 @@ import {
   AuthFileCredentialsSection,
   AiProviderCredentialsSection,
   CredentialStatsCard,
+  CredentialProviderFilterBar,
   RequestEventsDetailsCard,
   TokenBreakdownChart,
   CostTrendChart,
@@ -43,6 +44,7 @@ import {
   useChartData,
   useCredentialsTabData
 } from '@/components/usage';
+import { filterCredentialsByProvider, type CredentialProviderFilterKey } from '@/components/usage/credentials/credentialProviderFilters';
 import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
 import {
   getModelNamesFromUsage,
@@ -581,6 +583,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     onAuthRequired,
   });
   const refreshCredentials = credentialsData.refresh;
+  const [credentialProviderFilter, setCredentialProviderFilter] = useState<CredentialProviderFilterKey>('all');
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
@@ -599,6 +602,18 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       ...apiKeyOptions.map((option) => ({ value: option.id, label: option.label })),
     ],
     [apiKeyOptions, t],
+  );
+  const credentialRowsForProviderFilter = useMemo(
+    () => [...credentialsData.authFileRows, ...credentialsData.aiProviderRows],
+    [credentialsData.aiProviderRows, credentialsData.authFileRows],
+  );
+  const filteredAuthFileCredentialRows = useMemo(
+    () => filterCredentialsByProvider(credentialsData.authFileRows, credentialProviderFilter),
+    [credentialProviderFilter, credentialsData.authFileRows],
+  );
+  const filteredAiProviderCredentialRows = useMemo(
+    () => filterCredentialsByProvider(credentialsData.aiProviderRows, credentialProviderFilter),
+    [credentialProviderFilter, credentialsData.aiProviderRows],
   );
   const themeOptions = useMemo(
     () =>
@@ -1712,9 +1727,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   loading={credentialStatsLoading}
                 />
                 {credentialsData.error && <div className={styles.errorBox}>{credentialsData.error}</div>}
+                <CredentialProviderFilterBar
+                  rows={credentialRowsForProviderFilter}
+                  value={credentialProviderFilter}
+                  onChange={setCredentialProviderFilter}
+                />
                 <div className={styles.credentialsSections}>
                   <AuthFileCredentialsSection
-                    rows={credentialsData.authFileRows}
+                    rows={filteredAuthFileCredentialRows}
                     total={credentialsData.authFileTotal}
                     page={credentialsData.authFilePage}
                     totalPages={credentialsData.authFileTotalPages}
@@ -1732,7 +1752,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                     onRefreshQuotaForAuthIndex={credentialsData.refreshQuotaForAuthIndex}
                   />
                   <AiProviderCredentialsSection
-                    rows={credentialsData.aiProviderRows}
+                    rows={filteredAiProviderCredentialRows}
                     total={credentialsData.aiProviderTotal}
                     page={credentialsData.aiProviderPage}
                     totalPages={credentialsData.aiProviderTotalPages}
