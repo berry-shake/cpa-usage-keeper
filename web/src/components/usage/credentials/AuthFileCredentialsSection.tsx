@@ -1,10 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { IconRefreshCw } from '@/components/ui/icons'
+import quotaCostIcon from '@/assets/icons/quota-cost.svg'
+import quotaTokenIcon from '@/assets/icons/quota-token.svg'
 import styles from './CredentialSections.module.scss'
 import type { AuthFileCredentialRow, DisplayQuota, PlanTypeTone } from './credentialViewModels'
 import type { UsageIdentityPageSort } from '@/lib/api'
 import { CredentialBadge, CredentialRowShell, CredentialSectionShell, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
+
+type Translate = (key: string, options?: Record<string, string>) => string
 
 interface AuthFileCredentialsSectionProps {
   rows: AuthFileCredentialRow[]
@@ -178,25 +182,40 @@ export function formatQuotaResetLabel(resetAt: string): string {
   if (!Number.isFinite(resetMs)) {
     return ''
   }
-  const remainingMinutes = Math.max(0, Math.ceil((resetMs - Date.now()) / 60_000))
-  const days = Math.floor(remainingMinutes / 1_440)
-  const hours = Math.floor((remainingMinutes % 1_440) / 60)
-  const minutes = remainingMinutes % 60
   const month = String(resetTime.getMonth() + 1).padStart(2, '0')
   const day = String(resetTime.getDate()).padStart(2, '0')
   const hour = String(resetTime.getHours()).padStart(2, '0')
   const minute = String(resetTime.getMinutes()).padStart(2, '0')
-  const duration = days > 0 ? `${days}d${hours}h${minutes}m` : `${hours}h${minutes}m`
-  return `${duration} (${month}/${day} ${hour}:${minute})`
+  return `${month}/${day} ${hour}:${minute}`
+}
+
+export function formatQuotaResetDuration(resetAt: string): string {
+  const resetMs = new Date(resetAt).getTime()
+  if (!Number.isFinite(resetMs)) {
+    return ''
+  }
+  const remainingMinutes = Math.max(0, Math.ceil((resetMs - Date.now()) / 60_000))
+  const days = Math.floor(remainingMinutes / 1_440)
+  const hours = Math.floor((remainingMinutes % 1_440) / 60)
+  const minutes = remainingMinutes % 60
+  return days > 0 ? `${days}d${hours}h${minutes}m` : `${hours}h${minutes}m`
+}
+
+export function formatQuotaWindowUsageAriaLabel(t: Translate, windowUsage: NonNullable<DisplayQuota['windowUsage']>): string {
+  return t('usage_stats.credentials_quota_window_usage_aria', {
+    tokens: windowUsage.tokens,
+    cost: windowUsage.cost,
+  })
 }
 
 function QuotaBar({ quota }: { quota: DisplayQuota }) {
-  // 条宽使用剩余额度百分比，颜色跟随剩余风险状态从绿到黄到红。
   const { t } = useTranslation()
+  // 条宽使用剩余额度百分比，颜色跟随剩余风险状态从绿到黄到红。
   const percent = quota.barPercent ?? 0
   const width = `${Math.max(0, Math.min(100, percent))}%`
-  const percentLabel = quota.barPercent === null ? '' : t('usage_stats.credentials_quota_percent_remaining', { percent: `${Math.round(quota.barPercent)}%` })
+  const percentLabel = quota.barPercent === null ? '' : `${Math.round(quota.barPercent)}%`
   const resetLabel = quota.resetText ? formatQuotaResetLabel(quota.resetText) : ''
+  const resetDuration = quota.resetText ? formatQuotaResetDuration(quota.resetText) : ''
 
   return (
     <div className={styles.credentialQuotaBarBlock}>
@@ -204,9 +223,10 @@ function QuotaBar({ quota }: { quota: DisplayQuota }) {
         <span className={styles.credentialQuotaLabelGroup}>
           <span>{quota.label}</span>
         </span>
-        {percentLabel && (
+        {(resetDuration || percentLabel) && (
           <span className={styles.credentialQuotaValueGroup}>
-            <strong>{percentLabel}</strong>
+            {resetDuration && <span className={styles.credentialQuotaResetDuration}>{resetDuration}</span>}
+            {percentLabel && <strong>{percentLabel}</strong>}
           </span>
         )}
       </div>
@@ -214,6 +234,18 @@ function QuotaBar({ quota }: { quota: DisplayQuota }) {
         <span className={`${styles.credentialQuotaFill} ${credentialToneClassName('credentialQuotaFill', quota.status)}`.trim()} style={{ width }} />
       </div>
       <div className={styles.credentialQuotaMeta}>
+        {quota.windowUsage && (
+          <strong className={styles.credentialQuotaWindowUsage} aria-label={formatQuotaWindowUsageAriaLabel(t, quota.windowUsage)}>
+            <span className={styles.credentialQuotaUsageMetric}>
+              <img src={quotaTokenIcon} alt="" aria-hidden="true" />
+              <span>{quota.windowUsage.tokens}</span>
+            </span>
+            <span className={styles.credentialQuotaUsageMetric}>
+              <img src={quotaCostIcon} alt="" aria-hidden="true" />
+              <span>{quota.windowUsage.cost}</span>
+            </span>
+          </strong>
+        )}
         {resetLabel && <span>{resetLabel}</span>}
       </div>
     </div>

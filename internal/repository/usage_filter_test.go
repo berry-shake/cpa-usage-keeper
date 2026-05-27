@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"cpa-usage-keeper/internal/repository/dto"
 	"math"
 	"path/filepath"
 	"reflect"
@@ -12,6 +11,8 @@ import (
 
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
 )
@@ -892,7 +893,7 @@ func TestCalculateUsageEventCostDoesNotDoubleChargeReasoningTokens(t *testing.T)
 		CachePricePer1M:      1,
 	}
 
-	cost := calculateUsageEventCost(event, pricing)
+	cost := helper.CalculateUsageEventCost(event, pricing)
 
 	if cost != 46.4 {
 		t.Fatalf("expected reasoning tokens not to be added to completion cost, got %f", cost)

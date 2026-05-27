@@ -38,6 +38,13 @@ type Options struct {
 	EnvFile string
 }
 
+type QuotaRunner interface {
+	SetRefreshContext(context.Context)
+	StopRefreshTasks()
+	WaitRefreshTasks()
+	StartAutoRefresh(context.Context) error
+}
+
 type App struct {
 	Config            *config.Config
 	DB                *gorm.DB
@@ -47,6 +54,8 @@ type App struct {
 	RedisProcess      Runner
 	Maintenance       *StorageCleanupRunner
 	MetadataSync      *MetadataSyncRunner
+	QuotaService      QuotaRunner
+	QuotaAutoRefresh  QuotaRunner
 	BackupMaintenance *DatabaseBackupRunner
 	LogCloser         io.Closer
 
@@ -135,7 +144,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		logrus.WithField("cpa_base_url", cfg.CPABaseURL).Warn("TLS certificate verification is disabled for CPA and Redis queue connections")
 	}
 	pricingService := service.NewPricingService(db, cpaClient)
-	quotaService := quota.NewService(db, cpaClient)
+	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit, AutoRefreshInterval: cfg.QuotaAutoRefreshInterval})
 	sessionManager := auth.NewSessionManager(cfg.AuthSessionTTL)
 	authHandler := api.NewAuthHandler(api.AuthConfig{
 		Enabled:       cfg.AuthEnabled,
@@ -153,6 +162,8 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		RedisProcess:      redisProcessRunner,
 		Maintenance:       NewStorageCleanupRunner(syncService),
 		MetadataSync:      NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval),
+		QuotaService:      quotaService,
+		QuotaAutoRefresh:  quotaAutoRefreshService(cfg, quotaService),
 		BackupMaintenance: backupMaintenance,
 		LogCloser:         logCloser,
 		Router: api.NewRouter(
@@ -172,10 +183,24 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 				UsageIdentity: usageIdentityService,
 				Quota:         quotaService,
 				CPAAPIKeys:    cpaAPIKeyService,
-				Status:        api.StatusRouteConfig{CPAPublicURL: cfg.CPAPublicURL},
+				Status:        api.StatusRouteConfig{CPAPublicURL: cfg.CPAPublicURL, ActiveRecorder: quotaActiveRecorder(cfg, quotaService)},
 			},
 		),
 	}, nil
+}
+
+func quotaActiveRecorder(cfg config.Config, service *quota.Service) api.ActiveStatusRecorder {
+	if !cfg.QuotaAutoRefreshEnabled {
+		return nil
+	}
+	return service
+}
+
+func quotaAutoRefreshService(cfg config.Config, service *quota.Service) QuotaRunner {
+	if !cfg.QuotaAutoRefreshEnabled {
+		return nil
+	}
+	return service
 }
 
 func closeGormDB(db *gorm.DB) error {
@@ -195,6 +220,9 @@ func (a *App) Close() error {
 	}
 
 	a.stopBackgroundTasks()
+	if a.QuotaService != nil {
+		a.QuotaService.StopRefreshTasks()
+	}
 
 	var closeErr error
 	if a.DB != nil {
@@ -240,6 +268,17 @@ func (a *App) Run() error {
 		a.startBackgroundTask(func() {
 			if err := a.MetadataSync.Run(ctx); err != nil {
 				logrus.Errorf("metadata sync stopped: %v", err)
+			}
+		})
+	}
+	if a.QuotaService != nil {
+		a.QuotaService.SetRefreshContext(ctx)
+	}
+	if a.QuotaAutoRefresh != nil {
+		a.startBackgroundTask(func() {
+			// quota 自动刷新和手动刷新共用队列，但作为独立后台任务跟随 App 生命周期启动和停止。
+			if err := a.QuotaAutoRefresh.StartAutoRefresh(ctx); err != nil {
+				logrus.Errorf("quota auto refresh stopped: %v", err)
 			}
 		})
 	}

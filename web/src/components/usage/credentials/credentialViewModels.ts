@@ -1,10 +1,15 @@
 import type { UsageIdentity, UsageQuotaRow } from '@/lib/types'
-import { calculateCacheRate } from '@/utils/usage'
+import { calculateCacheRate, formatCompactTokenValue } from '@/utils/usage'
 
 export const CREDENTIALS_PAGE_SIZE = 10
 
 type QuotaStatus = 'ok' | 'warning' | 'danger' | 'unknown'
 export type PlanTypeTone = 'free' | 'team' | 'plus' | 'pro' | 'neutral'
+
+export interface QuotaWindowUsageDisplay {
+  tokens: string
+  cost: string
+}
 
 export interface DisplayQuota {
   key: string
@@ -17,6 +22,7 @@ export interface DisplayQuota {
   remaining?: number
   resetText?: string
   windowSeconds?: number
+  windowUsage?: QuotaWindowUsageDisplay
   status: QuotaStatus
 }
 
@@ -39,7 +45,6 @@ export interface AuthFileCredentialRow {
   quota: UsageQuotaRow[]
   quotaLoading: boolean
   quotaError?: string
-  refreshTaskId?: string
   refreshStatus?: 'queued' | 'running' | 'completed' | 'failed'
   primaryQuota?: DisplayQuota
   secondaryQuota?: DisplayQuota
@@ -112,7 +117,7 @@ export function buildAuthFileCredentialRows(
   // Auth Files 行合并 usage identity、缓存 quota 和刷新任务状态，组件不再重复拼装字段。
   identities: UsageIdentity[],
   quotas: Map<string, UsageQuotaRow[]> = new Map(),
-  quotaStates: Map<string, Pick<AuthFileCredentialRow, 'quotaLoading' | 'quotaError' | 'refreshTaskId' | 'refreshStatus'>> = new Map(),
+  quotaStates: Map<string, Pick<AuthFileCredentialRow, 'quotaLoading' | 'quotaError' | 'refreshStatus'>> = new Map(),
 ): AuthFileCredentialRow[] {
   return identities.map((identity) => {
     const quota = quotas.get(identity.identity) ?? []
@@ -143,7 +148,6 @@ export function buildAuthFileCredentialRows(
       quota,
       quotaLoading: state?.quotaLoading ?? false,
       quotaError: state?.quotaError,
-      refreshTaskId: state?.refreshTaskId,
       refreshStatus: state?.refreshStatus,
       primaryQuota,
       secondaryQuota,
@@ -192,8 +196,31 @@ function toDisplayQuota(row: UsageQuotaRow): DisplayQuota {
     remaining,
     resetText: row.resetAt,
     windowSeconds,
+    windowUsage: quotaWindowUsage(row),
     status: quotaStatus(row, percentDisplay.percent, percentDisplay.kind),
   }
+}
+
+function quotaWindowUsage(row: UsageQuotaRow): QuotaWindowUsageDisplay | undefined {
+  const tokens = finiteNumber(row.window_usage_tokens)
+  const cost = finiteNumber(row.window_usage_cost)
+  if (tokens === undefined || cost === undefined) {
+    return undefined
+  }
+  return {
+    tokens: formatCompactTokenValue(tokens),
+    cost: formatQuotaWindowCost(cost),
+  }
+}
+
+function formatQuotaWindowCost(cost: number): string {
+  // 限额条下方空间很紧，窗口成本统一展示两位小数，避免 0 显示成 0.0000。
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cost || 0).replace(/^US\$/, '$')
 }
 
 function quotaLabel(row: UsageQuotaRow, windowSeconds?: number): string {

@@ -401,6 +401,31 @@ func TestViewerSessionCannotAccessAdminManagementRoutes(t *testing.T) {
 	}
 }
 
+func TestViewerSessionCannotAccessStatusActiveRoute(t *testing.T) {
+	sessions := auth.NewSessionManager(time.Hour)
+	token, _, err := sessions.CreateAPIKeyViewer(42)
+	if err != nil {
+		t.Fatalf("CreateAPIKeyViewer returned error: %v", err)
+	}
+	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}
+	recorder := &activeStatusRecorderStub{}
+	router := NewRouter(nil, nil, nil, nil, config, NewAuthHandler(config, sessions), "", OptionalProviders{
+		Status: StatusRouteConfig{ActiveRecorder: recorder},
+	})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status/active", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected viewer session to be forbidden from status active route, got %d %s", resp.Code, resp.Body.String())
+	}
+	if recorder.calls != 0 {
+		t.Fatalf("expected forbidden viewer heartbeat not to record activity, got %d calls", recorder.calls)
+	}
+}
+
 func TestAdminSessionCannotAccessKeyOverviewRoute(t *testing.T) {
 	sessions := auth.NewSessionManager(time.Hour)
 	token, _, err := sessions.Create()

@@ -54,7 +54,7 @@ export function useCredentialsTabData({ enabled, onAuthRequired }: UseCredential
     () => selectQuotaEligibleAuthIndexes(credentialPages.authFileIdentities),
     [credentialPages.authFileIdentities],
   )
-  const { quotaByAuthIndex, setQuotaByAuthIndex } = useQuotaCache({
+  const { quotaByAuthIndex, cachedQuotaStateByAuthIndex, setQuotaByAuthIndex } = useQuotaCache({
     enabled,
     authIndexes: currentAuthIndexes,
     onAuthRequired,
@@ -68,12 +68,14 @@ export function useCredentialsTabData({ enabled, onAuthRequired }: UseCredential
 
   // 把对象状态转成 Map 后交给纯 view model，组件层只消费已组合好的行数据。
   const quotaRowsByAuthIndex = useMemo(() => new Map(Object.entries(quotaByAuthIndex)), [quotaByAuthIndex])
-  const quotaStates = useMemo(() => new Map(Object.entries(quotaRefreshTasks.quotaStateByAuthIndex).map(([authIndex, state]) => [authIndex, {
-    quotaLoading: state.loading ?? false,
-    quotaError: state.error,
-    refreshTaskId: state.refreshTaskId,
-    refreshStatus: state.refreshStatus,
-  }])), [quotaRefreshTasks.quotaStateByAuthIndex])
+  const quotaStates = useMemo(() => {
+    const mergedStates = { ...cachedQuotaStateByAuthIndex, ...quotaRefreshTasks.quotaStateByAuthIndex }
+    return new Map(Object.entries(mergedStates).map(([authIndex, state]) => [authIndex, {
+      quotaLoading: state.loading ?? false,
+      quotaError: state.error,
+      refreshStatus: state.refreshStatus,
+    }]))
+  }, [cachedQuotaStateByAuthIndex, quotaRefreshTasks.quotaStateByAuthIndex])
 
   const authFileRows = useMemo(
     () => buildAuthFileCredentialRows(credentialPages.authFileIdentities, quotaRowsByAuthIndex, quotaStates),

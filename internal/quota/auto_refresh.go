@@ -1,0 +1,283 @@
+package quota
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/timeutil"
+
+	"github.com/sirupsen/logrus"
+)
+
+func (s *Service) RunAutoRefresh(ctx context.Context) error {
+	// nil service 或未初始化数据库时没有可刷新对象，直接安全返回。
+	if s == nil || s.db == nil {
+		return nil
+	}
+	// now 作为本轮调度时间，后续 active 判断、轮次互斥和缓存过期判断都复用它。
+	now := time.Now()
+	// 自动刷新必须依赖前端活跃心跳，避免无人打开后台时仍持续扫库和请求上游。
+	if !s.HasRecentActiveStatus(now) {
+		// inactive 是正常节流路径，用 debug 日志避免污染生产日志。
+		logrus.Debug("quota auto refresh skipped because backend page is inactive")
+		return nil
+	}
+	// 同一时间只允许一个自动刷新轮次存活，并且两轮整表入队之间必须满足配置间隔。
+	if !s.beginAutoRefreshRound(now) {
+		// 上一轮仍 active 或上一轮刚启动过时直接跳过，手动刷新仍可走共享任务队列。
+		logrus.Debug("quota auto refresh skipped because previous auto round is still active or recently started")
+		return nil
+	}
+	// 该标记用于区分“本 goroutine 自己收尾”和“任务监控 goroutine 收尾”。
+	roundHandedToMonitor := false
+	logrus.Info("quota auto refresh round started")
+	// 每轮结束日志用 defer 兜底，确保扫描失败、无任务入队或同步完成时都能释放轮次锁。
+	defer func() {
+		// 如果本轮没有交给后台监控，就在当前调用栈释放轮次锁。
+		if !roundHandedToMonitor {
+			// 扫描失败或没有任务入队时没有监控 goroutine，必须立即释放。
+			s.finishAutoRefreshRound()
+			logrus.Info("quota auto refresh round completed")
+		}
+	}()
+	// 自动刷新每轮开始先清理过期任务，确保 401/402 过期后能重新进入队列，而不是被旧缓存一直拦住。
+	s.cleanupExpiredRefreshTasks(now)
+	identities, err := s.listAutoRefreshAuthFiles(ctx)
+	if err != nil {
+		return err
+	}
+	// Auth Files 扫描成功后才记录整轮启动时间；扫描失败只依赖 attempt 时间做轻量退避。
+	s.markAutoRefreshRoundStartedAt(now)
+	queued := 0
+	skippedCachedError := 0
+	skippedRunning := 0
+	skippedUnsupported := 0
+	queuedAuthIndexes := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		authIndex := strings.TrimSpace(identity.Identity)
+		if authIndex == "" {
+			continue
+		}
+		if _, _, ok := s.resolveQuotaHandlerForIdentity(identity); !ok {
+			// 自动刷新和手动查询共用同一套 handler 解析逻辑，不支持的 Auth File 不占用 worker。
+			skippedUnsupported++
+			continue
+		}
+		if s.shouldSkipAutoRefreshForCachedHTTPError(authIndex, now) {
+			// 这里跳过的是未过期的可缓存 HTTP 错误，避免后台持续打已知不可自动恢复的身份。
+			skippedCachedError++
+			continue
+		}
+		if task, created := s.ensureRefreshTask(authIndex, RefreshSourceAuto); created {
+			queued++
+			queuedAuthIndexes = append(queuedAuthIndexes, task.AuthIndex)
+		} else if task != nil && task.isActive() {
+			// queued/running 已经代表这个 auth_index 在队列里，自动刷新不能重复入队。
+			skippedRunning++
+		}
+	}
+	if len(queuedAuthIndexes) > 0 {
+		if s.startRefreshGoroutine(func() {
+			s.dispatchAutoRefreshTasks(queuedAuthIndexes)
+		}) {
+			roundHandedToMonitor = true
+		} else {
+			// 关闭期间不能再启动 dispatcher，本轮已入队任务必须转为失败，避免永久停在 queued。
+			s.markQueuedRefreshTasksFailed(queuedAuthIndexes, context.Canceled)
+		}
+	}
+	logrus.WithFields(logrus.Fields{
+		"scanned":              len(identities),
+		"queued":               queued,
+		"skipped_cached_error": skippedCachedError,
+		"skipped_running":      skippedRunning,
+		"skipped_unsupported":  skippedUnsupported,
+	}).Debug("quota auto refresh round summary")
+	return nil
+}
+
+func (s *Service) beginAutoRefreshRound(now time.Time) bool {
+	// now 归一化后写入内存时间，方便后续和配置间隔比较。
+	now = timeutil.NormalizeStorageTime(now)
+	// 自动刷新轮次锁独立于任务锁，避免长时间扫描时阻塞前端轮询任务状态。
+	s.autoRefreshMu.Lock()
+	// defer 解锁，保证所有返回路径都释放轮次锁。
+	defer s.autoRefreshMu.Unlock()
+	// 已有轮次存活时拒绝新轮次，减少重复 DB 扫描和重复排队判断。
+	if s.autoRefreshRunning {
+		return false
+	}
+	// 上一次尝试刚发生过时不再重复扫库，避免 DB 故障或配置错误时形成忙循环。
+	if !s.lastAutoRefreshAttemptAt.IsZero() && now.Sub(s.lastAutoRefreshAttemptAt) < s.autoRefreshInterval {
+		return false
+	}
+	// 上一次整轮自动刷新刚启动过时不再重复扫库入队，心跳只负责续约 active。
+	if !s.lastAutoRefreshRoundAt.IsZero() && now.Sub(s.lastAutoRefreshRoundAt) < s.autoRefreshInterval {
+		return false
+	}
+	// 标记当前自动刷新轮次开始，后续由当前调用栈或监控 goroutine 释放。
+	s.autoRefreshRunning = true
+	// 记录最近一次尝试时间；即使扫描失败，也要用它为下一次尝试提供退避。
+	s.lastAutoRefreshAttemptAt = now
+	return true
+}
+
+func (s *Service) markAutoRefreshRoundStartedAt(now time.Time) {
+	// now 归一化后写入内存时间，和 beginAutoRefreshRound 的 interval 判断保持一致。
+	now = timeutil.NormalizeStorageTime(now)
+	// autoRefreshMu 保护 lastAutoRefreshRoundAt，避免心跳和定时触发并发读写。
+	s.autoRefreshMu.Lock()
+	// defer 解锁，保证写入完成后释放轮次锁。
+	defer s.autoRefreshMu.Unlock()
+	// 记录本轮整表自动刷新启动时间，后续心跳和 ticker 都用它控制下一轮间隔。
+	s.lastAutoRefreshRoundAt = now
+}
+
+func (s *Service) finishAutoRefreshRound() {
+	// 释放轮次状态前加锁，和 beginAutoRefreshRound 的读写保持一致。
+	s.autoRefreshMu.Lock()
+	// defer 解锁，保证状态写入后正常释放锁。
+	defer s.autoRefreshMu.Unlock()
+	// 标记本轮自动刷新结束，下一次 tick 才可以重新扫描 Auth Files。
+	s.autoRefreshRunning = false
+}
+
+func (s *Service) dispatchAutoRefreshTasks(authIndexes []string) {
+	// 自动刷新轮次从扫描到最后一个本轮任务完成都算 active，防止下一次 tick 又为已完成的前半批重复入队。
+	// defer 确保 dispatcher 退出、等待结束或 refreshContext 取消时都会释放轮次锁。
+	defer func() {
+		s.finishAutoRefreshRound()
+		logrus.Info("quota auto refresh round completed")
+	}()
+	// 复用共享 dispatcher，继续使用全局 worker limit 和关闭时 queued 任务失败逻辑。
+	s.dispatchRefreshTasks(authIndexes)
+	// dispatcher 只负责派发，派发后还要等本轮 auto 任务全部离开 queued/running。
+	s.waitForAutoRefreshTasks(authIndexes)
+}
+
+func (s *Service) waitForAutoRefreshTasks(authIndexes []string) {
+	// 1s 轮询足够轻量，且只在自动刷新轮次存在期间运行一个监控 goroutine。
+	ticker := time.NewTicker(time.Second)
+	// 函数退出时释放 ticker，避免长期泄漏 runtime timer。
+	defer ticker.Stop()
+	refreshDone := s.refreshContextSnapshot().Done()
+	for {
+		// 没有本轮 active 任务时，说明 queued/running 已全部完成或失败，可以结束轮次。
+		if !s.hasActiveRefreshTask(authIndexes) {
+			return
+		}
+		select {
+		// 应用关闭时不再等待，任务本身会通过 refreshContext 进入取消/失败路径。
+		case <-refreshDone:
+			return
+		// 到下一个轻量检查周期后再次确认本轮任务状态。
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) hasActiveRefreshTask(authIndexes []string) bool {
+	// 读取 refreshTasks 前加锁，和任务状态切换、清理逻辑保持同一把锁。
+	s.refreshMu.Lock()
+	// defer 解锁，保证任何返回路径都释放任务锁。
+	defer s.refreshMu.Unlock()
+	for _, authIndex := range authIndexes {
+		// 按本轮入队的 auth_index 查任务，避免扫描整个任务 map。
+		task, ok := s.refreshTasks[authIndex]
+		// 只把本轮自动刷新任务的 queued/running 算作轮次仍 active。
+		if ok && task.Source == RefreshSourceAuto && task.isActive() {
+			return true
+		}
+	}
+	// 所有本轮任务都不再 active，监控 goroutine 可以释放自动刷新轮次。
+	return false
+}
+
+func (s *Service) StartAutoRefresh(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	// 启动后先检查一次；只有已经收到前端 active 心跳时才会真正扫描 Auth Files。
+	if err := s.RunAutoRefresh(ctx); err != nil {
+		logrus.Errorf("quota auto refresh failed: %v", err)
+	}
+	for {
+		// 每次循环都按上次整轮启动时间重新计算等待时长，避免心跳立即刷新后固定 ticker 造成下一轮最多延迟一个 interval。
+		delay := s.nextAutoRefreshDelay(time.Now())
+		// timer 只覆盖下一次检查点，检查后重新计算，便于 lastAutoRefreshRoundAt 被心跳唤醒更新后自动校准。
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			// 退出前停止 timer，避免 context 取消时留下 runtime timer。
+			timer.Stop()
+			return nil
+		case <-timer.C:
+			if err := s.RunAutoRefresh(ctx); err != nil {
+				logrus.Errorf("quota auto refresh failed: %v", err)
+			}
+		}
+	}
+}
+
+func (s *Service) nextAutoRefreshDelay(now time.Time) time.Duration {
+	// 页面不活跃时只按配置间隔做低频检查；重新打开页面会由心跳立即唤醒，不依赖这里等满 interval。
+	if !s.HasRecentActiveStatus(now) {
+		return s.autoRefreshInterval
+	}
+	// 自动刷新轮次状态由 autoRefreshMu 保护，读取 running 和 lastAutoRefreshRoundAt 前必须加锁。
+	s.autoRefreshMu.Lock()
+	// defer 解锁，保证所有返回路径都释放轮次锁。
+	defer s.autoRefreshMu.Unlock()
+	// 上一轮仍未完成时不做短间隔复查，本次触发直接让出，等待下一次心跳激活或定时触发。
+	if s.autoRefreshRunning {
+		return s.autoRefreshInterval
+	}
+	// 没有成功启动过整轮时，下一次检查可以立即尝试，RunAutoRefresh 会再次验证 active 状态。
+	throttleAt := s.lastAutoRefreshRoundAt
+	if throttleAt.IsZero() || (!s.lastAutoRefreshAttemptAt.IsZero() && s.lastAutoRefreshAttemptAt.After(throttleAt)) {
+		throttleAt = s.lastAutoRefreshAttemptAt
+	}
+	if throttleAt.IsZero() {
+		return 0
+	}
+	// dueAt 是下一次允许启动整轮 Auth Files 自动刷新的最早时间。
+	dueAt := throttleAt.Add(s.autoRefreshInterval)
+	// now 同样归一化，和 lastAutoRefreshRoundAt 保持一致时间口径。
+	now = timeutil.NormalizeStorageTime(now)
+	// 已到期时立即返回，让 StartAutoRefresh 下一轮马上执行 RunAutoRefresh。
+	if !now.Before(dueAt) {
+		return 0
+	}
+	// 未到期时只睡到 dueAt，避免固定 ticker 导致额外等待一个完整 interval。
+	return dueAt.Sub(now)
+}
+
+func (s *Service) listAutoRefreshAuthFiles(ctx context.Context) ([]entities.UsageIdentity, error) {
+	var identities []entities.UsageIdentity
+	// 自动刷新只扫描未删除且未禁用的 Auth Files；AI Provider 和用户停用的 Auth File 都不应产生后台请求。
+	err := s.db.WithContext(ctx).
+		Select("id, identity, provider, type, auth_type, is_deleted, disabled").
+		Where("auth_type = ? AND is_deleted = ? AND (disabled IS NULL OR disabled = ?)", entities.UsageIdentityAuthTypeAuthFile, false, false).
+		Order("priority IS NULL ASC").
+		Order("priority DESC").
+		Order("id ASC").
+		Find(&identities).Error
+	return identities, err
+}
+
+func (s *Service) shouldSkipAutoRefreshForCachedHTTPError(authIndex string, now time.Time) bool {
+	now = timeutil.NormalizeStorageTime(now)
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	task, ok := s.refreshTasks[authIndex]
+	if !ok || task.Status != RefreshTaskStatusFailed || task.HTTPStatusCode == nil {
+		return false
+	}
+	if _, ok := RefreshCacheableHTTPStatusCodes[*task.HTTPStatusCode]; !ok {
+		return false
+	}
+	// 只有未过期的 401/402 等配置错误会拦截自动刷新；过期后下一轮可以重新尝试并覆盖旧错误。
+	return task.ExpiresAt.IsZero() || now.Before(task.ExpiresAt)
+}

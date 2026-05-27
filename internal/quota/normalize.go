@@ -9,6 +9,11 @@ import (
 	"cpa-usage-keeper/internal/timeutil"
 )
 
+const (
+	quotaWindowFiveHourSeconds int64 = 5 * 60 * 60
+	quotaWindowSevenDaySeconds int64 = 7 * 24 * 60 * 60
+)
+
 func NormalizeQuotaRows(output ProviderOutput) []QuotaRow {
 	// 不在 provider 层强行统一原始结构，只在出口处转换为前端展示需要的 quota rows。
 	switch result := output.Result.(type) {
@@ -82,13 +87,20 @@ func appendClaudeWindowQuotaRow(rows []QuotaRow, key string, label string, scope
 	if window == nil {
 		return rows
 	}
-	return append(rows, QuotaRow{
+	row := QuotaRow{
 		Key:         key,
 		Label:       label,
 		Scope:       scope,
 		UsedPercent: floatPtr(window.Utilization),
 		ResetAt:     window.ResetsAt,
-	})
+	}
+	// Claude 只给官方语义明确的 5h 会话窗口和 seven_day 系列补 seconds，其它未知 key 不猜测。
+	if key == "five_hour" {
+		row.Window = &QuotaWindow{Seconds: intPtr(quotaWindowFiveHourSeconds)}
+	} else if strings.HasPrefix(key, "seven_day") {
+		row.Window = &QuotaWindow{Seconds: intPtr(quotaWindowSevenDaySeconds)}
+	}
+	return append(rows, row)
 }
 
 func normalizeCodexQuotaRows(result CodexResult) []QuotaRow {
@@ -162,17 +174,19 @@ func appendCodexWindowQuotaRow(rows []QuotaRow, key string, label string, scope 
 	}
 	label = codexWindowLabel(label, window.LimitWindowSeconds)
 	row := QuotaRow{
-		Key:               key,
-		Label:             label,
-		Scope:             scope,
-		Metric:            metric,
-		UsedPercent:       floatPtr(window.UsedPercent),
-		Allowed:           info.Allowed,
-		LimitReached:      info.LimitReached,
-		ResetAfterSeconds: intPtr(window.ResetAfterSeconds),
+		Key:          key,
+		Label:        label,
+		Scope:        scope,
+		Metric:       metric,
+		UsedPercent:  floatPtr(window.UsedPercent),
+		Allowed:      info.Allowed,
+		LimitReached: info.LimitReached,
 	}
 	if window.LimitWindowSeconds != 0 {
 		row.Window = &QuotaWindow{Seconds: intPtr(window.LimitWindowSeconds)}
+	}
+	if window.ResetAfterSeconds != 0 {
+		row.ResetAfterSeconds = intPtr(window.ResetAfterSeconds)
 	}
 	if window.ResetAt != 0 {
 		row.ResetAt = timeutil.FormatStorageTime(time.Unix(window.ResetAt, 0))
@@ -237,6 +251,8 @@ func normalizeAntigravityQuotaRows(result AntigravityResult) []QuotaRow {
 		}
 		row := QuotaRow{Key: "model." + key, Label: label, Scope: "model", Metric: key}
 		if model.QuotaInfo != nil {
+			// Antigravity 模型限额按 5 小时刷新，只有存在 quota info 时才让该 row 进入窗口统计。
+			row.Window = &QuotaWindow{Seconds: intPtr(quotaWindowFiveHourSeconds)}
 			row.Remaining = floatPtr(model.QuotaInfo.Remaining)
 			row.RemainingFraction = floatPtr(model.QuotaInfo.RemainingFraction)
 			row.ResetAt = model.QuotaInfo.ResetTime
@@ -322,12 +338,30 @@ func resetAtFromKimiDetail(detail *KimiUsageDetail) string {
 
 func kimiWindow(limit KimiLimitItem) *QuotaWindow {
 	if limit.Window != nil {
-		return &QuotaWindow{Duration: floatPtr(float64(limit.Window.Duration)), Unit: limit.Window.TimeUnit}
+		return quotaWindowFromDurationUnit(limit.Window.Duration, limit.Window.TimeUnit)
 	}
 	if limit.Duration != 0 || limit.TimeUnit != "" {
-		return &QuotaWindow{Duration: floatPtr(float64(limit.Duration)), Unit: limit.TimeUnit}
+		return quotaWindowFromDurationUnit(limit.Duration, limit.TimeUnit)
 	}
 	return nil
+}
+
+func quotaWindowFromDurationUnit(duration int64, unit string) *QuotaWindow {
+	window := &QuotaWindow{Duration: floatPtr(float64(duration)), Unit: unit}
+	// Kimi 返回显式 duration/unit 时才换算 seconds；未知单位保留原字段但不参与窗口用量统计。
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "second", "seconds", "s":
+		window.Seconds = intPtr(int64(duration))
+	case "minute", "minutes", "m":
+		window.Seconds = intPtr(int64(duration) * 60)
+	case "hour", "hours", "h":
+		window.Seconds = intPtr(int64(duration) * 3600)
+	case "day", "days", "d":
+		window.Seconds = intPtr(int64(duration) * 86400)
+	case "week", "weeks", "w":
+		window.Seconds = intPtr(int64(duration) * 604800)
+	}
+	return window
 }
 
 func firstNonEmpty(values ...string) string {

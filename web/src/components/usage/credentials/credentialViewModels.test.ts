@@ -139,7 +139,7 @@ describe('credentialViewModels', () => {
   it('builds auth file rows with primary secondary and extra quota display data', () => {
     const quotas = new Map<string, UsageQuotaRow[]>([
       ['auth-1', [
-        { key: 'rate_limit.primary_window', label: '5h', remainingFraction: 0.72, remaining: 72, resetAt: '2026-05-09T12:00:00Z' },
+        { key: 'rate_limit.primary_window', label: '5h', remainingFraction: 0.72, remaining: 72, resetAt: '2026-05-09T12:00:00Z', window_usage_tokens: 1_500_000, window_usage_cost: 12.34 },
         { key: 'rate_limit.secondary_window', label: 'Weekly', used: 40, limit: 100 },
         { key: 'code_assist.current_tier.GOOGLE_ONE_AI', label: 'Code Assist Credit', remaining: 10 },
       ]],
@@ -159,11 +159,24 @@ describe('credentialViewModels', () => {
     expect(rows[0].primaryQuota?.percentKind).toBe('remaining')
     expect(rows[0].primaryQuota?.barPercent).toBe(72)
     expect(rows[0].primaryQuota?.status).toBe('ok')
+    expect(rows[0].primaryQuota?.windowUsage).toEqual({ tokens: '1.50M', cost: '$12.34' })
     expect(rows[0].secondaryQuota?.label).toBe('Weekly')
     expect(rows[0].secondaryQuota?.percent).toBe(40)
     expect(rows[0].secondaryQuota?.percentKind).toBe('used')
     expect(rows[0].secondaryQuota?.barPercent).toBe(60)
     expect(rows[0].extraQuota.map((quota) => quota.label)).toEqual(['Code Assist Credit'])
+  })
+
+  it('formats zero quota window cost with two decimals', () => {
+    const quotas = new Map<string, UsageQuotaRow[]>([
+      ['auth-1', [
+        { key: 'rate_limit.primary_window', label: '5h', remainingFraction: 0.72, window_usage_tokens: 0, window_usage_cost: 0 },
+      ]],
+    ])
+
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1' })], quotas)
+
+    expect(rows[0].primaryQuota?.windowUsage).toEqual({ tokens: '0', cost: '$0.00' })
   })
 
   it('uses Claude token semantics for auth file cache rate', () => {

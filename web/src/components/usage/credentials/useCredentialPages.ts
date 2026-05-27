@@ -8,6 +8,8 @@ interface UseCredentialPagesOptions {
   onAuthRequired?: () => void
 }
 
+export const CREDENTIAL_PAGES_REFRESH_INTERVAL_MS = 5 * 60 * 1000
+
 const AUTH_FILE_ACTIVE_ONLY_STORAGE_KEY = 'cpa-usage-keeper-auth-files-active-only'
 
 const getInitialAuthFileActiveOnly = () => {
@@ -171,7 +173,11 @@ export function useCredentialPages({ enabled, onAuthRequired }: UseCredentialPag
       return
     }
     void refreshAuthFiles()
+    const intervalID = window.setInterval(() => {
+      void refreshAuthFiles()
+    }, CREDENTIAL_PAGES_REFRESH_INTERVAL_MS)
     return () => {
+      window.clearInterval(intervalID)
       authFilesRequestControllerRef.current?.abort()
       authFilesRequestControllerRef.current = null
     }
@@ -185,7 +191,11 @@ export function useCredentialPages({ enabled, onAuthRequired }: UseCredentialPag
       return
     }
     void refreshAiProviders()
+    const intervalID = window.setInterval(() => {
+      void refreshAiProviders()
+    }, CREDENTIAL_PAGES_REFRESH_INTERVAL_MS)
     return () => {
+      window.clearInterval(intervalID)
       aiProvidersRequestControllerRef.current?.abort()
       aiProvidersRequestControllerRef.current = null
     }
