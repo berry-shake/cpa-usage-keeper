@@ -1,82 +1,84 @@
-import type { UsageIdentity } from '@/lib/types'
+import type { UsageIdentityTypeCount } from '@/lib/types'
 
-export type CredentialProviderFilterKey = 'all' | 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'iflow'
+export type CredentialProviderFilterScope = 'auth-files' | 'ai-provider'
+export type KnownCredentialProviderFilterKey = 'antigravity' | 'claude' | 'codex' | 'gemini' | 'gemini-cli' | 'iflow' | 'openai'
+export type CredentialProviderFilterKey = 'all' | KnownCredentialProviderFilterKey
 
 export interface CredentialProviderFilterOption {
   key: CredentialProviderFilterKey
+  count: number
   labelKey: string
+  knownKey?: KnownCredentialProviderFilterKey
 }
 
-export interface CredentialProviderRowLike {
-  identity: Pick<UsageIdentity, 'name' | 'displayName' | 'type' | 'provider'>
+interface KnownCredentialProviderFilter {
+  key: KnownCredentialProviderFilterKey
+  labelKey: string
+  types: string[]
 }
 
-export const CREDENTIAL_PROVIDER_FILTER_OPTIONS: CredentialProviderFilterOption[] = [
-  { key: 'all', labelKey: 'usage_stats.credentials_filter_all' },
-  { key: 'antigravity', labelKey: 'usage_stats.credentials_filter_antigravity' },
-  { key: 'claude', labelKey: 'usage_stats.credentials_filter_claude' },
-  { key: 'codex', labelKey: 'usage_stats.credentials_filter_codex' },
-  { key: 'gemini-cli', labelKey: 'usage_stats.credentials_filter_gemini_cli' },
-  { key: 'iflow', labelKey: 'usage_stats.credentials_filter_iflow' },
+const AUTH_FILE_PROVIDER_FILTERS: KnownCredentialProviderFilter[] = [
+  { key: 'antigravity', labelKey: 'usage_stats.credentials_filter_antigravity', types: ['antigravity'] },
+  { key: 'claude', labelKey: 'usage_stats.credentials_filter_claude', types: ['claude'] },
+  { key: 'codex', labelKey: 'usage_stats.credentials_filter_codex', types: ['codex'] },
+  { key: 'gemini-cli', labelKey: 'usage_stats.credentials_filter_gemini_cli', types: ['gemini-cli'] },
+  { key: 'iflow', labelKey: 'usage_stats.credentials_filter_iflow', types: ['iflow'] },
 ]
 
-const PROVIDER_ALIASES: Record<Exclude<CredentialProviderFilterKey, 'all'>, string[]> = {
-  antigravity: ['antigravity'],
-  claude: ['claude', 'anthropic', 'claudecode'],
-  codex: ['codex'],
-  'gemini-cli': ['gemini', 'geminicli'],
-  iflow: ['iflow', 'flowith'],
+const AI_PROVIDER_FILTERS: KnownCredentialProviderFilter[] = [
+  { key: 'claude', labelKey: 'usage_stats.credentials_filter_claude', types: ['claude'] },
+  { key: 'codex', labelKey: 'usage_stats.credentials_filter_codex', types: ['codex'] },
+  { key: 'gemini', labelKey: 'usage_stats.credentials_filter_gemini', types: ['gemini'] },
+  { key: 'openai', labelKey: 'usage_stats.credentials_filter_openai', types: ['openai'] },
+]
+
+const FILTERS_BY_SCOPE: Record<CredentialProviderFilterScope, KnownCredentialProviderFilter[]> = {
+  'auth-files': AUTH_FILE_PROVIDER_FILTERS,
+  'ai-provider': AI_PROVIDER_FILTERS,
 }
 
-export function normalizeCredentialProviderToken(value: string | undefined): string {
-  return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+function credentialProviderFiltersForScope(scope: CredentialProviderFilterScope): KnownCredentialProviderFilter[] {
+  return FILTERS_BY_SCOPE[scope]
 }
 
-const NORMALIZED_PROVIDER_ALIASES = (Object.entries(PROVIDER_ALIASES) as Array<[Exclude<CredentialProviderFilterKey, 'all'>, string[]]>).map(
-  ([key, aliases]) => ({
-    key,
-    normalizedAliases: aliases.map(normalizeCredentialProviderToken),
-  }),
-)
-
-export function resolveCredentialProviderKey(row: CredentialProviderRowLike): CredentialProviderFilterKey | null {
-  const tokens = [
-    row.identity.type,
-    row.identity.provider,
-    row.identity.name,
-    row.identity.displayName,
-  ].map(normalizeCredentialProviderToken).filter(Boolean)
-
-  for (const { key, normalizedAliases } of NORMALIZED_PROVIDER_ALIASES) {
-    if (tokens.some((token) => normalizedAliases.some((alias) => token === alias || token.includes(alias)))) {
-      return key
-    }
-  }
-
-  return null
-}
-
-export function matchesCredentialProviderFilter(row: CredentialProviderRowLike, filter: CredentialProviderFilterKey): boolean {
-  return filter === 'all' || resolveCredentialProviderKey(row) === filter
-}
-
-export function filterCredentialsByProvider<T extends CredentialProviderRowLike>(rows: T[], filter: CredentialProviderFilterKey): T[] {
+export function credentialProviderFilterTypes(scope: CredentialProviderFilterScope, filter: CredentialProviderFilterKey): string[] {
   if (filter === 'all') {
-    return rows
+    return []
   }
-  return rows.filter((row) => matchesCredentialProviderFilter(row, filter))
+  return credentialProviderFiltersForScope(scope).find((item) => item.key === filter)?.types ?? []
 }
 
-export function buildCredentialProviderFilterCounts(rows: CredentialProviderRowLike[]): Record<CredentialProviderFilterKey, number> {
-  const counts = Object.fromEntries(CREDENTIAL_PROVIDER_FILTER_OPTIONS.map((option) => [option.key, 0])) as Record<CredentialProviderFilterKey, number>
-  counts.all = rows.length
+export function buildCredentialProviderFilterOptions(scope: CredentialProviderFilterScope, typeCounts: UsageIdentityTypeCount[]): CredentialProviderFilterOption[] {
+  const countsByType = new Map<string, number>()
+  let allCount = 0
 
-  for (const row of rows) {
-    const key = resolveCredentialProviderKey(row)
-    if (key) {
-      counts[key] += 1
+  for (const item of typeCounts) {
+    const count = finiteCount(item.count)
+    if (count <= 0) {
+      continue
     }
+    allCount += count
+    countsByType.set(item.type, (countsByType.get(item.type) ?? 0) + count)
   }
 
-  return counts
+  if (allCount <= 0) {
+    return []
+  }
+
+  const options: CredentialProviderFilterOption[] = [{ key: 'all', labelKey: 'usage_stats.credentials_filter_all', count: allCount }]
+
+  // 每个 tab 只展示有专用图标的一对一 type；未知 type 只计入 All，不单独生成按钮。
+  for (const filter of credentialProviderFiltersForScope(scope)) {
+    const count = filter.types.reduce((sum, type) => sum + (countsByType.get(type) ?? 0), 0)
+    if (count <= 0) {
+      continue
+    }
+    options.push({ key: filter.key, labelKey: filter.labelKey, count, knownKey: filter.key })
+  }
+
+  return options
+}
+
+function finiteCount(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0
 }

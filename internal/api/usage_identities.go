@@ -17,11 +17,17 @@ type usageIdentitiesResponse struct {
 }
 
 type usageIdentitiesPageResponse struct {
-	Identities []usageIdentityResponse `json:"identities"`
-	TotalCount int64                   `json:"total_count"`
-	Page       int                     `json:"page"`
-	PageSize   int                     `json:"page_size"`
-	TotalPages int                     `json:"total_pages"`
+	Identities []usageIdentityResponse  `json:"identities"`
+	TotalCount int64                    `json:"total_count"`
+	Page       int                      `json:"page"`
+	PageSize   int                      `json:"page_size"`
+	TotalPages int                      `json:"total_pages"`
+	TypeCounts []usageIdentityTypeCount `json:"type_counts"`
+}
+
+type usageIdentityTypeCount struct {
+	Type  string `json:"type"`
+	Count int64  `json:"count"`
 }
 
 type usageIdentityResponse struct {
@@ -61,7 +67,7 @@ type usageIdentityResponse struct {
 func registerUsageIdentityRoutes(router gin.IRoutes, usageIdentityProvider service.UsageIdentityProvider) {
 	router.GET("/usage/identities/page", func(c *gin.Context) {
 		if usageIdentityProvider == nil {
-			c.JSON(http.StatusOK, usageIdentitiesPageResponse{Identities: []usageIdentityResponse{}, Page: 1, PageSize: 10})
+			c.JSON(http.StatusOK, usageIdentitiesPageResponse{Identities: []usageIdentityResponse{}, Page: 1, PageSize: 10, TypeCounts: []usageIdentityTypeCount{}})
 			return
 		}
 
@@ -81,12 +87,17 @@ func registerUsageIdentityRoutes(router gin.IRoutes, usageIdentityProvider servi
 		for _, item := range result.Items {
 			response = append(response, mapUsageIdentityResponse(item))
 		}
+		typeCounts := make([]usageIdentityTypeCount, 0, len(result.TypeCounts))
+		for _, item := range result.TypeCounts {
+			typeCounts = append(typeCounts, usageIdentityTypeCount{Type: item.Type, Count: item.Count})
+		}
 		c.JSON(http.StatusOK, usageIdentitiesPageResponse{
 			Identities: response,
 			TotalCount: result.Total,
 			Page:       request.Page,
 			PageSize:   request.PageSize,
 			TotalPages: totalPages(result.Total, request.PageSize),
+			TypeCounts: typeCounts,
 		})
 	})
 
@@ -114,7 +125,7 @@ func parseUsageIdentitiesPageRequest(c *gin.Context) (service.ListUsageIdentitie
 	// page/page_size 做宽松兜底，auth_type 做严格校验，避免前端分区拿到混合数据。
 	page := positiveQueryInt(c, "page", 1)
 	pageSize := positiveQueryInt(c, "page_size", 10)
-	request := service.ListUsageIdentitiesRequest{Page: page, PageSize: pageSize, Sort: c.Query("sort")}
+	request := service.ListUsageIdentitiesRequest{Page: page, PageSize: pageSize, Sort: c.Query("sort"), Types: cleanUsageIdentityTypeFilters(c.QueryArray("type"))}
 	if rawActiveOnly := c.Query("active_only"); rawActiveOnly != "" {
 		activeOnly, err := strconv.ParseBool(rawActiveOnly)
 		if err != nil {
@@ -133,6 +144,22 @@ func parseUsageIdentitiesPageRequest(c *gin.Context) (service.ListUsageIdentitie
 		request.AuthType = &authType
 	}
 	return request, true
+}
+
+func cleanUsageIdentityTypeFilters(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	types := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		types = append(types, value)
+	}
+	return types
 }
 
 func positiveQueryInt(c *gin.Context, key string, fallback int) int {

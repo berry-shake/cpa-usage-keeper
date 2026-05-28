@@ -5,37 +5,38 @@ import claudeIcon from '@/assets/icons/claude.svg'
 import codexIcon from '@/assets/icons/codex.svg'
 import geminiIcon from '@/assets/icons/gemini.svg'
 import iflowIcon from '@/assets/icons/iflow.svg'
+import openaiIcon from '@/assets/icons/openai.svg'
 import { IconFilterAll } from '@/components/ui/icons'
+import type { UsageIdentityTypeCount } from '@/lib/types'
 import styles from './CredentialSections.module.scss'
-import { CREDENTIAL_PROVIDER_FILTER_OPTIONS, buildCredentialProviderFilterCounts, type CredentialProviderFilterKey, type CredentialProviderRowLike } from './credentialProviderFilters'
+import { buildCredentialProviderFilterOptions, type CredentialProviderFilterKey, type CredentialProviderFilterScope, type KnownCredentialProviderFilterKey } from './credentialProviderFilters'
 
 interface CredentialProviderFilterBarProps {
-  rows: CredentialProviderRowLike[]
+  scope: CredentialProviderFilterScope
+  typeCounts: UsageIdentityTypeCount[]
   value: CredentialProviderFilterKey
   onChange: (value: CredentialProviderFilterKey) => void
 }
 
-const providerIconUrls: Partial<Record<CredentialProviderFilterKey, string>> = {
+const providerIconUrls: Partial<Record<KnownCredentialProviderFilterKey, string>> = {
   antigravity: antigravityIcon,
   claude: claudeIcon,
   codex: codexIcon,
+  gemini: geminiIcon,
   'gemini-cli': geminiIcon,
   iflow: iflowIcon,
+  openai: openaiIcon,
 }
 
-export function CredentialProviderFilterBar({ rows, value, onChange }: CredentialProviderFilterBarProps) {
+export function CredentialProviderFilterBar({ scope, typeCounts, value, onChange }: CredentialProviderFilterBarProps) {
   const { t } = useTranslation()
-  const counts = useMemo(() => buildCredentialProviderFilterCounts(rows), [rows])
-  const visibleOptions = useMemo(
-    () => CREDENTIAL_PROVIDER_FILTER_OPTIONS.filter((option) => counts[option.key] > 0),
-    [counts],
-  )
+  const visibleOptions = useMemo(() => buildCredentialProviderFilterOptions(scope, typeCounts), [scope, typeCounts])
 
   useEffect(() => {
-    if (value !== 'all' && counts[value] === 0) {
+    if (value !== 'all' && !visibleOptions.some((option) => option.key === value)) {
       onChange('all')
     }
-  }, [counts, onChange, value])
+  }, [onChange, value, visibleOptions])
 
   if (visibleOptions.length === 0) {
     return null
@@ -54,10 +55,10 @@ export function CredentialProviderFilterBar({ rows, value, onChange }: Credentia
             onClick={() => onChange(option.key)}
           >
             <span className={styles.credentialProviderFilterIconFrame}>
-              <CredentialProviderFilterIcon provider={option.key} />
+              <CredentialProviderFilterIcon provider={option.knownKey ?? option.key} />
             </span>
             <span className={styles.credentialProviderFilterLabel}>{t(option.labelKey)}</span>
-            <span className={styles.credentialProviderFilterCount}>{counts[option.key]}</span>
+            <span className={styles.credentialProviderFilterCount}>{option.count}</span>
           </button>
         )
       })}
@@ -65,7 +66,7 @@ export function CredentialProviderFilterBar({ rows, value, onChange }: Credentia
   )
 }
 
-function CredentialProviderFilterIcon({ provider }: { provider: CredentialProviderFilterKey }) {
+function CredentialProviderFilterIcon({ provider }: { provider: CredentialProviderFilterKey | KnownCredentialProviderFilterKey }) {
   if (provider === 'all') {
     return <IconFilterAll size={21} />
   }

@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { CredentialProviderFilterBar } from './CredentialProviderFilterBar'
-import type { CredentialProviderRowLike } from './credentialProviderFilters'
 
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => undefined },
@@ -10,19 +9,10 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-const row = (type: string, provider = type): CredentialProviderRowLike => ({
-  identity: {
-    name: `${type} credential`,
-    displayName: `${type} credential`,
-    type,
-    provider,
-  },
-})
-
 describe('CredentialProviderFilterBar', () => {
-  it('hides provider buttons with zero current-page credentials', () => {
+  it('hides provider buttons with zero backend type counts', () => {
     const html = renderToStaticMarkup(
-      <CredentialProviderFilterBar rows={[row('codex'), row('claude', 'anthropic')]} value="all" onChange={() => undefined} />,
+      <CredentialProviderFilterBar scope="auth-files" typeCounts={[{ type: 'codex', count: 1 }, { type: 'claude', count: 1 }]} value="all" onChange={() => undefined} />,
     )
 
     expect(html).toContain('usage_stats.credentials_filter_all')
@@ -31,13 +21,23 @@ describe('CredentialProviderFilterBar', () => {
     expect(html).not.toContain('usage_stats.credentials_filter_antigravity')
     expect(html).not.toContain('usage_stats.credentials_filter_gemini_cli')
     expect(html).not.toContain('usage_stats.credentials_filter_iflow')
+    expect(html).not.toContain('usage_stats.credentials_filter_openai')
   })
 
   it('hides the whole filter bar when no credentials are loaded', () => {
     const html = renderToStaticMarkup(
-      <CredentialProviderFilterBar rows={[]} value="all" onChange={() => undefined} />,
+      <CredentialProviderFilterBar scope="auth-files" typeCounts={[]} value="all" onChange={() => undefined} />,
     )
 
     expect(html).toBe('')
+  })
+
+  it('uses the AI provider Gemini label outside Auth Files', () => {
+    const html = renderToStaticMarkup(
+      <CredentialProviderFilterBar scope="ai-provider" typeCounts={[{ type: 'gemini', count: 1 }]} value="all" onChange={() => undefined} />,
+    )
+
+    expect(html).toContain('usage_stats.credentials_filter_gemini')
+    expect(html).not.toContain('usage_stats.credentials_filter_gemini_cli')
   })
 })

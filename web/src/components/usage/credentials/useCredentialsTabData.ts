@@ -9,16 +9,21 @@ import {
 import { useCredentialPages } from './useCredentialPages'
 import { useQuotaCache } from './useQuotaCache'
 import type { UsageIdentityPageSort } from '@/lib/api'
+import type { UsageIdentityTypeCount } from '@/lib/types'
 import { quotaRefreshDisplayError, useQuotaRefreshTasks } from './useQuotaRefreshTasks'
+import type { CredentialProviderFilterKey } from './credentialProviderFilters'
 
 interface UseCredentialsTabDataOptions {
-  enabled: boolean
+  enabledAuthFiles: boolean
+  enabledAiProviders: boolean
   onAuthRequired?: () => void
 }
 
 export interface CredentialsTabData {
   authFileRows: AuthFileCredentialRow[]
   aiProviderRows: AiProviderCredentialRow[]
+  authFileTypeCounts: UsageIdentityTypeCount[]
+  aiProviderTypeCounts: UsageIdentityTypeCount[]
   authFileTotal: number
   aiProviderTotal: number
   authFilePageSize: number
@@ -28,6 +33,8 @@ export interface CredentialsTabData {
   authFileTotalPages: number
   aiProviderTotalPages: number
   authFileActiveOnly: boolean
+  authFileProviderFilter: CredentialProviderFilterKey
+  aiProviderProviderFilter: CredentialProviderFilterKey
   authFileSort: UsageIdentityPageSort
   aiProviderSort: UsageIdentityPageSort
   setAuthFilePage: (page: number) => void
@@ -35,6 +42,8 @@ export interface CredentialsTabData {
   setAuthFilePageSize: (pageSize: number) => void
   setAiProviderPageSize: (pageSize: number) => void
   setAuthFileActiveOnly: (activeOnly: boolean) => void
+  setAuthFileProviderFilter: (filter: CredentialProviderFilterKey) => void
+  setAiProviderProviderFilter: (filter: CredentialProviderFilterKey) => void
   setAuthFileSort: (sort: UsageIdentityPageSort) => void
   setAiProviderSort: (sort: UsageIdentityPageSort) => void
   loading: boolean
@@ -46,21 +55,21 @@ export interface CredentialsTabData {
   refreshQuotaForAuthIndex: (authIndex: string) => Promise<void>
 }
 
-export function useCredentialsTabData({ enabled, onAuthRequired }: UseCredentialsTabDataOptions): CredentialsTabData {
+export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, onAuthRequired }: UseCredentialsTabDataOptions): CredentialsTabData {
   // 页面 hook 只编排分页、缓存和刷新任务三层数据，不直接发散 API 调用。
-  const credentialPages = useCredentialPages({ enabled, onAuthRequired })
+  const credentialPages = useCredentialPages({ enabledAuthFiles, enabledAiProviders, onAuthRequired })
   const currentAuthIndexes = useMemo(
     // quota 只对当前 Auth Files 页生效，AI Provider 不参与缓存读取和刷新。
     () => selectQuotaEligibleAuthIndexes(credentialPages.authFileIdentities),
     [credentialPages.authFileIdentities],
   )
   const { quotaByAuthIndex, cachedQuotaStateByAuthIndex, setQuotaByAuthIndex } = useQuotaCache({
-    enabled,
+    enabled: enabledAuthFiles,
     authIndexes: currentAuthIndexes,
     onAuthRequired,
   })
   const quotaRefreshTasks = useQuotaRefreshTasks({
-    enabled,
+    enabled: enabledAuthFiles,
     currentAuthIndexes,
     setQuotaByAuthIndex,
     onAuthRequired,
@@ -89,6 +98,8 @@ export function useCredentialsTabData({ enabled, onAuthRequired }: UseCredential
   return {
     authFileRows,
     aiProviderRows,
+    authFileTypeCounts: credentialPages.authFileTypeCounts,
+    aiProviderTypeCounts: credentialPages.aiProviderTypeCounts,
     authFileTotal: credentialPages.authFileTotal,
     aiProviderTotal: credentialPages.aiProviderTotal,
     authFilePageSize: credentialPages.authFilePageSize,
@@ -98,6 +109,8 @@ export function useCredentialsTabData({ enabled, onAuthRequired }: UseCredential
     authFileTotalPages: credentialPages.authFileTotalPages,
     aiProviderTotalPages: credentialPages.aiProviderTotalPages,
     authFileActiveOnly: credentialPages.authFileActiveOnly,
+    authFileProviderFilter: credentialPages.authFileProviderFilter,
+    aiProviderProviderFilter: credentialPages.aiProviderProviderFilter,
     authFileSort: credentialPages.authFileSort,
     aiProviderSort: credentialPages.aiProviderSort,
     setAuthFilePage: credentialPages.setAuthFilePage,
@@ -105,6 +118,8 @@ export function useCredentialsTabData({ enabled, onAuthRequired }: UseCredential
     setAuthFilePageSize: credentialPages.setAuthFilePageSize,
     setAiProviderPageSize: credentialPages.setAiProviderPageSize,
     setAuthFileActiveOnly: credentialPages.setAuthFileActiveOnly,
+    setAuthFileProviderFilter: credentialPages.setAuthFileProviderFilter,
+    setAiProviderProviderFilter: credentialPages.setAiProviderProviderFilter,
     setAuthFileSort: credentialPages.setAuthFileSort,
     setAiProviderSort: credentialPages.setAiProviderSort,
     loading: credentialPages.loading,

@@ -260,12 +260,18 @@ export interface UsageIdentitiesResponse {
   identities: UsageIdentity[]
 }
 
+export interface UsageIdentityTypeCount {
+  type: string
+  count: number
+}
+
 export interface UsageIdentitiesPageResponse {
   identities: UsageIdentity[]
   total_count: number
   page: number
   page_size: number
   total_pages: number
+  type_counts?: UsageIdentityTypeCount[]
 }
 
 export interface UsageQuotaWindow {

@@ -16,3 +16,9 @@ type UsageIdentityStatsDelta struct {
 	LastUsedAt      *time.Time
 	MaxUsageEventID int64
 }
+
+// UsageIdentityTypeCount 是 usage identity 按原始 type 聚合后的计数。
+type UsageIdentityTypeCount struct {
+	Type  string `gorm:"column:type"`
+	Count int64  `gorm:"column:count"`
+}

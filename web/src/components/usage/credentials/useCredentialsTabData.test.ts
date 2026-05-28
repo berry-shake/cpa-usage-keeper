@@ -6,8 +6,8 @@ import { buildQuotaCacheAuthIndexesKey, QUOTA_CACHE_REFRESH_INTERVAL_MS } from '
 import { buildQuotaRefreshSubmissionUpdate, buildQuotaRefreshTaskErrorUpdate } from './useQuotaRefreshTasks'
 
 describe('Credentials polling intervals', () => {
-  it('keeps list data on a 5 minute refresh interval', () => {
-    expect(CREDENTIAL_PAGES_REFRESH_INTERVAL_MS).toBe(5 * 60 * 1000)
+  it('keeps list data on a 1 minute refresh interval', () => {
+    expect(CREDENTIAL_PAGES_REFRESH_INTERVAL_MS).toBe(60 * 1000)
   })
 
   it('keeps quota cache on a 1 minute refresh interval', () => {

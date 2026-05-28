@@ -224,6 +224,7 @@ describe('fetchUsageEvents', () => {
       pageSize: 20,
       activeOnly: true,
       sort: 'priority',
+      types: ['claude', ' openai '],
     });
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -235,6 +236,7 @@ describe('fetchUsageEvents', () => {
     expect(parsed.searchParams.get('page_size')).toBe('20');
     expect(parsed.searchParams.get('active_only')).toBe('true');
     expect(parsed.searchParams.get('sort')).toBe('priority');
+    expect(parsed.searchParams.getAll('type')).toEqual(['claude', ' openai ']);
     expect(init).toMatchObject({ credentials: 'include', signal });
   });
 

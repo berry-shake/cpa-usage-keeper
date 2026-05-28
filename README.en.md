@@ -85,6 +85,26 @@ networks:
     driver: bridge
 ```
 
+To manage Keeper settings with a `.env` file, replace `environment` in the `cpa-usage-keeper` service with `env_file`:
+
+```yaml
+    env_file:
+      - .env
+```
+
+Then create `.env` on the host in the same directory as `docker-compose.yml`, for example:
+
+```env
+TZ=Asia/Shanghai
+CPA_BASE_URL=http://cli-proxy-api:8317
+CPA_MANAGEMENT_KEY=replace-with-your-management-key
+REDIS_QUEUE_ADDR=cli-proxy-api:8317
+AUTH_ENABLED=true
+LOGIN_PASSWORD=replace-with-your-login-password
+```
+
+`env_file` paths are resolved relative to the `docker-compose.yml` directory; the `.env` above is injected into the Keeper container, equivalent to setting those environment variables for the container.
+
 Start:
 
 ```bash

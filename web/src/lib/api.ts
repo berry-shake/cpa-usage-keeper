@@ -198,6 +198,7 @@ export type UsageIdentityPageSort = 'priority' | 'total_requests' | 'total_token
 export interface FetchUsageIdentitiesPageOptions {
   authType?: UsageIdentityAuthType
   activeOnly?: boolean
+  types?: string[]
   sort?: UsageIdentityPageSort
   page?: number
   pageSize?: number
@@ -239,6 +240,11 @@ export async function fetchUsageIdentitiesPage(signal?: AbortSignal, options?: F
   }
   if (options?.sort) {
     params.set('sort', options.sort)
+  }
+  for (const type of options?.types ?? []) {
+    if (type !== '') {
+      params.append('type', type)
+    }
   }
   if (typeof options?.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
     params.set('page', String(Math.floor(options.page)))
