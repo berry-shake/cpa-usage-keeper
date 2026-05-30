@@ -130,7 +130,7 @@ export const getCredentialSectionVisibility = (tab: UsageTab) => ({
   showAiProvider: tab === 'ai-provider',
 });
 
-export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'settings' && !getCredentialSectionVisibility(tab).enabled;
+export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'settings';
 
 export const shouldShowApiKeyFilter = (tab: UsageTab) => tab === 'overview' || tab === 'analysis' || tab === 'events';
 
@@ -1623,7 +1623,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
               <div className={styles.toolbarActionsRight}>
                 {showRangeControls && (
                   <div className={styles.usageFilterBar}>
-                    <div className={styles.apiKeyFilterGroup}>
+                    {shouldShowApiKeyFilter(activeTab) && (
+                      <div className={styles.apiKeyFilterGroup}>
                     <label className={`${styles.usageFilterField} ${styles.apiKeyFilterField}`.trim()}>
                       <span className={styles.usageFilterLabel}>{t('usage_stats.api_key_filter')}</span>
                       <Select
@@ -1637,6 +1638,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       />
                     </label>
                   </div>
+                    )}
                     <div className={styles.timeRangeGroup}>
                     <label className={`${styles.usageFilterField} ${styles.rangeFilterField}`.trim()}>
                       <span className={styles.usageFilterLabel}>{t('usage_stats.range_filter')}</span>

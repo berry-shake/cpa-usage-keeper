@@ -32,8 +32,8 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toMatch(/\.usageRefreshSlot\s*\{[\s\S]*?flex:\s*0 0 auto;/)
   })
 
-  it('keeps the API Key filter visible on the Analysis page so Analysis requests can be filtered', () => {
-    expect(usagePageSource).not.toContain('shouldShowApiKeyFilter(activeTab)')
+  it('hides the API Key filter on credential tabs while keeping it on overview/analysis/events', () => {
+    expect(usagePageSource).toContain('shouldShowApiKeyFilter(activeTab)')
     expect(usagePageSource).not.toContain('styles.apiKeyFilterGroupHidden')
     expect(usagePageSource).not.toContain('aria-hidden={!showApiKeyFilter}')
     expect(usagePageStyles).not.toContain('.apiKeyFilterGroupHidden')
