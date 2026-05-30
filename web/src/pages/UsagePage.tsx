@@ -727,6 +727,18 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const activeCredentialProviderFilter = credentialSectionVisibility.showAiProvider ? credentialsData.aiProviderProviderFilter : credentialsData.authFileProviderFilter;
   const setActiveCredentialProviderFilter = credentialSectionVisibility.showAiProvider ? credentialsData.setAiProviderProviderFilter : credentialsData.setAuthFileProviderFilter;
   const activeCredentialProviderFilterScope = credentialSectionVisibility.showAiProvider ? 'ai-provider' : 'auth-files';
+  // 凭证统计卡按当前 tab 类型过滤：auth-files 只看 source_key 以 "auth:" 开头的记录，
+  // ai-provider 只看 "provider:" 前缀；其他情况保留全部以便排查。
+  const credentialStatsCredentialsForTab = useMemo(() => {
+    const all = credentialStatsData.credentials;
+    if (credentialSectionVisibility.showAuthFiles) {
+      return all.filter((credential) => typeof credential.source_key === 'string' && credential.source_key.startsWith('auth:'));
+    }
+    if (credentialSectionVisibility.showAiProvider) {
+      return all.filter((credential) => typeof credential.source_key === 'string' && credential.source_key.startsWith('provider:'));
+    }
+    return all;
+  }, [credentialStatsData.credentials, credentialSectionVisibility.showAiProvider, credentialSectionVisibility.showAuthFiles]);
   const themeOptions = useMemo(
     () =>
       THEME_OPTIONS.map((option) => ({
@@ -1848,7 +1860,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
               <>
                 {credentialStatsError && <div className={styles.errorBox}>{credentialStatsError}</div>}
                 <CredentialStatsCard
-                  credentials={credentialStatsData.credentials}
+                  credentials={credentialStatsCredentialsForTab}
                   loading={credentialStatsLoading}
                 />
                 {credentialsData.error && <div className={styles.errorBox}>{credentialsData.error}</div>}
