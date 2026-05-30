@@ -207,7 +207,7 @@ jobs:
             mkdir -p "${package_dir}/data"
             cp "${binary}" "${package_dir}/cpa-usage-keeper"
             chmod +x "${package_dir}/cpa-usage-keeper"
-            cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
+            cp .env.example README.md README.zh.md LICENSE "${package_dir}/"
             if [ "${goos}" = "linux" ]; then
               cp deploy/linux/cpa-usage-keeper.service "${package_dir}/"
             fi
@@ -221,7 +221,7 @@ jobs:
             package_dir="dist/${package_name}"
             mkdir -p "${package_dir}/data"
             cp "${binary}" "${package_dir}/cpa-usage-keeper.exe"
-            cp .env.example README.md README.en.md LICENSE CONTRIBUTORS.md "${package_dir}/"
+            cp .env.example README.md README.zh.md LICENSE "${package_dir}/"
             (cd dist && zip -qr "${package_name}.zip" "${package_name}")
           }
 
