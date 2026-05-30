@@ -1,68 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, normalizeUsageTabValue, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
-import { filterUsageByWindow, type UsageFilterWindow } from '@/utils/usage';
-import type { StatusResponse, UsageSnapshot } from '@/lib/types';
-
-const usage: UsageSnapshot = {
-  total_requests: 2,
-  success_count: 2,
-  failure_count: 0,
-  total_tokens: 300,
-  requests_by_day: {},
-  requests_by_hour: {},
-  tokens_by_day: {},
-  tokens_by_hour: {},
-  apis: {
-    'provider-a': {
-      display_name: 'Provider A',
-      total_requests: 2,
-      success_count: 2,
-      failure_count: 0,
-      total_tokens: 300,
-      models: {
-        'claude-sonnet': {
-          total_requests: 2,
-          success_count: 2,
-          failure_count: 0,
-          total_tokens: 300,
-          details: [
-            {
-              timestamp: '2026-04-23T00:00:00.000Z',
-              latency_ms: 100,
-              source: 'source-a',
-              auth_index: '1',
-              failed: false,
-              tokens: {
-                input_tokens: 50,
-                output_tokens: 50,
-                reasoning_tokens: 0,
-                cached_tokens: 0,
-                total_tokens: 100,
-              },
-            },
-            {
-              timestamp: '2026-04-23T02:00:00.000Z',
-              latency_ms: 120,
-              source: 'source-a',
-              auth_index: '1',
-              failed: false,
-              tokens: {
-                input_tokens: 100,
-                output_tokens: 100,
-                reasoning_tokens: 0,
-                cached_tokens: 0,
-                total_tokens: 200,
-              },
-            },
-          ],
-        },
-      },
-    },
-  },
-};
-
-const deriveFilteredUsageLikePage = (input: UsageSnapshot, filterWindow: UsageFilterWindow) =>
-  filterUsageByWindow(input, filterWindow);
+import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, normalizeUsageTabValue, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldLoadPricingOnUsageTabEntry, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
+import type { StatusResponse, UsageFilterWindow } from '@/lib/types';
 
 const createAutoRefreshTestDocument = (visibilityState: DocumentVisibilityState = 'visible') => {
   const target = new EventTarget();
@@ -379,19 +317,14 @@ describe('UsagePage active tab auto-refresh guard', () => {
   });
 });
 
-describe('UsagePage range filtering bug', () => {
-  it('changes the usage payload that summary metrics read from', () => {
-    const filterWindow: UsageFilterWindow = {
-      startMs: Date.parse('2026-04-23T01:00:00.000Z'),
-      endMs: Date.parse('2026-04-23T03:00:00.000Z'),
-      windowMinutes: 120,
-    };
-
-    const expected = filterUsageByWindow(usage, filterWindow);
-    const actual = deriveFilteredUsageLikePage(usage, filterWindow);
-
-    expect(expected.total_requests).toBe(1);
-    expect(actual.total_requests).toBe(expected.total_requests);
+describe('UsagePage Request Events pricing preload', () => {
+  it('loads only model prices when entering Request Events but not for other tab entry paths', () => {
+    expect(shouldLoadPricingOnUsageTabEntry('events')).toBe(true);
+    expect(shouldLoadPricingOnUsageTabEntry('overview')).toBe(false);
+    expect(shouldLoadPricingOnUsageTabEntry('analysis')).toBe(false);
+    expect(shouldLoadPricingOnUsageTabEntry('auth-files')).toBe(false);
+    expect(shouldLoadPricingOnUsageTabEntry('ai-provider')).toBe(false);
+    expect(shouldLoadPricingOnUsageTabEntry('settings')).toBe(false);
   });
 });
 

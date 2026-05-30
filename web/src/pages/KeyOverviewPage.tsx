@@ -21,7 +21,7 @@ import {
 import type { UsageOverviewPayload } from '@/components/usage/hooks/useUsageData';
 import { BrandLink } from '@/components/BrandLink';
 import {
-  getModelNamesFromUsage,
+  getOverviewModelNames,
   resolveUsageFilterWindow,
   sanitizeChartLines,
   type UsageFilterWindow,
@@ -231,7 +231,7 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
   });
 
   const overviewModelNames = useMemo(
-    () => getModelNamesFromUsage(usage?.usage ?? null),
+    () => getOverviewModelNames(usage),
     [usage]
   );
 

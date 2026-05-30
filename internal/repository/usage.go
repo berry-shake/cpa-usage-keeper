@@ -14,7 +14,7 @@ import (
 )
 
 // usageEventProjectionColumns 限制 usage_events 查询列，避免 Overview 和列表页把 RawJSON 等大字段读入内存。
-const usageEventProjectionColumns = "id, api_group_key, provider, auth_type, model, reasoning_effort, timestamp, source, auth_index, failed, latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens"
+const usageEventProjectionColumns = "id, api_group_key, provider, auth_type, model, reasoning_effort, endpoint, timestamp, source, auth_index, failed, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens"
 
 // usageEventProjection 是 usage_events 轻量投影，专门承接 select columns 的查询结果。
 type usageEventProjection struct {
@@ -24,11 +24,13 @@ type usageEventProjection struct {
 	AuthType            string
 	Model               string
 	ReasoningEffort     string
+	Endpoint            string
 	Timestamp           time.Time
 	Source              string
 	AuthIndex           string
 	Failed              bool
 	LatencyMS           int64
+	TTFTMS              *int64 `gorm:"column:ttft_ms"`
 	InputTokens         int64
 	OutputTokens        int64
 	ReasoningTokens     int64
@@ -36,12 +38,6 @@ type usageEventProjection struct {
 	CacheReadTokens     int64
 	CacheCreationTokens int64
 	TotalTokens         int64
-}
-
-// BuildUsageSnapshot 构建无筛选的旧版 usage snapshot，供仍需要全量快照的调用方使用。
-func BuildUsageSnapshot(db *gorm.DB) (*dto.StatisticsSnapshot, error) {
-	// 复用带筛选入口，空 filter 表示不限制时间和 API key。
-	return BuildUsageSnapshotWithFilter(db, dto.UsageQueryFilter{})
 }
 
 // Request Event Log Tab：先按列表条件统计总数，再加载当前页和筛选项。
@@ -141,12 +137,14 @@ func usageEventProjectionToRecord(event usageEventProjection) dto.UsageEventReco
 		APIGroupKey:         strings.TrimSpace(event.APIGroupKey),
 		Model:               strings.TrimSpace(event.Model),
 		ReasoningEffort:     strings.TrimSpace(event.ReasoningEffort),
+		Endpoint:            strings.TrimSpace(event.Endpoint),
 		AuthType:            strings.TrimSpace(event.AuthType),
 		Provider:            strings.TrimSpace(event.Provider),
 		Source:              strings.TrimSpace(event.Source),
 		AuthIndex:           strings.TrimSpace(event.AuthIndex),
 		Failed:              event.Failed,
 		LatencyMS:           event.LatencyMS,
+		TTFTMS:              event.TTFTMS,
 		InputTokens:         event.InputTokens,
 		OutputTokens:        event.OutputTokens,
 		ReasoningTokens:     event.ReasoningTokens,
@@ -167,11 +165,13 @@ func usageEventProjectionToEntity(event usageEventProjection) entities.UsageEven
 		AuthType:            event.AuthType,
 		Model:               event.Model,
 		ReasoningEffort:     event.ReasoningEffort,
+		Endpoint:            event.Endpoint,
 		Timestamp:           event.Timestamp,
 		Source:              event.Source,
 		AuthIndex:           event.AuthIndex,
 		Failed:              event.Failed,
 		LatencyMS:           event.LatencyMS,
+		TTFTMS:              event.TTFTMS,
 		InputTokens:         event.InputTokens,
 		OutputTokens:        event.OutputTokens,
 		ReasoningTokens:     event.ReasoningTokens,
@@ -239,6 +239,9 @@ func applyUsageEventListQuery(query *gorm.DB, filter dto.UsageQueryFilter) *gorm
 	return query
 }
 
+// ListUsageCredentialStatsWithFilter 保留 fork 在 pure-Go SQLite 下的兼容写法：
+// 先用子查询标准化 source/auth_index/model 维度，再外层聚合，并通过 Rows() 手动扫描，
+// 避免 glebarez/sqlite + modernc.org/sqlite 下复杂 TRIM/SUM 混排出现扫描错位。
 func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dto.UsageCredentialStatRecord, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
@@ -319,19 +322,6 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 	return rows, nil
 }
 
-// Snapshot 先读事件，再按时间窗口在内存里汇总。
-func BuildUsageSnapshotWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.StatisticsSnapshot, error) {
-	if db == nil {
-		return nil, fmt.Errorf("database is nil")
-	}
-
-	events, err := loadUsageOverviewEventsWithFilter(db, filter)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildUsageSnapshotFromEvents(events), nil
-}
 
 func BuildAnalysisWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.AnalysisRecord, error) {
 	if db == nil {
@@ -691,7 +681,6 @@ func BuildUsageOverviewWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dt
 func newUsageOverviewRecord(filter dto.UsageQueryFilter, windowMinutes int64) *dto.UsageOverviewRecord {
 	return &dto.UsageOverviewRecord{
 		Usage: &dto.StatisticsSnapshot{
-			APIs:           map[string]dto.APISnapshot{},
 			RequestsByDay:  map[string]int64{},
 			RequestsByHour: map[string]int64{},
 			TokensByDay:    map[string]int64{},
@@ -730,7 +719,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, prici
 		if usageOverviewEventInsideWindow(event, fullStart, fullEnd) {
 			continue
 		}
-		applyUsageEventToSnapshot(overview.Usage, event, false)
+		applyUsageEventToOverviewSnapshot(overview.Usage, event)
 		applyUsageEventToOverview(overview, event, bucketByDay, latestHourlyStart, pricingByModel)
 	}
 
@@ -807,7 +796,7 @@ func buildUsageOverviewFromStats(db *gorm.DB, filter dto.UsageQueryFilter, prici
 	}
 	overview.Health.TotalSuccess = healthSuccess
 	overview.Health.TotalFailure = healthFailure
-	finalizeUsageOverview(overview, false)
+	finalizeUsageOverview(overview)
 	return overview, nil
 }
 
@@ -1178,9 +1167,9 @@ func applyUsageOverviewStatToSummary(overview *dto.UsageOverviewRecord, requestC
 	overview.Summary.TotalCost += cost
 }
 
-// applyUsageOverviewHourlyStatToSnapshot 把小时 stats 合入旧 snapshot 结构，保持 API response 兼容。
+// applyUsageOverviewHourlyStatToSnapshot 把小时 stats 合入 Overview 基础 usage 统计。
 func applyUsageOverviewHourlyStatToSnapshot(snapshot *dto.StatisticsSnapshot, row entities.UsageOverviewHourlyStat) {
-	applyUsageOverviewStatToSnapshotTotals(snapshot, row.APIGroupKey, row.Model, row.RequestCount, row.SuccessCount, row.FailureCount, row.TotalTokens)
+	applyUsageOverviewStatToSnapshotTotals(snapshot, row.RequestCount, row.SuccessCount, row.FailureCount, row.TotalTokens)
 
 	bucketStart := timeutil.NormalizeStorageTime(row.BucketStart)
 	dayKey := bucketStart.Format("2006-01-02")
@@ -1204,38 +1193,21 @@ func applyUsageOverviewHourlyStatToSnapshotHours(snapshot *dto.StatisticsSnapsho
 	snapshot.TokensByHour[bucketKey] += row.TotalTokens
 }
 
-// applyUsageOverviewDailyStatToSnapshot 把天 stats 合入旧 snapshot 结构，完整小时明细由 hourly stats 负责。
+// applyUsageOverviewDailyStatToSnapshot 把天 stats 合入 Overview 基础 usage 统计，完整小时明细由 hourly stats 负责。
 func applyUsageOverviewDailyStatToSnapshot(snapshot *dto.StatisticsSnapshot, row entities.UsageOverviewDailyStat) {
-	applyUsageOverviewStatToSnapshotTotals(snapshot, row.APIGroupKey, row.Model, row.RequestCount, row.SuccessCount, row.FailureCount, row.TotalTokens)
+	applyUsageOverviewStatToSnapshotTotals(snapshot, row.RequestCount, row.SuccessCount, row.FailureCount, row.TotalTokens)
 
 	dayKey := timeutil.NormalizeStorageTime(row.BucketStart).Format("2006-01-02")
 	snapshot.RequestsByDay[dayKey] += row.RequestCount
 	snapshot.TokensByDay[dayKey] += row.TotalTokens
 }
 
-// applyUsageOverviewStatToSnapshotTotals 复用 hourly/daily stats 的 API 和 model 维度累计逻辑。
-func applyUsageOverviewStatToSnapshotTotals(snapshot *dto.StatisticsSnapshot, apiGroupKey, model string, requestCount, successCount, failureCount, totalTokens int64) {
-	apiKey := normalizeUsageOverviewDimension(apiGroupKey)
-	modelName := normalizeUsageOverviewDimension(model)
-	apiSnapshot := snapshot.APIs[apiKey]
-	if apiSnapshot.Models == nil {
-		apiSnapshot.Models = map[string]dto.ModelSnapshot{}
-	}
-	modelSnapshot := apiSnapshot.Models[modelName]
-	modelSnapshot.TotalRequests += requestCount
-	modelSnapshot.TotalTokens += totalTokens
-	modelSnapshot.SuccessCount += successCount
-	modelSnapshot.FailureCount += failureCount
-	apiSnapshot.TotalRequests += requestCount
-	apiSnapshot.TotalTokens += totalTokens
-	apiSnapshot.SuccessCount += successCount
-	apiSnapshot.FailureCount += failureCount
+// applyUsageOverviewStatToSnapshotTotals 复用 hourly/daily stats 的基础 totals 累计逻辑。
+func applyUsageOverviewStatToSnapshotTotals(snapshot *dto.StatisticsSnapshot, requestCount, successCount, failureCount, totalTokens int64) {
 	snapshot.TotalRequests += requestCount
 	snapshot.TotalTokens += totalTokens
 	snapshot.SuccessCount += successCount
 	snapshot.FailureCount += failureCount
-	apiSnapshot.Models[modelName] = modelSnapshot
-	snapshot.APIs[apiKey] = apiSnapshot
 }
 
 // applyUsageOverviewStatToSeries 同时维护总序列和按模型拆分序列，并即时刷新 RPM/TPM。
@@ -1388,72 +1360,13 @@ func loadUsageOverviewEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter)
 	return events, nil
 }
 
-// buildUsageSnapshotFromEvents 用原始事件构建旧 snapshot 响应，保留详情列表能力。
-func buildUsageSnapshotFromEvents(events []entities.UsageEvent) *dto.StatisticsSnapshot {
-	// Snapshot 仍按原始事件聚合，因为 Request Details 需要逐条事件明细。
-	snapshot := &dto.StatisticsSnapshot{
-		APIs:           map[string]dto.APISnapshot{},
-		RequestsByDay:  map[string]int64{},
-		RequestsByHour: map[string]int64{},
-		TokensByDay:    map[string]int64{},
-		TokensByHour:   map[string]int64{},
-	}
-	if len(events) == 0 {
-		return snapshot
-	}
-
-	for _, event := range events {
-		applyUsageEventToSnapshot(snapshot, event, true)
-	}
-	finalizeUsageSnapshot(snapshot, true)
-	return snapshot
-}
-
-// applyUsageEventToSnapshot 把单条 usage_event 累计到旧 snapshot 的 API/model/day/hour 结构。
-func applyUsageEventToSnapshot(snapshot *dto.StatisticsSnapshot, event entities.UsageEvent, includeDetails bool) {
-	// API key 和 model 维度都需要统一 unknown 兜底，否则空值会生成不可读 map key。
-	apiKey := normalizeUsageOverviewDimension(event.APIGroupKey)
-	modelName := normalizeUsageOverviewDimension(event.Model)
-
-	apiSnapshot := snapshot.APIs[apiKey]
-	if apiSnapshot.Models == nil {
-		apiSnapshot.Models = map[string]dto.ModelSnapshot{}
-	}
-
-	modelSnapshot := apiSnapshot.Models[modelName]
-	// Overview 不需要 Details，只有旧 Snapshot 页面才保留逐条请求详情。
-	if includeDetails {
-		detail := dto.RequestDetail{
-			Timestamp: timeutil.NormalizeStorageTime(event.Timestamp),
-			LatencyMS: event.LatencyMS,
-			Source:    strings.TrimSpace(event.Source),
-			AuthIndex: strings.TrimSpace(event.AuthIndex),
-			Failed:    event.Failed,
-			Tokens: dto.TokenStats{
-				InputTokens:         event.InputTokens,
-				OutputTokens:        event.OutputTokens,
-				ReasoningTokens:     event.ReasoningTokens,
-				CachedTokens:        event.CachedTokens,
-				CacheReadTokens:     event.CacheReadTokens,
-				CacheCreationTokens: event.CacheCreationTokens,
-				TotalTokens:         event.TotalTokens,
-			},
-		}
-		modelSnapshot.Details = append(modelSnapshot.Details, detail)
-	}
-	modelSnapshot.TotalRequests++
-	modelSnapshot.TotalTokens += event.TotalTokens
-	apiSnapshot.TotalRequests++
-	apiSnapshot.TotalTokens += event.TotalTokens
+// applyUsageEventToOverviewSnapshot 把边界 raw event 累计到 Overview 基础 usage 统计。
+func applyUsageEventToOverviewSnapshot(snapshot *dto.StatisticsSnapshot, event entities.UsageEvent) {
 	snapshot.TotalRequests++
 	snapshot.TotalTokens += event.TotalTokens
 	if event.Failed {
-		modelSnapshot.FailureCount++
-		apiSnapshot.FailureCount++
 		snapshot.FailureCount++
 	} else {
-		modelSnapshot.SuccessCount++
-		apiSnapshot.SuccessCount++
 		snapshot.SuccessCount++
 	}
 
@@ -1464,25 +1377,6 @@ func applyUsageEventToSnapshot(snapshot *dto.StatisticsSnapshot, event entities.
 	snapshot.RequestsByHour[hourKey]++
 	snapshot.TokensByDay[dayKey] += event.TotalTokens
 	snapshot.TokensByHour[hourKey] += event.TotalTokens
-
-	apiSnapshot.Models[modelName] = modelSnapshot
-	snapshot.APIs[apiKey] = apiSnapshot
-}
-
-// finalizeUsageSnapshot 做 snapshot 后处理，目前只在带 Details 时稳定详情排序。
-func finalizeUsageSnapshot(snapshot *dto.StatisticsSnapshot, includeDetails bool) {
-	if !includeDetails {
-		return
-	}
-	for apiKey, apiSnapshot := range snapshot.APIs {
-		for modelName, modelSnapshot := range apiSnapshot.Models {
-			sort.Slice(modelSnapshot.Details, func(i, j int) bool {
-				return modelSnapshot.Details[i].Timestamp.Before(modelSnapshot.Details[j].Timestamp)
-			})
-			apiSnapshot.Models[modelName] = modelSnapshot
-		}
-		snapshot.APIs[apiKey] = apiSnapshot
-	}
 }
 
 // newUsageOverviewSeriesRecord 初始化 Overview 趋势序列中的所有指标 map。
@@ -1563,9 +1457,8 @@ func applyUsageEventToOverview(overview *dto.UsageOverviewRecord, event entities
 	updateUsageOverviewHealthBlock(overview.Health.BlockDetails, event)
 }
 
-// finalizeUsageOverview 从累计后的 snapshot/health 数据反推 summary 派生指标。
-func finalizeUsageOverview(overview *dto.UsageOverviewRecord, includeDetails bool) {
-	finalizeUsageSnapshot(overview.Usage, includeDetails)
+// finalizeUsageOverview 从累计后的 usage/health 数据反推 summary 派生指标。
+func finalizeUsageOverview(overview *dto.UsageOverviewRecord) {
 	overview.Summary.RequestCount = overview.Usage.TotalRequests
 	overview.Summary.TokenCount = overview.Usage.TotalTokens
 	if overview.Summary.WindowMinutes > 0 {

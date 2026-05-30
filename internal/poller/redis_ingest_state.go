@@ -49,8 +49,12 @@ const (
 	RedisIngestSourceHTTPPull = "http_pull:usage_queue"
 )
 
-// redisIngestRecoveryRetryInterval 控制 subscribe/Redis 恢复探测间隔。
-const redisIngestRecoveryRetryInterval = 30 * time.Second
+const (
+	// RedisIngestAllFailedRetryInitial 是三条远端入口全部失败后的最小重试间隔。
+	RedisIngestAllFailedRetryInitial = 10 * time.Second
+	// redisIngestRecoveryRetryInterval 控制 subscribe/Redis 恢复探测间隔。
+	redisIngestRecoveryRetryInterval = 30 * time.Second
+)
 
 // redisIngestSubscribeBatchWindow 控制订阅收到首条消息后最多聚合 1s 再写入 inbox。
 const redisIngestSubscribeBatchWindow = time.Second

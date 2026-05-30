@@ -32,44 +32,7 @@ export interface UpdateCheckResponse {
   message: string
 }
 
-export interface UsageTokenStats {
-  input_tokens: number
-  output_tokens: number
-  reasoning_tokens: number
-  cached_tokens: number
-  total_tokens: number
-}
-
-export interface UsageDetail {
-  timestamp: string
-  latency_ms: number
-  source: string
-  source_raw?: string
-  source_display?: string
-  source_type?: string
-  auth_index: string
-  failed: boolean
-  tokens: UsageTokenStats
-}
-
-export interface UsageModelSnapshot {
-  total_requests: number
-  success_count: number
-  failure_count: number
-  total_tokens: number
-  details?: UsageDetail[]
-}
-
-export interface UsageApiSnapshot {
-  display_name?: string
-  total_requests: number
-  success_count: number
-  failure_count: number
-  total_tokens: number
-  models: Record<string, UsageModelSnapshot>
-}
-
-export interface UsageSnapshot {
+export interface UsageOverviewUsageSnapshot {
   total_requests: number
   success_count: number
   failure_count: number
@@ -78,7 +41,6 @@ export interface UsageSnapshot {
   requests_by_hour: Record<string, number>
   tokens_by_day: Record<string, number>
   tokens_by_hour: Record<string, number>
-  apis: Record<string, UsageApiSnapshot>
 }
 
 export interface UsageOverviewSummary {
@@ -127,7 +89,7 @@ export interface UsageOverviewServiceHealth {
 }
 
 export interface UsageOverviewResponse {
-  usage: UsageSnapshot
+  usage: UsageOverviewUsageSnapshot
   summary?: UsageOverviewSummary
   series?: UsageOverviewSeries
   hourly_series?: UsageOverviewSeries
@@ -151,8 +113,10 @@ export interface UsageEventTokens {
 export interface UsageEvent {
   id?: string
   timestamp: string
+  api_key?: string
   model: string
   reasoning_effort?: string
+  endpoint?: string
   source: string
   source_raw?: string
   source_type?: string
@@ -160,6 +124,7 @@ export interface UsageEvent {
   isDelete?: boolean
   failed: boolean
   latency_ms: number
+  ttft_ms?: number
   tokens: UsageEventTokens
 }
 
@@ -446,87 +411,4 @@ export interface UsageFilterWindow {
   startMs?: number
   endMs?: number
   windowMinutes?: number
-}
-
-export type UsageSeriesDimension = 'all' | 'api' | 'model'
-
-export interface SummaryCardValue {
-  key: string
-  label: string
-  value: string
-  hint?: string
-  accent: string
-}
-
-export interface ApiSummaryItem {
-  apiName: string
-  totalRequests: number
-  successCount: number
-  failureCount: number
-  totalTokens: number
-  modelCount: number
-  totalCost: number
-  models: Array<{
-    modelName: string
-    totalRequests: number
-    successCount: number
-    failureCount: number
-    totalTokens: number
-    totalCost: number
-  }>
-}
-
-export interface ModelSummaryItem {
-  apiName: string
-  modelName: string
-  totalRequests: number
-  successCount: number
-  failureCount: number
-  totalTokens: number
-  averageLatencyMs: number
-  totalLatencyMs: number
-  successRate: number
-  totalCost: number
-}
-
-export interface EventRow {
-  timestamp: string
-  apiName: string
-  modelName: string
-  source: string
-  authIndex: string
-  failed: boolean
-  latencyMs: number
-  inputTokens: number
-  outputTokens: number
-  reasoningTokens: number
-  cachedTokens: number
-  totalTokens: number
-}
-
-export interface TrendPoint {
-  label: string
-  value: number
-}
-
-export interface TrendSeries {
-  key: string
-  label: string
-  color: string
-  data: TrendPoint[]
-}
-
-export interface TokenBreakdown {
-  inputTokens: number
-  outputTokens: number
-  reasoningTokens: number
-  cachedTokens: number
-}
-
-export interface RateStats {
-  rpm: number
-  tpm: number
-  requestCount: number
-  tokenCount: number
-  windowMinutes: number
 }

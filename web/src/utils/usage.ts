@@ -1,4 +1,4 @@
-import type { UsageFilterWindow, UsageTimeRange } from '@/lib/types';
+import type { UsageFilterWindow, UsageOverviewResponse, UsageOverviewSeries, UsageTimeRange } from '@/lib/types';
 import type { UsagePayload } from '@/components/usage/hooks/useUsageData';
 import {
   LATENCY_SOURCE_FIELD,
@@ -8,7 +8,6 @@ import {
   formatDurationMs
 } from '@/utils/usage/latency';
 
-export * from '@/lib/usage';
 export {
   LATENCY_SOURCE_FIELD,
   LATENCY_SOURCE_UNIT,
@@ -41,37 +40,6 @@ export interface ChartData {
   datasets: ChartDataset[];
 }
 
-export interface ModelStatsSummary {
-  model: string;
-  requests: number;
-  successCount: number;
-  failureCount: number;
-  tokens: number;
-  averageLatencyMs: number | null;
-  totalLatencyMs: number | null;
-  latencySampleCount: number;
-  cost: number;
-}
-
-export interface ApiStatsModelSummary {
-  requests: number;
-  successCount: number;
-  failureCount: number;
-  tokens: number;
-  cost: number;
-}
-
-export interface ApiStats {
-  endpoint: string;
-  displayName: string;
-  totalRequests: number;
-  successCount: number;
-  failureCount: number;
-  totalTokens: number;
-  totalCost: number;
-  models: Record<string, ApiStatsModelSummary>;
-}
-
 export type TokenCategory = 'input' | 'output' | 'cached' | 'reasoning';
 
 interface UsageModelSeriesLine {
@@ -85,15 +53,9 @@ interface UsagePayloadWithModelSeries {
   model_series?: Record<string, UsageModelSeriesLine>;
 }
 
-export interface UsageDetailRecord {
-  timestamp: string;
-  source: string;
-  source_raw?: string;
-  source_display?: string;
+interface UsageCostDetail {
   source_type?: string;
-  auth_index: string;
-  failed: boolean;
-  latency_ms: number;
+  __modelName?: string;
   tokens: {
     input_tokens: number;
     output_tokens: number;
@@ -102,10 +64,6 @@ export interface UsageDetailRecord {
     cache_tokens?: number;
     total_tokens: number;
   };
-  __apiName?: string;
-  __apiDisplayName?: string;
-  __modelName?: string;
-  __timestampMs?: number;
   [key: string]: unknown;
 }
 
@@ -130,22 +88,19 @@ export interface ServiceHealthData {
 }
 
 const CHART_COLORS = ['#8b8680', '#8b5cf6', '#22c55e', '#f97316', '#f59e0b', '#06b6d4', '#ef4444', '#6366f1', '#ec4899'];
-const SOURCE_PREFIXES = ['sk-', 'gsk_', 'rk-', 'pk-', 'AIza', 'claude-', 'vertex-', 'gemini-'];
 
 const toNumber = (value: unknown): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatLocalDayKey = (date: Date): string => {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
+export function calculateDisplayInputTokens({ inputTokens, cachedTokens }: { inputTokens: unknown; cachedTokens: unknown }): number {
+  return Math.max(Math.max(toNumber(inputTokens), 0) - Math.max(toNumber(cachedTokens), 0), 0);
+}
 
-const startOfDayKey = (timestamp: string): string => {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? '' : formatLocalDayKey(date);
-};
+export function calculateDisplayOutputTokens({ outputTokens, reasoningTokens }: { outputTokens: unknown; reasoningTokens: unknown }): number {
+  return Math.max(Math.max(toNumber(outputTokens), 0) - Math.max(toNumber(reasoningTokens), 0), 0);
+}
 
 const HOUR_BUCKET_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
@@ -173,11 +128,6 @@ const formatHourBucketKey = (timestampMs: number, referenceKey?: string): string
     ? 'Z'
     : `${offsetMinutes < 0 ? '-' : '+'}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
   return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}T${pad(shifted.getUTCHours())}:00:00${offset}`;
-};
-
-const startOfHourKey = (timestamp: string): string => {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? '' : formatHourBucketKey(date.getTime(), timestamp);
 };
 
 const formatHourLabel = (key: string): string => {
@@ -222,15 +172,6 @@ const buildHourlyWindow = (hourWindowHours?: number, endMs?: number, includeFina
   };
 };
 
-const resolveHourlyChartEndMs = (details: UsageDetailRecord[], _hourWindowHours?: number, endMs?: number): number | undefined => {
-  const requestedEndMs = Number.isFinite(endMs) && endMs && endMs > 0 ? endMs : undefined;
-  if (requestedEndMs !== undefined) return requestedEndMs;
-  if (!details.length) return undefined;
-  return getDetailTimestampBounds(details)?.latestMs;
-};
-
-const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
-
 const PRESET_WINDOW_HOURS: Record<Extract<UsageTimeRange, '4h' | '8h' | '12h' | '24h' | '7d' | '30d'>, number> = {
   '4h': 4,
   '8h': 8,
@@ -243,19 +184,6 @@ const PRESET_WINDOW_HOURS: Record<Extract<UsageTimeRange, '4h' | '8h' | '12h' | 
 const toValidTimestamp = (value: unknown): number | null => {
   const timestamp = typeof value === 'number' ? value : Date.parse(String(value ?? ''));
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
-};
-
-const getDetailTimestampBounds = (details: UsageDetailRecord[]): { earliestMs: number; latestMs: number } | null => {
-  let earliestMs = Number.POSITIVE_INFINITY;
-  let latestMs = Number.NEGATIVE_INFINITY;
-  details.forEach((detail) => {
-    const timestamp = detail.__timestampMs ?? 0;
-    if (!Number.isFinite(timestamp) || timestamp <= 0) return;
-    earliestMs = Math.min(earliestMs, timestamp);
-    latestMs = Math.max(latestMs, timestamp);
-  });
-  if (!Number.isFinite(earliestMs) || !Number.isFinite(latestMs)) return null;
-  return { earliestMs, latestMs };
 };
 
 export function sanitizeChartLines(chartLines: string[], modelNames: string[]): string[] {
@@ -311,51 +239,19 @@ export function normalizeAuthIndex(value: unknown): string {
   return String(value).trim();
 }
 
-export function extractTotalTokens(detail: Partial<UsageDetailRecord>): number {
-  const tokens = detail.tokens ?? {
-    input_tokens: 0,
-    output_tokens: 0,
-    reasoning_tokens: 0,
-    cached_tokens: 0,
-    total_tokens: 0
-  };
-  const explicit = toNumber(tokens.total_tokens);
-  if (explicit > 0) return explicit;
-  return toNumber(tokens.input_tokens) + toNumber(tokens.output_tokens) + toNumber(tokens.reasoning_tokens) + Math.max(toNumber(tokens.cached_tokens), toNumber(tokens.cache_tokens));
-}
-
-export function collectUsageDetails(usage: UsagePayload | null | undefined): UsageDetailRecord[] {
-  if (!usage?.apis) return [];
-  const rows: UsageDetailRecord[] = [];
-  Object.entries(usage.apis).forEach(([apiName, api]) => {
-    const apiDisplayName = String(api.display_name ?? apiName).trim() || apiName;
-    Object.entries(api.models ?? {}).forEach(([modelName, model]) => {
-      (model.details ?? []).forEach((detail) => {
-        const timestampMs = Date.parse(detail.timestamp);
-        rows.push({
-          ...detail,
-          latency_ms: toNumber(detail.latency_ms),
-          __apiName: apiName,
-          __apiDisplayName: apiDisplayName,
-          __modelName: modelName,
-          __timestampMs: Number.isFinite(timestampMs) ? timestampMs : 0
-        });
-      });
-    });
-  });
-  return rows.sort((a, b) => (b.__timestampMs ?? 0) - (a.__timestampMs ?? 0));
-}
-
-export function getModelNamesFromUsage(usage: UsagePayload | null | undefined): string[] {
+export function getOverviewModelNames(overview: Pick<UsageOverviewResponse, 'series' | 'hourly_series' | 'daily_series'> | null | undefined): string[] {
   const names = new Set<string>();
-  Object.values(usage?.apis ?? {}).forEach((api) => {
-    Object.keys(api.models ?? {}).forEach((modelName) => {
+  const addSeriesModels = (series: UsageOverviewSeries | undefined) => {
+    Object.keys(series?.models ?? {}).forEach((modelName) => {
       const normalized = modelName.trim();
       if (normalized) {
         names.add(normalized);
       }
     });
-  });
+  };
+  addSeriesModels(overview?.series);
+  addSeriesModels(overview?.hourly_series);
+  addSeriesModels(overview?.daily_series);
   return Array.from(names).sort((a, b) => a.localeCompare(b));
 }
 
@@ -408,36 +304,6 @@ export function resolveUsageFilterWindow(
   };
 }
 
-export function filterUsageByWindow(usage: UsagePayload, window: UsageFilterWindow): UsagePayload {
-  const details = collectUsageDetails(usage);
-  if (!details.length) return usage;
-  const { startMs, endMs } = window;
-  if (startMs === undefined && endMs === undefined) {
-    return usage;
-  }
-  const filteredDetails = details.filter((detail) => {
-    const timestamp = detail.__timestampMs ?? 0;
-    if (!Number.isFinite(timestamp) || timestamp <= 0) return false;
-    if (startMs !== undefined && timestamp < startMs) return false;
-    if (endMs !== undefined && timestamp > endMs) return false;
-    return true;
-  });
-  return buildUsageFromDetails(filteredDetails);
-}
-
-export function filterUsageByTimeRange(
-  usage: UsagePayload,
-  range: UsageTimeRange,
-  options: {
-    nowMs?: number;
-    customStart?: string | number;
-    customEnd?: string | number;
-  } = {}
-): UsagePayload {
-  const window = resolveUsageFilterWindow(usage, range, options);
-  return filterUsageByWindow(usage, window);
-}
-
 export function loadModelPrices(): Record<string, ModelPrice> {
   try {
     const raw = window.localStorage.getItem('cpa-model-prices');
@@ -453,7 +319,7 @@ export function saveModelPrices(prices: Record<string, ModelPrice>): void {
   window.localStorage.setItem('cpa-model-prices', JSON.stringify(prices));
 }
 
-export function calculateCost(detail: UsageDetailRecord, modelPrices: Record<string, ModelPrice>): number {
+export function calculateCost(detail: UsageCostDetail, modelPrices: Record<string, ModelPrice>): number {
   const modelName = detail.__modelName ?? '';
   const pricing = modelPrices[modelName];
   if (!pricing) return 0;
@@ -515,71 +381,6 @@ export function buildCandidateUsageSourceIds({ apiKey, prefix }: { apiKey?: stri
   return Array.from(set);
 }
 
-export function getApiStats(usage: UsagePayload | null, modelPrices: Record<string, ModelPrice>): ApiStats[] {
-  if (!usage?.apis) return [];
-  return Object.entries(usage.apis)
-    .map(([endpoint, api]) => {
-      const models: Record<string, ApiStatsModelSummary> = {};
-      let totalCost = 0;
-      Object.entries(api.models ?? {}).forEach(([modelName, model]) => {
-        let modelCost = 0;
-        (model.details ?? []).forEach((detail) => {
-          modelCost += calculateCost({ ...detail, __modelName: modelName }, modelPrices);
-        });
-        totalCost += modelCost;
-        models[modelName] = {
-          requests: toNumber(model.total_requests),
-          successCount: toNumber(model.success_count),
-          failureCount: toNumber(model.failure_count),
-          tokens: toNumber(model.total_tokens),
-          cost: modelCost
-        };
-      });
-      return {
-        endpoint,
-        displayName: String(api.display_name ?? endpoint).trim() || endpoint,
-        totalRequests: toNumber(api.total_requests),
-        successCount: toNumber(api.success_count),
-        failureCount: toNumber(api.failure_count),
-        totalTokens: toNumber(api.total_tokens),
-        totalCost,
-        models
-      };
-    })
-    .sort((a, b) => b.totalRequests - a.totalRequests);
-}
-
-export function getModelStats(usage: UsagePayload | null, modelPrices: Record<string, ModelPrice>): ModelStatsSummary[] {
-  const grouped = new Map<string, ModelStatsSummary>();
-  collectUsageDetails(usage).forEach((detail) => {
-    const model = detail.__modelName || '-';
-    const current = grouped.get(model) ?? {
-      model,
-      requests: 0,
-      successCount: 0,
-      failureCount: 0,
-      tokens: 0,
-      averageLatencyMs: null,
-      totalLatencyMs: 0,
-      latencySampleCount: 0,
-      cost: 0
-    };
-    current.requests += 1;
-    current.tokens += extractTotalTokens(detail);
-    current.cost += calculateCost(detail, modelPrices);
-    if (detail.failed) current.failureCount += 1;
-    else current.successCount += 1;
-    const latency = extractLatencyMs(detail);
-    if (latency !== null) {
-      current.totalLatencyMs = (current.totalLatencyMs ?? 0) + latency;
-      current.latencySampleCount += 1;
-      current.averageLatencyMs = (current.totalLatencyMs ?? 0) / current.latencySampleCount;
-    }
-    grouped.set(model, current);
-  });
-  return Array.from(grouped.values()).sort((a, b) => b.requests - a.requests);
-}
-
 export function buildChartData(
   usage: UsagePayload,
   period: 'hour' | 'day',
@@ -587,389 +388,61 @@ export function buildChartData(
   chartLines: string[],
   options: { hourWindowHours?: number; endMs?: number; includeFinalHourBucket?: boolean } = {}
 ): ChartData {
-  const details = collectUsageDetails(usage);
-  if (!details.length) {
-    const lines = chartLines.length ? chartLines : ['all'];
-    const bucketMap = period === 'hour'
-      ? (metric === 'requests' ? usage.requests_by_hour : usage.tokens_by_hour)
-      : (metric === 'requests' ? usage.requests_by_day : usage.tokens_by_day);
-    const rawBucketKeys = Object.keys(bucketMap ?? {}).sort((a, b) => a.localeCompare(b));
-    if (!rawBucketKeys.length) {
-      return { labels: [], datasets: [] };
-    }
-    const hourWindow = period === 'hour'
-      ? (() => {
-        const referenceKey = rawBucketKeys[rawBucketKeys.length - 1];
-        const endMs = options.endMs ?? Date.parse(referenceKey);
-        const { earliestTime, hourMs, labels } = buildHourlyWindow(options.hourWindowHours, endMs, options.includeFinalHourBucket, referenceKey);
-        return {
-          bucketKeys: labels.map((_, index) => formatHourBucketKey(earliestTime + index * hourMs, referenceKey)),
-          labels,
-        };
-      })()
-      : null;
-    const bucketKeys = period === 'hour' ? hourWindow!.bucketKeys : rawBucketKeys;
-    const displayLabels = period === 'hour' ? hourWindow!.labels : rawBucketKeys;
-    const datasets: ChartDataset[] = [];
-    if (lines.includes('all')) {
-      datasets.push({
-        label: 'All',
-        data: bucketKeys.map((key) => toNumber(bucketMap?.[key])),
-        borderColor: CHART_COLORS[0],
-        backgroundColor: `${CHART_COLORS[0]}22`,
-        pointBackgroundColor: CHART_COLORS[0],
-        pointBorderColor: CHART_COLORS[0],
-        fill: false,
-        tension: 0.35
-      });
-    }
-    const modelSeries = (usage as UsagePayload & UsagePayloadWithModelSeries).model_series ?? {};
-    lines.filter((line) => line !== 'all').forEach((line) => {
-      const series = modelSeries[line];
-      const lineBucketMap = period === 'hour'
-        ? (metric === 'requests' ? series?.requests_by_hour : series?.tokens_by_hour)
-        : (metric === 'requests' ? series?.requests_by_day : series?.tokens_by_day);
-      if (!lineBucketMap) return;
-      const color = CHART_COLORS[datasets.length % CHART_COLORS.length];
-      datasets.push({
-        label: line,
-        data: bucketKeys.map((key) => toNumber(lineBucketMap[key])),
-        borderColor: color,
-        backgroundColor: `${color}22`,
-        pointBackgroundColor: color,
-        pointBorderColor: color,
-        fill: false,
-        tension: 0.35
-      });
-    });
-    return {
-      labels: displayLabels.map((key) => (period === 'hour' ? key : formatDayLabel(key))),
-      datasets
-    };
-  }
-
   const lines = chartLines.length ? chartLines : ['all'];
-  const bucketsByLine = new Map<string, Map<string, number>>();
-  const orderedKeys = new Set<string>();
-
-  if (period === 'hour') {
-    const hourEndMs = resolveHourlyChartEndMs(details, options.hourWindowHours, options.endMs);
-    const referenceKey = details.find((detail) => (detail.__timestampMs ?? 0) === hourEndMs)?.timestamp ?? details[0]?.timestamp;
-    const { labels, earliestTime, lastBucketTime, hourMs } = buildHourlyWindow(options.hourWindowHours, hourEndMs, options.includeFinalHourBucket, referenceKey);
-    const bucketKeys = labels.map((_, index) => formatHourBucketKey(earliestTime + index * hourMs, referenceKey));
-    bucketKeys.forEach((key) => orderedKeys.add(key));
-
-    details.forEach((detail) => {
-      const timestamp = detail.__timestampMs ?? 0;
-      if (!Number.isFinite(timestamp) || timestamp <= 0) return;
-      const bucketStart = startOfOffsetHourMs(timestamp, parseHourBucketOffsetMinutes(detail.timestamp));
-      if (bucketStart < earliestTime || bucketStart > lastBucketTime) return;
-      const key = formatHourBucketKey(bucketStart, detail.timestamp);
-      const lineKey = lines.includes(detail.__modelName ?? '')
-        ? detail.__modelName ?? 'all'
-        : lines.includes(detail.__apiName ?? '')
-          ? detail.__apiName ?? 'all'
-          : 'all';
-      if (!lines.includes('all') && lineKey === 'all') return;
-      const line = bucketsByLine.get(lineKey) ?? new Map<string, number>();
-      const value = metric === 'requests' ? 1 : extractTotalTokens(detail);
-      line.set(key, (line.get(key) ?? 0) + value);
-      bucketsByLine.set(lineKey, line);
-      if (lines.includes('all')) {
-        const allLine = bucketsByLine.get('all') ?? new Map<string, number>();
-        allLine.set(key, (allLine.get(key) ?? 0) + value);
-        bucketsByLine.set('all', allLine);
-      }
-    });
-
-    return {
-      labels,
-      datasets: Array.from(bucketsByLine.entries()).map(([label, values], index) => ({
-        label: label === 'all' ? 'All' : label,
-        data: bucketKeys.map((key) => values.get(key) ?? 0),
-        borderColor: CHART_COLORS[index % CHART_COLORS.length],
-        backgroundColor: `${CHART_COLORS[index % CHART_COLORS.length]}22`,
-        pointBackgroundColor: CHART_COLORS[index % CHART_COLORS.length],
-        pointBorderColor: CHART_COLORS[index % CHART_COLORS.length],
-        fill: false,
-        tension: 0.35
-      }))
-    };
+  const bucketMap = period === 'hour'
+    ? (metric === 'requests' ? usage.requests_by_hour : usage.tokens_by_hour)
+    : (metric === 'requests' ? usage.requests_by_day : usage.tokens_by_day);
+  const rawBucketKeys = Object.keys(bucketMap ?? {}).sort((a, b) => a.localeCompare(b));
+  if (!rawBucketKeys.length) {
+    return { labels: [], datasets: [] };
   }
-
-  details.forEach((detail) => {
-    const key = startOfDayKey(detail.timestamp);
-    if (!key) return;
-    orderedKeys.add(key);
-    const lineKey = lines.includes(detail.__modelName ?? '') ? detail.__modelName ?? 'all' : lines.includes(detail.__apiName ?? '') ? detail.__apiName ?? 'all' : 'all';
-    if (!lines.includes('all') && lineKey === 'all') return;
-    const line = bucketsByLine.get(lineKey) ?? new Map<string, number>();
-    const value = metric === 'requests' ? 1 : extractTotalTokens(detail);
-    line.set(key, (line.get(key) ?? 0) + value);
-    bucketsByLine.set(lineKey, line);
-    if (lines.includes('all')) {
-      const allLine = bucketsByLine.get('all') ?? new Map<string, number>();
-      allLine.set(key, (allLine.get(key) ?? 0) + value);
-      bucketsByLine.set('all', allLine);
-    }
-  });
-
-  const bucketKeys = Array.from(orderedKeys).sort((a, b) => a.localeCompare(b));
-  return {
-    labels: bucketKeys.map((key) => formatDayLabel(key)),
-    datasets: Array.from(bucketsByLine.entries()).map(([label, values], index) => ({
-      label: label === 'all' ? 'All' : label,
-      data: bucketKeys.map((key) => values.get(key) ?? 0),
-      borderColor: CHART_COLORS[index % CHART_COLORS.length],
-      backgroundColor: `${CHART_COLORS[index % CHART_COLORS.length]}22`,
-      pointBackgroundColor: CHART_COLORS[index % CHART_COLORS.length],
-      pointBorderColor: CHART_COLORS[index % CHART_COLORS.length],
+  const hourWindow = period === 'hour'
+    ? (() => {
+      const referenceKey = rawBucketKeys[rawBucketKeys.length - 1];
+      const endMs = options.endMs ?? Date.parse(referenceKey);
+      const { earliestTime, hourMs, labels } = buildHourlyWindow(options.hourWindowHours, endMs, options.includeFinalHourBucket, referenceKey);
+      return {
+        bucketKeys: labels.map((_, index) => formatHourBucketKey(earliestTime + index * hourMs, referenceKey)),
+        labels,
+      };
+    })()
+    : null;
+  const bucketKeys = period === 'hour' ? hourWindow!.bucketKeys : rawBucketKeys;
+  const displayLabels = period === 'hour' ? hourWindow!.labels : rawBucketKeys;
+  const datasets: ChartDataset[] = [];
+  if (lines.includes('all')) {
+    datasets.push({
+      label: 'All',
+      data: bucketKeys.map((key) => toNumber(bucketMap?.[key])),
+      borderColor: CHART_COLORS[0],
+      backgroundColor: `${CHART_COLORS[0]}22`,
+      pointBackgroundColor: CHART_COLORS[0],
+      pointBorderColor: CHART_COLORS[0],
       fill: false,
       tension: 0.35
-    }))
-  };
-}
-
-export function buildHourlyTokenBreakdown(usage: UsagePayload | null, hourWindowHours = 24, endMs?: number, includeFinalBucket = false) {
-  return buildTokenBreakdownSeries(usage, 'hour', hourWindowHours, endMs, includeFinalBucket);
-}
-
-export function buildDailyTokenBreakdown(usage: UsagePayload | null) {
-  return buildTokenBreakdownSeries(usage, 'day');
-}
-
-function buildTokenBreakdownSeries(usage: UsagePayload | null, period: 'hour' | 'day', hourWindowHours?: number, endMs?: number, includeFinalBucket = false) {
-  const details = collectUsageDetails(usage);
-  if (!details.length) {
-    return { labels: [], dataByCategory: { input: [], output: [], cached: [], reasoning: [] } as Record<TokenCategory, number[]> };
-  }
-
-  if (period === 'hour') {
-    const hourEndMs = resolveHourlyChartEndMs(details, hourWindowHours, endMs);
-    const referenceKey = details.find((detail) => (detail.__timestampMs ?? 0) === hourEndMs)?.timestamp ?? details[0]?.timestamp;
-    const { labels, earliestTime, lastBucketTime, hourMs } = buildHourlyWindow(hourWindowHours, hourEndMs, includeFinalBucket, referenceKey);
-    const dataByCategory = {
-      input: new Array(labels.length).fill(0),
-      output: new Array(labels.length).fill(0),
-      cached: new Array(labels.length).fill(0),
-      reasoning: new Array(labels.length).fill(0)
-    } as Record<TokenCategory, number[]>;
-
-    details.forEach((detail) => {
-      const timestamp = detail.__timestampMs ?? 0;
-      if (!Number.isFinite(timestamp) || timestamp <= 0) return;
-      const bucketStart = startOfOffsetHourMs(timestamp, parseHourBucketOffsetMinutes(detail.timestamp));
-      if (bucketStart < earliestTime || bucketStart > lastBucketTime) return;
-      const bucketIndex = Math.floor((bucketStart - earliestTime) / hourMs);
-      if (bucketIndex < 0 || bucketIndex >= labels.length) return;
-      dataByCategory.input[bucketIndex] += toNumber(detail.tokens.input_tokens);
-      dataByCategory.output[bucketIndex] += toNumber(detail.tokens.output_tokens);
-      dataByCategory.cached[bucketIndex] += Math.max(toNumber(detail.tokens.cached_tokens), toNumber(detail.tokens.cache_tokens));
-      dataByCategory.reasoning[bucketIndex] += toNumber(detail.tokens.reasoning_tokens);
     });
-
-    return { labels, dataByCategory };
   }
-
-  const keys = Array.from(new Set(details.map((detail) => startOfDayKey(detail.timestamp)))).filter(Boolean).sort((a, b) => a.localeCompare(b));
-  const dataByCategory = { input: [], output: [], cached: [], reasoning: [] } as Record<TokenCategory, number[]>;
-  keys.forEach((key) => {
-    const matching = details.filter((detail) => startOfDayKey(detail.timestamp) === key);
-    dataByCategory.input.push(sum(matching.map((detail) => toNumber(detail.tokens.input_tokens))));
-    dataByCategory.output.push(sum(matching.map((detail) => toNumber(detail.tokens.output_tokens))));
-    dataByCategory.cached.push(sum(matching.map((detail) => Math.max(toNumber(detail.tokens.cached_tokens), toNumber(detail.tokens.cache_tokens)))));
-    dataByCategory.reasoning.push(sum(matching.map((detail) => toNumber(detail.tokens.reasoning_tokens))));
-  });
-  return { labels: keys.map((key) => formatDayLabel(key)), dataByCategory };
-}
-
-export function buildHourlyCostSeries(usage: UsagePayload | null, modelPrices: Record<string, ModelPrice>, hourWindowHours = 24, endMs?: number, includeFinalBucket = false) {
-  return buildCostSeries(usage, modelPrices, 'hour', hourWindowHours, endMs, includeFinalBucket);
-}
-
-export function buildDailyCostSeries(usage: UsagePayload | null, modelPrices: Record<string, ModelPrice>) {
-  return buildCostSeries(usage, modelPrices, 'day');
-}
-
-function buildCostSeries(usage: UsagePayload | null, modelPrices: Record<string, ModelPrice>, period: 'hour' | 'day', hourWindowHours?: number, endMs?: number, includeFinalBucket = false) {
-  const details = collectUsageDetails(usage);
-  if (!details.length) return { labels: [], data: [], hasData: false };
-
-  if (period === 'hour') {
-    const hourEndMs = resolveHourlyChartEndMs(details, hourWindowHours, endMs);
-    const referenceKey = details.find((detail) => (detail.__timestampMs ?? 0) === hourEndMs)?.timestamp ?? details[0]?.timestamp;
-    const { labels, earliestTime, lastBucketTime, hourMs } = buildHourlyWindow(hourWindowHours, hourEndMs, includeFinalBucket, referenceKey);
-    const data = new Array(labels.length).fill(0);
-    let hasData = false;
-
-    details.forEach((detail) => {
-      const timestamp = detail.__timestampMs ?? 0;
-      if (!Number.isFinite(timestamp) || timestamp <= 0) return;
-      const bucketStart = startOfOffsetHourMs(timestamp, parseHourBucketOffsetMinutes(detail.timestamp));
-      if (bucketStart < earliestTime || bucketStart > lastBucketTime) return;
-      const bucketIndex = Math.floor((bucketStart - earliestTime) / hourMs);
-      if (bucketIndex < 0 || bucketIndex >= labels.length) return;
-      const cost = calculateCost(detail, modelPrices);
-      if (cost > 0) {
-        data[bucketIndex] += cost;
-        hasData = true;
-      }
+  const modelSeries = (usage as UsagePayload & UsagePayloadWithModelSeries).model_series ?? {};
+  lines.filter((line) => line !== 'all').forEach((line) => {
+    const series = modelSeries[line];
+    const lineBucketMap = period === 'hour'
+      ? (metric === 'requests' ? series?.requests_by_hour : series?.tokens_by_hour)
+      : (metric === 'requests' ? series?.requests_by_day : series?.tokens_by_day);
+    if (!lineBucketMap) return;
+    const color = CHART_COLORS[datasets.length % CHART_COLORS.length];
+    datasets.push({
+      label: line,
+      data: bucketKeys.map((key) => toNumber(lineBucketMap[key])),
+      borderColor: color,
+      backgroundColor: `${color}22`,
+      pointBackgroundColor: color,
+      pointBorderColor: color,
+      fill: false,
+      tension: 0.35
     });
-
-    return { labels, data, hasData };
-  }
-
-  const grouped = new Map<string, number>();
-  details.forEach((detail) => {
-    const key = startOfDayKey(detail.timestamp);
-    if (!key) return;
-    grouped.set(key, (grouped.get(key) ?? 0) + calculateCost(detail, modelPrices));
   });
-  const keys = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
-  const data = keys.map((key) => grouped.get(key) ?? 0);
-  return { labels: keys.map((key) => formatDayLabel(key)), data, hasData: data.some((value) => value > 0) };
-}
-
-export function calculateServiceHealthData(details: UsageDetailRecord[]): ServiceHealthData {
-  const rowCount = 7;
-  const blockCount = 96;
-  const windowMs = 15 * 60 * 1000;
-  const totalBlocks = rowCount * blockCount;
-  const timelineAnchor = Date.now();
-  const currentBucketStart = Math.floor(timelineAnchor / windowMs) * windowMs;
-  const newestWindowEnd = currentBucketStart + windowMs;
-  const oldestWindowStart = newestWindowEnd - totalBlocks * windowMs;
-
-  const blockDetails = Array.from({ length: totalBlocks }, (_, index) => {
-    const startTime = oldestWindowStart + index * windowMs;
-    const endTime = startTime + windowMs;
-    const matching = details.filter((detail) => {
-      const timestamp = detail.__timestampMs ?? 0;
-      return timestamp >= startTime && timestamp < endTime;
-    });
-    const success = matching.filter((detail) => !detail.failed).length;
-    const failure = matching.filter((detail) => detail.failed).length;
-    const total = success + failure;
-
-    return {
-      startTime,
-      endTime,
-      success,
-      failure,
-      rate: total > 0 ? success / total : -1
-    };
-  });
-
-  const totalSuccess = details.filter((detail) => !detail.failed).length;
-  const totalFailure = details.filter((detail) => detail.failed).length;
-  const total = totalSuccess + totalFailure;
-
   return {
-    totalSuccess,
-    totalFailure,
-    successRate: total > 0 ? (totalSuccess / total) * 100 : 0,
-    rows: rowCount,
-    columns: blockCount,
-    bucketSeconds: Math.floor(windowMs / 1000),
-    windowStart: oldestWindowStart,
-    windowEnd: newestWindowEnd,
-    blockDetails
+    labels: displayLabels.map((key) => (period === 'hour' ? key : formatDayLabel(key))),
+    datasets
   };
-}
-
-export function buildUsageFromDetails(details: UsageDetailRecord[]): UsagePayload {
-  const usage: UsagePayload = {
-    total_requests: 0,
-    success_count: 0,
-    failure_count: 0,
-    total_tokens: 0,
-    requests_by_day: {},
-    requests_by_hour: {},
-    tokens_by_day: {},
-    tokens_by_hour: {},
-    apis: {}
-  };
-
-  details.forEach((detail) => {
-    const apiName = detail.__apiName || 'unknown';
-    const modelName = detail.__modelName || 'unknown';
-    const tokens = extractTotalTokens(detail);
-    const dayKey = startOfDayKey(detail.timestamp);
-    const hourKey = startOfHourKey(detail.timestamp);
-
-    const apis = usage.apis ?? (usage.apis = {});
-    const api = apis[apiName] ?? {
-      display_name: detail.__apiDisplayName || apiName,
-      total_requests: 0,
-      success_count: 0,
-      failure_count: 0,
-      total_tokens: 0,
-      models: {}
-    };
-    const model = api.models[modelName] ?? {
-      total_requests: 0,
-      success_count: 0,
-      failure_count: 0,
-      total_tokens: 0,
-      details: []
-    };
-
-    usage.total_requests = (usage.total_requests ?? 0) + 1;
-    usage.total_tokens = (usage.total_tokens ?? 0) + tokens;
-    api.total_requests += 1;
-    api.total_tokens += tokens;
-    model.total_requests += 1;
-    model.total_tokens += tokens;
-
-    if (detail.failed) {
-      usage.failure_count = (usage.failure_count ?? 0) + 1;
-      api.failure_count += 1;
-      model.failure_count += 1;
-    } else {
-      usage.success_count = (usage.success_count ?? 0) + 1;
-      api.success_count += 1;
-      model.success_count += 1;
-    }
-
-    const modelDetails = model.details ?? (model.details = []);
-    modelDetails.push({
-      timestamp: detail.timestamp,
-      latency_ms: toNumber(detail.latency_ms),
-      source: detail.source ?? '',
-      source_raw: detail.source_raw ?? '',
-      source_display: detail.source_display ?? '',
-      source_type: detail.source_type ?? '',
-      auth_index: detail.auth_index ?? '',
-      failed: detail.failed === true,
-      tokens: {
-        input_tokens: toNumber(detail.tokens.input_tokens),
-        output_tokens: toNumber(detail.tokens.output_tokens),
-        reasoning_tokens: toNumber(detail.tokens.reasoning_tokens),
-        cached_tokens: Math.max(toNumber(detail.tokens.cached_tokens), toNumber(detail.tokens.cache_tokens)),
-        total_tokens: tokens
-      }
-    });
-
-    const requestsByDay = usage.requests_by_day ?? (usage.requests_by_day = {});
-    const requestsByHour = usage.requests_by_hour ?? (usage.requests_by_hour = {});
-    const tokensByDay = usage.tokens_by_day ?? (usage.tokens_by_day = {});
-    const tokensByHour = usage.tokens_by_hour ?? (usage.tokens_by_hour = {});
-    requestsByDay[dayKey] = (requestsByDay[dayKey] ?? 0) + 1;
-    requestsByHour[hourKey] = (requestsByHour[hourKey] ?? 0) + 1;
-    tokensByDay[dayKey] = (tokensByDay[dayKey] ?? 0) + tokens;
-    tokensByHour[hourKey] = (tokensByHour[hourKey] ?? 0) + tokens;
-
-    api.models[modelName] = model;
-    apis[apiName] = api;
-  });
-
-  return usage;
-}
-
-export function inferSourceType(source: string): string {
-  const value = source.trim();
-  if (!value) return '';
-  if (value.startsWith('t:')) return 'token';
-  if (SOURCE_PREFIXES.some((prefix) => value.startsWith(prefix))) return 'api-key';
-  return '';
 }

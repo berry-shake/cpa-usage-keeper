@@ -11,38 +11,6 @@ const usageWithBackendSummary: UsagePayload = {
   requests_by_hour: {},
   tokens_by_day: {},
   tokens_by_hour: {},
-  apis: {
-    'provider-a': {
-      total_requests: 1,
-      success_count: 1,
-      failure_count: 0,
-      total_tokens: 100,
-      models: {
-        'claude-sonnet': {
-          total_requests: 1,
-          success_count: 1,
-          failure_count: 0,
-          total_tokens: 100,
-          details: [
-            {
-              timestamp: '2026-04-23T00:00:00.000Z',
-              latency_ms: 100,
-              source: 'source-a',
-              auth_index: '1',
-              failed: false,
-              tokens: {
-                input_tokens: 20,
-                output_tokens: 30,
-                reasoning_tokens: 4,
-                cached_tokens: 5,
-                total_tokens: 50,
-              },
-            },
-          ],
-        },
-      },
-    },
-  },
   summary: {
     request_count: 3,
     token_count: 777,

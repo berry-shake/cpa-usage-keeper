@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/repository/dto"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 )
 
@@ -22,10 +21,6 @@ type usageEventsStub struct {
 	filterCalls        int
 	filterOptionCalls  int
 	credentialsCalls   int
-}
-
-func (s *usageEventsStub) GetUsageWithFilter(context.Context, servicedto.UsageFilter) (*dto.StatisticsSnapshot, error) {
-	return nil, nil
 }
 
 func (s *usageEventsStub) GetUsageOverview(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
@@ -74,12 +69,14 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		Timestamp:           time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
 		Model:               "claude-sonnet",
 		ReasoningEffort:     "medium",
+		Endpoint:            "POST /v1/responses",
 		AuthType:            "apikey",
 		Provider:            "OpenAI Mirror",
 		Source:              "sk-provider-key",
 		AuthIndex:           "2",
 		Failed:              false,
 		LatencyMS:           321,
+		TTFTMS:              usageEventInt64Ptr(45),
 		InputTokens:         10,
 		OutputTokens:        5,
 		ReasoningTokens:     2,
@@ -125,6 +122,12 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	if !contains(body, `"reasoning_effort":"medium"`) {
 		t.Fatalf("expected reasoning effort in response body: %s", body)
 	}
+	if !contains(body, `"endpoint":"POST /v1/responses"`) {
+		t.Fatalf("expected endpoint in response body: %s", body)
+	}
+	if !contains(body, `"ttft_ms":45`) {
+		t.Fatalf("expected ttft_ms in response body: %s", body)
+	}
 	if provider.filterCalls != 1 {
 		t.Fatalf("expected ListUsageEvents to be called once, got %d", provider.filterCalls)
 	}
@@ -166,6 +169,98 @@ func TestUsageEventsResponseDoesNotExposeSourceKey(t *testing.T) {
 	}
 	if contains(body, `"source_key"`) {
 		t.Fatalf("expected source_key to be removed from usage event response, got %s", body)
+	}
+}
+
+func TestUsageEventsResolvesCPAAPIKeyAliasFromGroupKey(t *testing.T) {
+	provider := &usageEventsStub{events: []servicedto.UsageEventRecord{{
+		ID:          49,
+		Timestamp:   time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
+		APIGroupKey: "sk-alpha123456",
+		Model:       "claude-sonnet",
+		AuthType:    "apikey",
+		Provider:    "Fallback Provider",
+	}}}
+	keyProvider := &authCPAAPIKeyStub{row: entities.CPAAPIKey{
+		ID:         7,
+		APIKey:     "sk-alpha123456",
+		DisplayKey: "sk-*********123456",
+		KeyAlias:   "Production Key",
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{CPAAPIKeys: keyProvider})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
+	}
+	if !contains(body, `"api_key":"Production Key"`) {
+		t.Fatalf("expected API key alias in response body: %s", body)
+	}
+	if contains(body, `sk-alpha123456`) || contains(body, `sk-*********123456`) {
+		t.Fatalf("expected raw and masked key to be hidden when alias exists, got %s", body)
+	}
+}
+
+func TestUsageEventsFallsBackToMaskedCPAAPIKeyFromGroupKey(t *testing.T) {
+	provider := &usageEventsStub{events: []servicedto.UsageEventRecord{{
+		ID:          50,
+		Timestamp:   time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
+		APIGroupKey: "sk-beta654321",
+		Model:       "claude-sonnet",
+		AuthType:    "apikey",
+		Provider:    "Fallback Provider",
+	}}}
+	keyProvider := &authCPAAPIKeyStub{row: entities.CPAAPIKey{
+		ID:         8,
+		APIKey:     "sk-beta654321",
+		DisplayKey: "sk-*********654321",
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{CPAAPIKeys: keyProvider})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
+	}
+	if !contains(body, `"api_key":"sk-*********654321"`) {
+		t.Fatalf("expected masked API key in response body: %s", body)
+	}
+	if contains(body, `sk-beta654321`) {
+		t.Fatalf("expected raw API key to stay hidden, got %s", body)
+	}
+}
+
+func TestUsageEventsFallsBackToCanonicalMaskedAPIKeyWhenGroupKeyIsUnmatched(t *testing.T) {
+	provider := &usageEventsStub{events: []servicedto.UsageEventRecord{{
+		ID:          51,
+		Timestamp:   time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
+		APIGroupKey: "sk-BabcdefghijklmnopqrstuvwxyzmaWyTA",
+		Model:       "claude-sonnet",
+		AuthType:    "apikey",
+		Provider:    "Fallback Provider",
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
+	}
+	if !contains(body, `"api_key":"sk-*********maWyTA"`) {
+		t.Fatalf("expected canonical masked API key in response body: %s", body)
+	}
+	if contains(body, `sk-BabcdefghijklmnopqrstuvwxyzmaWyTA`) || contains(body, `sk-B***************************WyTA`) {
+		t.Fatalf("expected raw and variable-length masked keys to stay hidden, got %s", body)
 	}
 }
 
@@ -452,6 +547,7 @@ func TestUsageEventSourceFilterOptionsReturnsIdentitySources(t *testing.T) {
 		t.Fatalf("expected deleted source filter options to be omitted, got %s", body)
 	}
 }
+
 func TestUsageCredentialsShowsDeletedProviderIdentityByName(t *testing.T) {
 	// 软删除的身份依然在 usage_identities 表里完整保留，凭证统计页应按 name 显示，
 	// 否则历史 events 会因为 identity 被删而彻底失踪。
@@ -791,4 +887,8 @@ func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	if provider.lastFilter.Model != "" || provider.lastFilter.Source != "" || provider.lastFilter.AuthIndex != "" || provider.lastFilter.Result != "" {
 		t.Fatalf("expected credentials endpoint to only pass time filters, got %+v", provider.lastFilter)
 	}
+}
+
+func usageEventInt64Ptr(value int64) *int64 {
+	return &value
 }

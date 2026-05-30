@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Line } from 'react-chartjs-2';
 import type { ChartOptions } from 'chart.js';
 import { Card } from '@/components/ui/Card';
-import { formatCompactTokenValue, type TokenCategory } from '@/utils/usage';
+import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactTokenValue, type TokenCategory } from '@/utils/usage';
 import { buildChartOptions, getHourChartMinWidth } from '@/utils/usage/chartConfig';
 import type { UsageOverviewPayload } from './hooks/useUsageData';
 import styles from '@/pages/UsagePage.module.scss';
@@ -26,6 +26,8 @@ type TokenSeriesSource = NonNullable<UsageOverviewPayload['series']>;
 export type TokenBreakdownChartSeries = {
   labels: string[];
   dataByCategory: Record<TokenCategory, number[]>;
+  tooltipDataByCategory: Record<TokenCategory, number[]>;
+  totalTokens: number[];
 };
 
 export type BuildTokenBreakdownChartSeriesOptions = {
@@ -83,6 +85,21 @@ const getTokenSource = (usage: UsageOverviewPayload | null, period: TokenBreakdo
   period === 'hour' ? (usage?.hourly_series ?? usage?.series) : (usage?.daily_series ?? usage?.series)
 );
 
+const getDatasetLabelPrefix = (dataset: unknown): string => {
+  const label = dataset && typeof dataset === 'object'
+    ? (dataset as { label?: unknown }).label
+    : undefined;
+  return typeof label === 'string' && label ? `${label}: ` : '';
+};
+
+const getTooltipTokenValue = (dataset: unknown, dataIndex: number | undefined, fallback: unknown): number => {
+  const tooltipData = dataset && typeof dataset === 'object'
+    ? (dataset as { tooltipData?: unknown[] }).tooltipData
+    : undefined;
+  const tooltipValue = typeof dataIndex === 'number' ? tooltipData?.[dataIndex] : undefined;
+  return Number(tooltipValue ?? fallback ?? 0);
+};
+
 const buildHourlyLabels = (source: TokenSeriesSource | undefined, hourWindowHours?: number, endMs?: number, includeFinalBucket = false) => {
   const labels = Array.from(new Set(CATEGORIES.flatMap((category) => Object.keys(source?.[`${category}_tokens`] ?? {}))))
     .sort((a, b) => a.localeCompare(b));
@@ -114,11 +131,24 @@ export const buildTokenBreakdownChartSeries = ({
   return {
     labels: labels.map((label, index) => formatChartLabel(label, period, includeFinalHourBucket && index === labels.length - 1)),
     dataByCategory: {
+      input: labels.map((label) => calculateDisplayInputTokens({
+        inputTokens: source?.input_tokens?.[label],
+        cachedTokens: source?.cached_tokens?.[label],
+      })),
+      output: labels.map((label) => calculateDisplayOutputTokens({
+        outputTokens: source?.output_tokens?.[label],
+        reasoningTokens: source?.reasoning_tokens?.[label],
+      })),
+      cached: labels.map((label) => Number(source?.cached_tokens?.[label] ?? 0)),
+      reasoning: labels.map((label) => Number(source?.reasoning_tokens?.[label] ?? 0)),
+    },
+    tooltipDataByCategory: {
       input: labels.map((label) => Number(source?.input_tokens?.[label] ?? 0)),
       output: labels.map((label) => Number(source?.output_tokens?.[label] ?? 0)),
       cached: labels.map((label) => Number(source?.cached_tokens?.[label] ?? 0)),
       reasoning: labels.map((label) => Number(source?.reasoning_tokens?.[label] ?? 0)),
     },
+    totalTokens: labels.map((label) => Number(source?.tokens?.[label] ?? 0)),
   };
 };
 
@@ -139,12 +169,16 @@ export const buildTokenBreakdownChartOptions = ({
   isDark,
   isMobile,
   stacked = false,
+  totalTokens = [],
+  totalLabel = 'Total',
 }: {
   period: TokenBreakdownChartPeriod;
   labels: string[];
   isDark: boolean;
   isMobile: boolean;
   stacked?: boolean;
+  totalTokens?: number[];
+  totalLabel?: string;
 }): ChartOptions<'line'> => {
   const baseOptions = buildChartOptions({ period, labels, isDark, isMobile });
   return {
@@ -155,8 +189,14 @@ export const buildTokenBreakdownChartOptions = ({
         ...baseOptions.plugins?.tooltip,
         callbacks: {
           label: (context) => {
-            const label = context.dataset.label ? `${context.dataset.label}: ` : '';
-            return `${label}${formatCompactTokenValue(Number(context.parsed.y ?? 0), true)}`;
+            const label = getDatasetLabelPrefix(context.dataset);
+            const value = getTooltipTokenValue(context.dataset, context.dataIndex, context.parsed.y);
+            return `${label}${formatCompactTokenValue(value, true)}`;
+          },
+          footer: (items) => {
+            const dataIndex = items[0]?.dataIndex ?? -1;
+            if (dataIndex < 0) return '';
+            return `${totalLabel}: ${formatCompactTokenValue(Number(totalTokens[dataIndex] ?? 0), true)}`;
           },
         },
       },
@@ -214,6 +254,7 @@ export function TokenBreakdownChart({
         backgroundColor: TOKEN_COLORS[cat].bg,
         pointBackgroundColor: TOKEN_COLORS[cat].border,
         pointBorderColor: TOKEN_COLORS[cat].border,
+        tooltipData: series.tooltipDataByCategory[cat],
         fill: true,
         tension: 0.35
       }))
@@ -225,6 +266,8 @@ export function TokenBreakdownChart({
       isDark,
       isMobile,
       stacked: true,
+      totalTokens: series.totalTokens,
+      totalLabel: t('usage_stats.total_tokens'),
     });
 
     return { chartData: data, chartOptions: options };

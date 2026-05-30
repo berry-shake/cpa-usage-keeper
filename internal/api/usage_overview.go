@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/auth"
-	"cpa-usage-keeper/internal/redact"
 	repodto "cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
@@ -27,15 +26,14 @@ type usageOverviewResponse struct {
 }
 
 type usageOverviewPayload struct {
-	TotalRequests  int64                               `json:"total_requests"`
-	SuccessCount   int64                               `json:"success_count"`
-	FailureCount   int64                               `json:"failure_count"`
-	TotalTokens    int64                               `json:"total_tokens"`
-	APIs           map[string]usageOverviewAPISnapshot `json:"apis"`
-	RequestsByDay  map[string]int64                    `json:"requests_by_day"`
-	RequestsByHour map[string]int64                    `json:"requests_by_hour"`
-	TokensByDay    map[string]int64                    `json:"tokens_by_day"`
-	TokensByHour   map[string]int64                    `json:"tokens_by_hour"`
+	TotalRequests  int64            `json:"total_requests"`
+	SuccessCount   int64            `json:"success_count"`
+	FailureCount   int64            `json:"failure_count"`
+	TotalTokens    int64            `json:"total_tokens"`
+	RequestsByDay  map[string]int64 `json:"requests_by_day"`
+	RequestsByHour map[string]int64 `json:"requests_by_hour"`
+	TokensByDay    map[string]int64 `json:"tokens_by_day"`
+	TokensByHour   map[string]int64 `json:"tokens_by_hour"`
 }
 
 type usageOverviewSummary struct {
@@ -93,22 +91,6 @@ type usageOverviewServiceHealthBlock struct {
 	Success   int64     `json:"success"`
 	Failure   int64     `json:"failure"`
 	Rate      float64   `json:"rate"`
-}
-
-type usageOverviewAPISnapshot struct {
-	DisplayName   string                                `json:"display_name,omitempty"`
-	TotalRequests int64                                 `json:"total_requests"`
-	SuccessCount  int64                                 `json:"success_count"`
-	FailureCount  int64                                 `json:"failure_count"`
-	TotalTokens   int64                                 `json:"total_tokens"`
-	Models        map[string]usageOverviewModelSnapshot `json:"models"`
-}
-
-type usageOverviewModelSnapshot struct {
-	TotalRequests int64 `json:"total_requests"`
-	SuccessCount  int64 `json:"success_count"`
-	FailureCount  int64 `json:"failure_count"`
-	TotalTokens   int64 `json:"total_tokens"`
 }
 
 var allowedKeyOverviewRanges = map[string]struct{}{
@@ -203,9 +185,8 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 	if overview != nil {
 		usage = overview.Usage
 	}
-	redactedUsage := redact.UsageSnapshot(usage)
 	c.JSON(http.StatusOK, usageOverviewResponse{
-		Usage:         buildUsageOverviewPayload(redactedUsage),
+		Usage:         buildUsageOverviewPayload(usage),
 		Summary:       buildUsageOverviewSummary(overview),
 		Series:        buildUsageOverviewSeries(overview),
 		HourlySeries:  buildUsageOverviewHourlySeries(overview),
@@ -220,7 +201,6 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 func buildUsageOverviewPayload(snapshot *repodto.StatisticsSnapshot) usageOverviewPayload {
 	if snapshot == nil {
 		return usageOverviewPayload{
-			APIs:           map[string]usageOverviewAPISnapshot{},
 			RequestsByDay:  map[string]int64{},
 			RequestsByHour: map[string]int64{},
 			TokensByDay:    map[string]int64{},
@@ -237,27 +217,6 @@ func buildUsageOverviewPayload(snapshot *repodto.StatisticsSnapshot) usageOvervi
 		RequestsByHour: cloneInt64Map(snapshot.RequestsByHour),
 		TokensByDay:    cloneInt64Map(snapshot.TokensByDay),
 		TokensByHour:   cloneInt64Map(snapshot.TokensByHour),
-		APIs:           map[string]usageOverviewAPISnapshot{},
-	}
-
-	for apiName, apiSnapshot := range snapshot.APIs {
-		payloadAPI := usageOverviewAPISnapshot{
-			DisplayName:   apiSnapshot.DisplayName,
-			TotalRequests: apiSnapshot.TotalRequests,
-			SuccessCount:  apiSnapshot.SuccessCount,
-			FailureCount:  apiSnapshot.FailureCount,
-			TotalTokens:   apiSnapshot.TotalTokens,
-			Models:        map[string]usageOverviewModelSnapshot{},
-		}
-		for modelName, modelSnapshot := range apiSnapshot.Models {
-			payloadAPI.Models[modelName] = usageOverviewModelSnapshot{
-				TotalRequests: modelSnapshot.TotalRequests,
-				SuccessCount:  modelSnapshot.SuccessCount,
-				FailureCount:  modelSnapshot.FailureCount,
-				TotalTokens:   modelSnapshot.TotalTokens,
-			}
-		}
-		payload.APIs[apiName] = payloadAPI
 	}
 
 	return payload

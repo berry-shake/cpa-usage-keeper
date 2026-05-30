@@ -33,6 +33,7 @@ func DecodeRedisUsageMessage(message string, fetchedAt time.Time) (entities.Usag
 type queuedUsageDetail struct {
 	Timestamp       time.Time      `json:"timestamp"`
 	LatencyMS       int64          `json:"latency_ms"`
+	TTFTMS          *int64         `json:"ttft_ms"`
 	Source          string         `json:"source"`
 	AuthIndex       string         `json:"auth_index"`
 	Tokens          dto.TokenStats `json:"tokens"`
@@ -41,6 +42,7 @@ type queuedUsageDetail struct {
 	Model           string         `json:"model"`
 	Alias           *string        `json:"alias"`
 	ReasoningEffort string         `json:"reasoning_effort"`
+	ServiceTier     string         `json:"service_tier"`
 	Endpoint        string         `json:"endpoint"`
 	AuthType        string         `json:"auth_type"`
 	APIKey          string         `json:"api_key"`
@@ -88,11 +90,13 @@ func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) entities.UsageEvent
 		Model:               model,
 		ModelAlias:          trimRedisOptionalString(d.Alias),
 		ReasoningEffort:     strings.TrimSpace(d.ReasoningEffort),
+		ServiceTier:         strings.TrimSpace(d.ServiceTier),
 		Timestamp:           timestamp,
 		Source:              source,
 		AuthIndex:           authIndex,
 		Failed:              d.Failed,
 		LatencyMS:           max(d.LatencyMS, 0),
+		TTFTMS:              d.TTFTMS,
 		InputTokens:         tokens.InputTokens,
 		OutputTokens:        tokens.OutputTokens,
 		ReasoningTokens:     tokens.ReasoningTokens,

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { Chart, ChartData, ChartOptions, Plugin, TooltipModel } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import type { AnalysisCompositionItem, AnalysisHeatmapCell, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
-import { formatCompactNumber } from '@/utils/usage';
+import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber } from '@/utils/usage';
 import styles from './AnalysisPanel.module.scss';
 
 interface AnalysisPanelProps {
@@ -17,8 +17,11 @@ type ChartRow = {
   label: string;
   input: number;
   output: number;
+  rawInput: number;
+  rawOutput: number;
   cached: number;
   reasoning: number;
+  total: number;
   requests: number;
 };
 
@@ -40,6 +43,10 @@ type LegendItem = {
 type GradientColor = {
   base: string;
   light: string;
+};
+
+type TokenTooltipDataset = ChartData<'bar', number[], string>['datasets'][number] & {
+  tooltipData?: number[];
 };
 
 const CHART_COLORS: GradientColor[] = [
@@ -64,6 +71,7 @@ type TokenLabels = {
   output: string;
   cached: string;
   reasoning: string;
+  total: string;
   requests: string;
 };
 
@@ -92,6 +100,21 @@ const getChartTheme = (isDark: boolean): ChartTheme => ({
 const toNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getDatasetLabelPrefix = (dataset: unknown): string => {
+  const label = dataset && typeof dataset === 'object'
+    ? (dataset as { label?: unknown }).label
+    : undefined;
+  return typeof label === 'string' && label ? `${label}: ` : '';
+};
+
+const getTooltipTokenValue = (dataset: unknown, dataIndex: number | undefined, fallback: unknown): number => {
+  const tooltipData = dataset && typeof dataset === 'object'
+    ? (dataset as { tooltipData?: unknown[] }).tooltipData
+    : undefined;
+  const tooltipValue = typeof dataIndex === 'number' ? tooltipData?.[dataIndex] : undefined;
+  return toNumber(tooltipValue ?? fallback);
 };
 
 const createChartGradient = (ctx: CanvasRenderingContext2D, chartArea: { top: number; bottom: number }, color: GradientColor) => {
@@ -150,10 +173,19 @@ const formatBucketLabel = (bucket: string, granularity: AnalysisResponse['granul
 function buildTokenUsageRows(buckets: AnalysisTokenUsageBucket[], granularity: AnalysisResponse['granularity']): ChartRow[] {
   return buckets.map((bucket) => ({
     label: formatBucketLabel(bucket.bucket, granularity),
-    input: toNumber(bucket.input_tokens),
-    output: toNumber(bucket.output_tokens),
+    input: calculateDisplayInputTokens({
+      inputTokens: bucket.input_tokens,
+      cachedTokens: bucket.cached_tokens,
+    }),
+    output: calculateDisplayOutputTokens({
+      outputTokens: bucket.output_tokens,
+      reasoningTokens: bucket.reasoning_tokens,
+    }),
+    rawInput: toNumber(bucket.input_tokens),
+    rawOutput: toNumber(bucket.output_tokens),
     cached: toNumber(bucket.cached_tokens),
     reasoning: toNumber(bucket.reasoning_tokens),
+    total: toNumber(bucket.total_tokens),
     requests: toNumber(bucket.requests),
   }));
 }
@@ -191,7 +223,7 @@ function buildTokenLegendItems(labels: TokenLabels): LegendItem[] {
   ];
 }
 
-function buildAnalysisTokenChartOptions({ chartTheme, isMobile }: { chartTheme: ChartTheme; isMobile: boolean }): ChartOptions<'bar'> {
+function buildAnalysisTokenChartOptions({ chartTheme, isMobile, totalTokens, totalLabel }: { chartTheme: ChartTheme; isMobile: boolean; totalTokens: number[]; totalLabel: string }): ChartOptions<'bar'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -209,8 +241,14 @@ function buildAnalysisTokenChartOptions({ chartTheme, isMobile }: { chartTheme: 
         usePointStyle: true,
         callbacks: {
           label: (context) => {
-            const label = context.dataset.label ? `${context.dataset.label}: ` : '';
-            return `${label}${formatCompactNumber(Number(context.parsed.y ?? 0))}`;
+            const label = getDatasetLabelPrefix(context.dataset);
+            const value = getTooltipTokenValue(context.dataset, context.dataIndex, context.parsed.y);
+            return `${label}${formatCompactNumber(value)}`;
+          },
+          footer: (items) => {
+            const dataIndex = items[0]?.dataIndex ?? -1;
+            if (dataIndex < 0) return '';
+            return `${totalLabel}: ${formatCompactNumber(Number(totalTokens[dataIndex] ?? 0))}`;
           },
         },
       },
@@ -248,10 +286,10 @@ function buildAnalysisTokenChartData(rows: ChartRow[], labels: TokenLabels): Cha
   return {
     labels: rows.map((row) => row.label),
     datasets: [
-      { label: labels.input, data: rows.map((row) => row.input), backgroundColor: (context) => toGradientFill(context, tokenColors.input), borderColor: tokenColors.input.base, stack: 'tokens', yAxisID: 'tokens' },
-      { label: labels.output, data: rows.map((row) => row.output), backgroundColor: (context) => toGradientFill(context, tokenColors.output), borderColor: tokenColors.output.base, stack: 'tokens', yAxisID: 'tokens' },
-      { label: labels.cached, data: rows.map((row) => row.cached), backgroundColor: (context) => toGradientFill(context, tokenColors.cached), borderColor: tokenColors.cached.base, stack: 'tokens', yAxisID: 'tokens' },
-      { label: labels.reasoning, data: rows.map((row) => row.reasoning), backgroundColor: (context) => toGradientFill(context, tokenColors.reasoning), borderColor: tokenColors.reasoning.base, stack: 'tokens', yAxisID: 'tokens' },
+      { label: labels.input, data: rows.map((row) => row.input), tooltipData: rows.map((row) => row.rawInput), backgroundColor: (context) => toGradientFill(context, tokenColors.input), borderColor: tokenColors.input.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
+      { label: labels.output, data: rows.map((row) => row.output), tooltipData: rows.map((row) => row.rawOutput), backgroundColor: (context) => toGradientFill(context, tokenColors.output), borderColor: tokenColors.output.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
+      { label: labels.cached, data: rows.map((row) => row.cached), tooltipData: rows.map((row) => row.cached), backgroundColor: (context) => toGradientFill(context, tokenColors.cached), borderColor: tokenColors.cached.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
+      { label: labels.reasoning, data: rows.map((row) => row.reasoning), tooltipData: rows.map((row) => row.reasoning), backgroundColor: (context) => toGradientFill(context, tokenColors.reasoning), borderColor: tokenColors.reasoning.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
       {
         type: 'line',
         label: labels.requests,
@@ -379,11 +417,17 @@ function TokenUsageChart({ rows, loading, isDark, isMobile }: { rows: ChartRow[]
     output: t('usage_stats.output_tokens'),
     cached: t('usage_stats.cached_tokens'),
     reasoning: t('usage_stats.reasoning_tokens'),
+    total: t('usage_stats.total_tokens'),
     requests: t('usage_stats.requests_count'),
   }), [t]);
   const chartTheme = useMemo(() => getChartTheme(isDark), [isDark]);
   const chartData = useMemo(() => buildAnalysisTokenChartData(rows, tokenLabels), [rows, tokenLabels]);
-  const chartOptions = useMemo(() => buildAnalysisTokenChartOptions({ chartTheme, isMobile }), [chartTheme, isMobile]);
+  const chartOptions = useMemo(() => buildAnalysisTokenChartOptions({
+    chartTheme,
+    isMobile,
+    totalTokens: rows.map((row) => row.total),
+    totalLabel: tokenLabels.total,
+  }), [chartTheme, isMobile, rows, tokenLabels.total]);
   const legendItems = useMemo(() => buildTokenLegendItems(tokenLabels), [tokenLabels]);
   return (
     <section className={`${styles.analysisCard} ${styles.tokenUsageCard}`}>

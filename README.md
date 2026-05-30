@@ -1,10 +1,10 @@
 # CPA Usage Keeper
 
-[English README](./README.en.md)
+[中文说明](./README.zh.md)
 
-`CPA Usage Keeper` 是一个独立的 CPA 用量持久化与可视化服务。
+CPA Usage Keeper is a standalone CPA usage persistence and dashboard service.
 
-它依赖 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 作为后端 CPA 数据来源，目标是在 CPA 之上补充持久化存储与统计分析能力。服务会从 CPA Redis usage 队列消费事件并写入 SQLite，定时拉取 CPA metadata，暴露聚合 API，并提供内置 Web Dashboard 用于查看 usage、pricing、request health 和 model/API 维度的统计信息。
+It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) as the backend CPA data source and adds persistent storage and statistical analysis capabilities on top of CPA. The service consumes events from the CPA Redis usage queue into SQLite, periodically pulls CPA metadata, exposes aggregation APIs, and serves a built-in web dashboard for usage, pricing, request health, and model/API statistics.
 
 <p float="left">
   <img src="https://images.bitskyline.com/i/2026/05/govoah.png" width="49%" />
@@ -15,34 +15,36 @@
   <img src="https://images.bitskyline.com/i/2026/05/fu4gh3.png" width="49%" />
 </p>
 
-## 功能特性
+## Features
 
-- 持久保存 CPA usage 数据到 SQLite
-- Dashboard 查看请求量、Token、成本、缓存命中率、成功率和延迟
-- 支持按时间范围、模型、API Key 和来源筛选用量明细
-- 分析页面提供 Token 趋势、模型/API Key/AI Provider 构成和时段热力图
-- API Key 独立查询页，可按 CPA API Key 查看专属用量
-- 凭证页面展示 Auth File 与 AI Provider 使用情况，支持凭证限额查询与刷新
-- 可维护模型价格，用于成本估算和统计展示
-- 可选密码登录保护、SQLite 备份、Docker/Docker Compose 和 systemd 部署
+- Persist CPA usage data to SQLite
+- Dashboard for request volume, tokens, cost, cache hit rate, success rate, and latency
+- Filter usage details by time range, model, API Key, and source
+- Analysis page for token trends, model/API Key/AI Provider composition, and hourly heatmaps
+- Standalone API Key usage page for querying usage by CPA API Key
+- Credentials page for Auth File and AI Provider usage, with credential quota lookup and refresh
+- Maintain model prices for cost estimation and reporting
+- Optional password login protection, SQLite backups, Docker/Docker Compose, and systemd deployment
 
-## 快速开始
+## Quick Start
 
-> 使用前请确认 CPA 配置已开启 usage 统计：`usage-statistics-enabled: true`。
+> Before using CPA Usage Keeper, make sure CPA usage statistics are enabled: `usage-statistics-enabled: true`.
 
-推荐部署路径：
+Recommended deployment path:
 
-- 第一次部署 CPA + Keeper：优先使用 [Docker Compose](#docker-compose推荐)。
-- CPA 已在宿主机运行：使用 [Docker](#dockercpa-已在宿主机运行)。
-- 不使用容器：使用 [Linux 二进制](#linux-二进制)。
+- First-time CPA + Keeper deployment: use [Docker Compose](#docker-compose-recommended).
+- CPA already runs on the host: use [Docker](#docker-cpa-already-runs-on-the-host).
+- No containers: use the [Linux binary](#linux-binary).
 
-公网部署建议启用 `AUTH_ENABLED=true`，并配置 `LOGIN_PASSWORD` 保护数据。
+For public deployments, enable `AUTH_ENABLED=true` and configure `LOGIN_PASSWORD` to protect your data.
 
-## 部署方式
+## Deployment
 
-### Docker Compose（推荐）
+### Docker Compose (Recommended)
 
-仓库提供了一个最简 `docker-compose.example.yml` 示例，用于同时部署 CPA 和 CPA Usage Keeper：
+The example below is a minimal reference for running CPA and CPA Usage Keeper together.
+
+The repository's `docker-compose.example.yml` is intentionally a Keeper-only template. Use it when CPA is already deployed, or merge its `cpa-usage-keeper` service into your own Compose project.
 
 ```yaml
 services:
@@ -69,7 +71,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      TZ: Asia/Shanghai # 设置容器时区，日志时间会按该时区显示。
+      TZ: Asia/Shanghai # Sets the container timezone; log timestamps use this timezone.
       CPA_BASE_URL: http://cli-proxy-api:8317
       CPA_MANAGEMENT_KEY: replace-with-your-management-key
       REDIS_QUEUE_ADDR: cli-proxy-api:8317
@@ -85,55 +87,55 @@ networks:
     driver: bridge
 ```
 
-如果想用 `.env` 文件管理 Keeper 配置，可以把上面 `cpa-usage-keeper` 的 `environment` 改成 `env_file`：
+To manage Keeper settings with a `.env` file, remove the `environment` block from the `cpa-usage-keeper` service and add `env_file`:
 
 ```yaml
     env_file:
       - .env
+    volumes:
+      - ./keeper:/data
 ```
 
-然后在宿主机的 `docker-compose.yml` 同一目录创建 `.env` 文件，例如：
+Create `.env` on the host in the same directory as `docker-compose.yml`, for example:
 
 ```env
 TZ=Asia/Shanghai
 CPA_BASE_URL=http://cli-proxy-api:8317
 CPA_MANAGEMENT_KEY=replace-with-your-management-key
-REDIS_QUEUE_ADDR=cli-proxy-api:8317
 AUTH_ENABLED=true
 LOGIN_PASSWORD=replace-with-your-login-password
 ```
 
-`env_file` 中的路径相对 `docker-compose.yml` 所在目录解析；上面的 `.env` 会被注入 Keeper 容器，效果等同于为容器设置这些环境变量。
+Docker Compose injects the `.env` values into the Keeper container as environment variables. If CPA uses a non-default Redis/RESP address, also set `REDIS_QUEUE_ADDR` in `.env`.
 
-启动：
+Start:
 
 ```bash
 docker compose up -d
 ```
 
-停止：
+Stop:
 
 ```bash
 docker compose down
 ```
 
-CPA 文件放在 `./cpa`，CPA Usage Keeper 数据放在 `./keeper`。
+CPA files are stored under `./cpa`, and CPA Usage Keeper data is stored under `./keeper`.
 
-### Docker（CPA 已在宿主机运行）
+### Docker (CPA Already Runs On The Host)
 
-复制配置模板并编辑，至少设置 `CPA_BASE_URL`、`CPA_MANAGEMENT_KEY`、`REDIS_QUEUE_ADDR`、`AUTH_ENABLED` 和 `LOGIN_PASSWORD`：
+Copy and edit the example config. At minimum, set `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`. For public deployments, also set `AUTH_ENABLED=true` and `LOGIN_PASSWORD`. If CPA uses a non-default Redis/RESP address, also set `REDIS_QUEUE_ADDR`:
 
 ```bash
 cp .env.example .env
 vim .env
 ```
 
-宿主机运行 CPA 时，`.env` 中通常需要这样设置：
+When CPA runs on the host, `.env` usually needs these values:
 
 ```env
 CPA_BASE_URL=http://host.docker.internal:8317
 CPA_MANAGEMENT_KEY=replace-with-your-management-key
-REDIS_QUEUE_ADDR=host.docker.internal:8317
 AUTH_ENABLED=true
 LOGIN_PASSWORD=replace-with-your-login-password
 ```
@@ -148,24 +150,24 @@ docker run -d \
   ghcr.io/willxup/cpa-usage-keeper:latest
 ```
 
-### Linux 二进制
+### Linux Binary
 
-#### 下载
+#### Download
 
-在 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载对应架构的 Linux 二进制包，或使用命令行下载：
+Download the Linux binary package for your architecture from [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest), or use the command line:
 
 ```bash
-curl -L -o cpa-usage-keeper.tar.gz "<替换为 Linux 二进制包下载地址>"
+curl -L -o cpa-usage-keeper.tar.gz "<replace-with-linux-binary-download-url>"
 mkdir -p cpa-usage-keeper
 tar -xzf cpa-usage-keeper.tar.gz -C cpa-usage-keeper --strip-components=1
 cd cpa-usage-keeper
 ```
 
-请在 Releases 页面复制 `linux_amd64` 或 `linux_arm64` 包的下载地址，并替换上面命令中的占位符。
+Copy the `linux_amd64` or `linux_arm64` package URL from Releases, then replace the placeholder in the command above.
 
-#### 配置和运行
+#### Configure And Run
 
-复制配置模板并编辑，具体配置项参考 [配置](#配置)：
+Copy and edit the example config. See [Configuration](#configuration) for the available options:
 
 ```bash
 cp .env.example .env
@@ -173,124 +175,124 @@ vim .env
 ./cpa-usage-keeper
 ```
 
-#### systemd 常驻运行
+#### Run With systemd
 
-Linux 二进制包内置 `cpa-usage-keeper.service`，可直接注册为 `systemd` 服务。启动后进程由 systemd 托管，关闭 SSH 或终端不会结束进程。
+The Linux binary package includes `cpa-usage-keeper.service`, which can be registered directly as a `systemd` service. After it starts, systemd keeps the process running after SSH or terminal sessions close.
 
-`systemd` 的 `WorkingDirectory` 需要绝对路径。下面的 `sed` 命令会把当前目录自动写入 service 文件：
-
-```bash
-sudo cp cpa-usage-keeper.service /etc/systemd/system/cpa-usage-keeper.service # 复制 service 文件到 systemd 目录
-sudo sed -i "s|__CPA_USAGE_KEEPER_DIR__|$(pwd)|g" /etc/systemd/system/cpa-usage-keeper.service # 写入当前目录作为 WorkingDirectory
-sudo systemctl daemon-reload # 重新加载 systemd 配置
-sudo systemctl enable --now cpa-usage-keeper # 设置开机自启并立即启动服务
-```
-
-常用命令：
+`systemd` requires an absolute `WorkingDirectory`. The `sed` command below writes the current directory into the service file automatically:
 
 ```bash
-sudo systemctl status cpa-usage-keeper # 查看服务状态
-sudo journalctl -u cpa-usage-keeper -f # 实时查看服务日志
-sudo systemctl restart cpa-usage-keeper # 重启服务
+sudo cp cpa-usage-keeper.service /etc/systemd/system/cpa-usage-keeper.service # Copy the service file into the systemd unit directory.
+sudo sed -i "s|__CPA_USAGE_KEEPER_DIR__|$(pwd)|g" /etc/systemd/system/cpa-usage-keeper.service # Write the current directory as WorkingDirectory.
+sudo systemctl daemon-reload # Reload systemd unit files.
+sudo systemctl enable --now cpa-usage-keeper # Enable startup on boot and start the service now.
 ```
 
-## 配置
+Useful commands:
 
-复制配置模板：
+```bash
+sudo systemctl status cpa-usage-keeper # Show service status.
+sudo journalctl -u cpa-usage-keeper -f # Follow service logs.
+sudo systemctl restart cpa-usage-keeper # Restart the service.
+```
+
+## Configuration
+
+Copy the example config:
 
 ```bash
 cp .env.example .env
 ```
 
-新手部署时优先看“最小必填”和“Web 访问与反代”两组，其它配置保持默认即可。
+For first-time deployments, start with "Minimum required" and "Web access and reverse proxy". Most other settings can keep their defaults.
 
-### 最小必填
+### Minimum Required
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `CPA_BASE_URL` | 是 | - | Keeper 服务端访问 CPA 的地址。Docker Compose 内通常是 `http://cli-proxy-api:8317`，可以是内网地址或容器服务名 |
-| `CPA_MANAGEMENT_KEY` | 是 | - | CPA management key，用于读取 CPA 管理接口数据 |
+| `CPA_BASE_URL` | Yes | - | URL used by the Keeper server to call CPA. In Docker Compose this is usually `http://cli-proxy-api:8317`, and it can be a private address or container service name |
+| `CPA_MANAGEMENT_KEY` | Yes | - | CPA management key used to read CPA management APIs |
 
-### Web 访问与反代
+### Web Access And Reverse Proxy
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `APP_PORT` | 否 | `8080` | Keeper HTTP 监听端口 |
-| `APP_BASE_PATH` | 否 | 根路径 | Keeper 子路径部署前缀，例如 `/keeper`；留空表示部署在 `/` |
-| `CPA_PUBLIC_URL` | 否 | 当前浏览器同源根路径 | 浏览器访问 CPA 的公开地址，用于“返回 CPA”跳转 |
+| `APP_PORT` | No | `8080` | Keeper HTTP listen port |
+| `APP_BASE_PATH` | No | root path | Keeper subpath prefix, such as `/keeper`; empty means `/` |
+| `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link |
 
-`APP_BASE_PATH` 必须为空或以 `/` 开头；例如 `/cpa`，`/cpa/` 会规范为 `/cpa`。
+`APP_BASE_PATH` must be empty or start with `/`; for example `/cpa`. `/cpa/` is normalized to `/cpa`.
 
-`CPA_PUBLIC_URL` 可填写域名、带协议的完整地址或相对路径，例如 `https://cpa.example.com`、`https://cpa.example.com/cpa/` 或 `/cpa/`。前端会自动追加 `management.html`，并兼容末尾已有 `/` 或已经填写到 `management.html` 的情况。未配置时，“返回 CPA”默认跳转到当前浏览器同源根路径下的 `/management.html`；如果 CPA 和 Keeper 的外部域名、端口或路径不一致，请显式设置 `CPA_PUBLIC_URL`。
+`CPA_PUBLIC_URL` may be a domain, a full URL with scheme, or a relative path, such as `https://cpa.example.com`, `https://cpa.example.com/cpa/`, or `/cpa/`. The frontend appends `management.html` automatically and handles trailing `/` or values that already end in `management.html`. When unset, the "Back to CPA" link points to `/management.html` on the current browser origin. If CPA and Keeper use different public domains, ports, or paths, set `CPA_PUBLIC_URL` explicitly.
 
-`CPA_BASE_URL` 只用于服务端访问 CPA，可以是 Docker 内部服务名或内网地址；不要把它当作浏览器跳转地址使用。
+`CPA_BASE_URL` is only used by the server to call CPA, so it can be a Docker service name or private network address. Do not use it as the browser navigation URL.
 
-### 登录保护
+### Login Protection
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `AUTH_ENABLED` | 否 | `false` | 是否启用登录保护 |
-| `LOGIN_PASSWORD` | 鉴权启用时必填 | - | 登录密码 |
-| `AUTH_SESSION_TTL` | 否 | `168h` | 登录 session 有效时长 |
+| `AUTH_ENABLED` | No | `false` | Enable login protection |
+| `LOGIN_PASSWORD` | When auth is enabled | - | Login password |
+| `AUTH_SESSION_TTL` | No | `168h` | Login session lifetime |
 
-### 时区与请求行为
+### Timezone And Request Behavior
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `TZ` | 否 | `Asia/Shanghai` | 统计和展示使用的时区；Today、按天统计、页面时间、日志时间和每日清理时间都会按这个时区计算 |
-| `REQUEST_TIMEOUT` | 否 | `30s` | 请求 CPA HTTP 接口和 Redis 队列的超时时间 |
-| `TLS_SKIP_VERIFY` | 否 | `false` | 跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证；仅在使用自签名证书时启用 |
+| `TZ` | No | `Asia/Shanghai` | Timezone used for statistics and display; Today, daily totals, page timestamps, log timestamps, and daily cleanup are calculated in this timezone |
+| `REQUEST_TIMEOUT` | No | `30s` | Timeout for CPA HTTP requests and Redis queue operations |
+| `TLS_SKIP_VERIFY` | No | `false` | Skip TLS certificate verification for CPA HTTPS and Redis queue TLS; enable only with self-signed certificates |
 
-### Auth Files 限额刷新
+### Auth Files Quota Refresh
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `QUOTA_AUTO_REFRESH_ENABLED` | 否 | `false` | 是否启用 Auth Files 限额自动刷新；仅在后台页面可见并持续心跳时执行 |
-| `QUOTA_AUTO_REFRESH_INTERVAL` | 否 | `5m` | Auth Files 限额自动刷新间隔，最低 `60s`，仅在后台页面活跃时生效 |
-| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | Auth Files 限额刷新队列最大并发数，最大 `100` |
+| `QUOTA_AUTO_REFRESH_ENABLED` | No | `false` | Enable Auth Files quota auto-refresh; it runs only while a backend page is visible and sending heartbeats |
+| `QUOTA_AUTO_REFRESH_INTERVAL` | No | `5m` | Auth Files quota auto-refresh interval, minimum `60s`, active only while a backend page is active |
+| `QUOTA_REFRESH_WORKER_LIMIT` | No | `10` | Maximum Auth Files quota refresh concurrency, capped at `100` |
 
-### Redis 队列高级配置
+### Redis Queue Advanced Settings
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `REDIS_QUEUE_ADDR` | 否 | `CPA_BASE_URL` 主机名 + `8317` | CPA Redis/RESP TCP 地址；一般保持空即可。非默认端口或单独暴露 Redis stream 时填写 `host:port` |
-| `REDIS_QUEUE_TLS` | 否 | `false` | 是否使用 TLS 连接 Redis 队列；显式设置 `REDIS_QUEUE_ADDR` 且需要 TLS 时设为 `true` |
-| `REDIS_QUEUE_BATCH_SIZE` | 否 | `10000` | 每次最多拉取的队列记录数 |
-| `REDIS_QUEUE_IDLE_INTERVAL` | 否 | `1s` | 队列为空时的检查间隔 |
+| `REDIS_QUEUE_ADDR` | No | `CPA_BASE_URL` hostname + `8317` | CPA Redis/RESP TCP address; normally leave empty. Set `host:port` for non-default ports or separately exposed Redis streams |
+| `REDIS_QUEUE_TLS` | No | `false` | Use TLS for Redis queue connection; set `true` when `REDIS_QUEUE_ADDR` is explicit and requires TLS |
+| `REDIS_QUEUE_BATCH_SIZE` | No | `10000` | Maximum queue records per pull |
+| `REDIS_QUEUE_IDLE_INTERVAL` | No | `1s` | Empty queue check interval |
 
-### 存储、日志与备份
+### Storage, Logs, And Backups
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `WORK_DIR` | 否 | `./data` | 应用工作目录；数据库、日志和备份默认分别写入 `app.db`、`logs/`、`backups/` |
-| `LOG_LEVEL` | 否 | `info` | 日志级别 |
-| `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
-| `LOG_RETENTION_DAYS` | 否 | `7` | 日志保留天数；`0` 表示不自动清理 |
-| `BACKUP_ENABLED` | 否 | `true` | 是否启用 SQLite 数据库备份 |
-| `BACKUP_INTERVAL` | 否 | `24h` | 数据库备份间隔 |
-| `BACKUP_RETENTION_DAYS` | 否 | `7` | 备份保留天数 |
+| `WORK_DIR` | No | `./data` | Application work directory; database, logs, and backups default to `app.db`, `logs/`, and `backups/` under it |
+| `LOG_LEVEL` | No | `info` | Log level |
+| `LOG_FILE_ENABLED` | No | `true` | Write persistent log files |
+| `LOG_RETENTION_DAYS` | No | `7` | Log retention days; `0` disables cleanup |
+| `BACKUP_ENABLED` | No | `true` | Enable SQLite database backups |
+| `BACKUP_INTERVAL` | No | `24h` | Database backup interval |
+| `BACKUP_RETENTION_DAYS` | No | `7` | Backup retention days |
 
-### 内置 HTTPS
+### Built-In HTTPS
 
-| 变量 | 必填 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `TLS_ENABLED` | 否 | `false` | 是否让 Keeper 自己启用 HTTPS/TLS |
-| `TLS_CERT_FILE` | 启用 TLS 时必填 | - | HTTPS 证书文件路径 |
-| `TLS_KEY_FILE` | 启用 TLS 时必填 | - | HTTPS 私钥文件路径 |
+| `TLS_ENABLED` | No | `false` | Let Keeper serve HTTPS/TLS directly |
+| `TLS_CERT_FILE` | Required when TLS is enabled | - | HTTPS certificate file path |
+| `TLS_KEY_FILE` | Required when TLS is enabled | - | HTTPS private key file path |
 
-通常建议在 nginx、Caddy 等反向代理层处理 HTTPS。只有需要 Keeper 进程直接提供 HTTPS 时，才设置 `TLS_ENABLED=true`，并填写 `TLS_CERT_FILE` 和 `TLS_KEY_FILE`；相对路径会按 `.env` 所在目录解析。
+Usually, HTTPS should be terminated at nginx, Caddy, or another reverse proxy. Set `TLS_ENABLED=true` only when the Keeper process must serve HTTPS directly, and provide `TLS_CERT_FILE` and `TLS_KEY_FILE`; relative paths are resolved against the `.env` file directory.
 
-安全与数据说明：
+Security and data notes:
 
-- SQLite 数据库备份会保存应用数据库中的原始数据，备份文件不做加密。
-- 面向浏览器的 API 会对 key-like source/lookup 字段做脱敏或稳定公开标识映射，但不会修改数据库原始值。
-- 公开部署建议开启 `AUTH_ENABLED=true`，并在反向代理层配置 HTTPS。
-- 登录 session 存在服务进程内存中，服务重启后已登录 session 会失效。
-- Redis inbox 原始消息会自动清理：成功数据保留到当天结束后清理，失败数据保留 7 天。
+- SQLite database backups store original data from the application database, and backup files are not encrypted.
+- Browser-facing APIs redact key-like source/lookup fields or map them to stable public identifiers, but raw database values are unchanged.
+- For public deployments, enable `AUTH_ENABLED=true` and terminate HTTPS at your reverse proxy.
+- Login sessions are stored in process memory and become invalid after restart.
+- Redis inbox raw messages are cleaned up automatically: successful rows are kept until the end of the current day, and failed rows are kept for 7 days.
 
-## Nginx反代
+## Nginx reverse proxy
 
-部署到 `/cpa` 时设置 `APP_BASE_PATH=/cpa`，并在反向代理中保留该前缀：
+When serving under `/cpa`, set `APP_BASE_PATH=/cpa` and keep the prefix in your reverse proxy:
 
 ```nginx
 location /cpa/ {
@@ -301,86 +303,85 @@ location /cpa/ {
 }
 ```
 
-如果 CPA 管理页和 Keeper 使用同一个浏览器域名，且 CPA 管理页在该域名根路径的 `/management.html`，可以不配置 `CPA_PUBLIC_URL`。例如 Keeper 在 `https://cpa.example.com/keeper/` 时，“返回 CPA”会默认跳转到 `https://cpa.example.com/management.html`。
+If the CPA management page and Keeper share the same browser domain, and CPA's management page is available at `/management.html` on that domain root, `CPA_PUBLIC_URL` can be omitted. For example, when Keeper is served from `https://cpa.example.com/keeper/`, "Back to CPA" defaults to `https://cpa.example.com/management.html`.
 
-如果 CPA 管理页在其它域名、端口或路径下，请配置 `CPA_PUBLIC_URL`，例如：
+If the CPA management page is on another domain, port, or path, set `CPA_PUBLIC_URL`, for example:
 
 ```env
 CPA_PUBLIC_URL=https://cpa.example.com
 ```
 
-## 项目结构
+## Project Structure
 
 ```text
-cmd/server/              应用入口
-internal/api/            HTTP 路由与处理器
-internal/app/            应用装配与启动
-internal/auth/           内存 session 鉴权
-internal/backup/         SQLite 数据库备份管理
-internal/benchmark/      聚合性能基准测试辅助
-internal/config/         环境配置加载
-internal/cpa/            CPA 客户端与类型定义
-internal/entities/       GORM 数据模型
-internal/helper/         后端通用辅助方法
-internal/logging/        日志初始化与保留策略
-internal/poller/         后台队列消费与 metadata 同步
-internal/quota/          quota 缓存、刷新与查询服务
-internal/redact/         前端展示字段脱敏
-internal/repository/     SQLite 访问与聚合逻辑
-internal/service/        usage、pricing 与身份数据服务
-internal/timeutil/       项目时区与时间工具
-internal/updatecheck/    GitHub Release 更新检查
-internal/version/        构建版本信息
-deploy/linux/            Linux systemd 服务文件
-web/                     React + TypeScript 前端
+cmd/server/              Application entrypoint
+internal/api/            HTTP routes and handlers
+internal/app/            App wiring and startup
+internal/auth/           In-memory session auth
+internal/backup/         SQLite database backup management
+internal/benchmark/      Aggregation benchmark helpers
+internal/config/         Environment config loading
+internal/cpa/            CPA client and types
+internal/entities/       GORM data models
+internal/helper/         Shared backend helpers and browser-facing redaction
+internal/logging/        Logging setup and retention
+internal/poller/         Background queue consumption and metadata sync
+internal/quota/          Quota cache, refresh, and query services
+internal/repository/     SQLite access and aggregations
+internal/service/        Usage, pricing, and identity services
+internal/timeutil/       Project timezone and time helpers
+internal/updatecheck/    GitHub Release update checks
+internal/version/        Build version metadata
+deploy/linux/            Linux systemd service file
+web/                     React + TypeScript frontend
 ```
 
-## 本地开发
+## Development
 
-### 前置依赖
+### Prerequisites
 
 - Go 1.22+
 - Node.js 22+
 - npm
-- 已运行的 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI)
+- A running [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) instance
 
-### 本地启动
+### Run locally
 
-1. 复制并编辑本地配置，至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。如果 CPA 的 Redis/RESP 端口不是默认 `8317`，同时设置 `REDIS_QUEUE_ADDR`：
+1. Create and edit your local config. At minimum, set `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`. If the CPA Redis/RESP port is not the default `8317`, also set `REDIS_QUEUE_ADDR`:
 
 ```bash
 cp .env.example .env
 vim .env
 ```
 
-2. 启动后端：
+2. Start the backend:
 
 ```bash
 go run ./cmd/server/main.go
 ```
 
-3. 在另一个终端安装前端依赖并启动开发服务器：
+3. In another terminal, install frontend dependencies and start the dev server:
 
 ```bash
 npm --prefix ./web ci
 npm --prefix ./web run dev -- --host 127.0.0.1
 ```
 
-前端开发服务器默认把 `/api` 代理到 `http://127.0.0.1:8080`，访问 `http://127.0.0.1:5173` 即可联调。如果后端使用了其他端口：
+The frontend dev server proxies `/api` to `http://127.0.0.1:8080` by default. Open `http://127.0.0.1:5173` for local development. If the backend uses another port:
 
 ```bash
 VITE_API_PROXY_TARGET=http://127.0.0.1:9090 npm --prefix ./web run dev -- --host 127.0.0.1
 ```
 
-### 测试
+### Tests
 
-运行完整的本地验证基线：
+Run the full local verification baseline:
 
 ```bash
 make verify
 ```
 
-也可以单独运行各项检查：
+Or run checks individually:
 
 ```bash
 go test ./cmd/... ./internal/...
@@ -396,7 +397,6 @@ npm --prefix ./web run build
   <img src="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&legend=top-left" />
 </p>
 
-
 ## License
 
-本项目基于 [MIT License](./LICENSE) 开源。
+This project is open source under the [MIT License](./LICENSE).

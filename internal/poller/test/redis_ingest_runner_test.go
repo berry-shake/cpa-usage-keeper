@@ -34,6 +34,35 @@ func TestRedisIngestRunnerStartupFallsBackToHTTPPull(t *testing.T) {
 	}
 }
 
+func TestRedisIngestRunnerStartupAllFailedUsesTenSecondInitialRetry(t *testing.T) {
+	logs := capturePollerLogs(t, logrus.DebugLevel)
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{err: errors.New("subscribe unavailable")},
+		&fakePullSource{err: errors.New("redis unavailable")},
+		&fakePullSource{err: errors.New("http unavailable")},
+		newFakeInboxWriter(),
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		_ = runner.Run(ctx)
+		close(done)
+	}()
+
+	output := waitForLogContains(t, logs, "redis ingest startup retry scheduled", "retry_after=10s")
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runner to stop")
+	}
+	if !strings.Contains(output, "startup_failed") {
+		t.Fatalf("expected startup failure before retry schedule, got logs: %s", output)
+	}
+}
+
 func TestRedisIngestRunnerSubscribeBackfillsBeforeReceiving(t *testing.T) {
 	writer := newFakeInboxWriter()
 	sub := &blockingSubscription{messages: make(chan string)}

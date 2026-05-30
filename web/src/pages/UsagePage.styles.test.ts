@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 const readSource = (url: URL) => readFileSync(url, 'utf8').replace(/\r\n/g, '\n')
 
+const globalStyles = readSource(new URL('../styles/global.scss', import.meta.url))
 const usagePageStyles = readSource(new URL('./UsagePage.module.scss', import.meta.url))
 const usagePageSource = readSource(new URL('./UsagePage.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
@@ -342,9 +343,45 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toMatch(/\.customRangeInput\s*\{[\s\S]*?-webkit-user-select:\s*none;/)
     expect(usagePageSource).not.toContain('readOnly')
     expect(usagePageSource).not.toContain('onPointerDown={handleCustomDateInputPointerDown}')
+    expect(usagePageSource).toContain('className={styles.customRangeInputShell}')
+    expect(usagePageSource).toContain('className={styles.customRangeInputDisplay}')
     expect(usagePageSource).toContain('onClick={handleCustomDateInputActivate}')
     expect(usagePageSource).toContain('onFocus={handleCustomDateInputActivate}')
     expect(usagePageSource).toContain('onKeyDown={handleCustomDateInputKeyDown}')
+  })
+
+  it('keeps mobile custom date fields inside the toolbar before the refresh action', () => {
+    const narrowToolbarStart = usagePageStyles.indexOf('@media (max-width: #{$breakpoint-tablet})')
+    const mobileToolbarStart = usagePageStyles.indexOf('@include mobile {\n  .tabPill', narrowToolbarStart)
+    const narrowToolbarBlock = usagePageStyles.slice(
+      narrowToolbarStart,
+      mobileToolbarStart
+    )
+    const mobileToolbarBlock = usagePageStyles.slice(
+      mobileToolbarStart,
+      usagePageStyles.indexOf('@media (prefers-reduced-motion: reduce)')
+    )
+
+    expect(narrowToolbarBlock).toMatch(/\.usageFilterBar\s*\{[\s\S]*?max-height:\s*none;/)
+    expect(narrowToolbarBlock).toMatch(/\.usageFilterBar\s*\{[\s\S]*?overflow:\s*visible;/)
+    expect(narrowToolbarBlock).toMatch(/\.timeRangeGroup\s*\{[\s\S]*?width:\s*100%;/)
+    expect(narrowToolbarBlock).toMatch(/\.customRangeFieldGroup\s*\{[\s\S]*?width:\s*100%;/)
+    expect(narrowToolbarBlock).toMatch(/\.customRangeFieldGroupOpen\s*\{[\s\S]*?max-height:\s*180px;/)
+    expect(mobileToolbarBlock).toMatch(/\.usageFilterBar\s*\{[\s\S]*?display:\s*grid;/)
+    expect(mobileToolbarBlock).toMatch(/\.usageFilterBar\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
+    expect(mobileToolbarBlock).toMatch(/\.rangeFilterField\s*\{[\s\S]*?grid-template-columns:\s*auto minmax\(0, 1fr\);/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeFieldGroup\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeField\s*\{[\s\S]*?grid-template-columns:\s*auto minmax\(0, 1fr\);/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeField\s*\{[\s\S]*?min-width:\s*0;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeField\s*\{[\s\S]*?max-width:\s*100%;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInputShell\s*\{[\s\S]*?position:\s*relative;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInputShell\s*\{[\s\S]*?overflow:\s*hidden;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInputDisplay\s*\{[\s\S]*?display:\s*flex;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInput\s*\{[\s\S]*?position:\s*absolute;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInput\s*\{[\s\S]*?min-width:\s*0;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInput\s*\{[\s\S]*?max-width:\s*100%;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInput\s*\{[\s\S]*?display:\s*block;/)
+    expect(mobileToolbarBlock).toMatch(/\.customRangeInput\s*\{[\s\S]*?opacity:\s*0;/)
   })
 
   it('keeps Overview chart period controls hidden because period selection is automatic', () => {
@@ -373,22 +410,45 @@ describe('UsagePage toolbar styles', () => {
   })
 
   it('aligns Request Event Log pagination with credential pagination height', () => {
-    expect(usagePageStyles).toMatch(/\.requestEventsCard:global\(\.card\)\s*\{[\s\S]*?padding-bottom:\s*0;/)
+    expect(usagePageStyles).toMatch(/\.requestEventsCard:global\(\.card\)\s*\{[\s\S]*?padding:\s*0;/)
     expect(requestEventsSource).toContain('className={styles.requestEventsCard}')
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?--usage-pagination-bar-height:\s*51px;/)
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?height:\s*var\(--usage-pagination-bar-height\);/)
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?box-sizing:\s*border-box;/)
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?align-items:\s*center;/)
-    expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?padding:\s*0 #\{\$spacing-lg\};/)
+    expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?padding:\s*0 22px;/)
   })
 
   it('keeps Request Event Log headers visible while the table scrolls', () => {
-    expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?height:\s*clamp\(400px,\s*60vh,\s*600px\);/)
+    expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?height:\s*clamp\(520px,\s*68vh,\s*760px\);/)
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?overflow:\s*auto;/)
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?thead\s+th\s*\{[\s\S]*?position:\s*sticky;/)
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?thead\s+th\s*\{[\s\S]*?top:\s*0;/)
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?thead\s+th\s*\{[\s\S]*?z-index:\s*2;/)
     expect(usagePageStyles).toMatch(/\.requestEventsTableWrapper\s*\{[\s\S]*?\.table\s*\{[\s\S]*?border-collapse:\s*separate;/)
+  })
+
+  it('themes the WebKit scrollbar corner so intersecting scrollbars do not show a white square', () => {
+    expect(globalStyles).toMatch(/::-webkit-scrollbar-corner\s*\{[\s\S]*?background:\s*var\(--bg-secondary\);/)
+  })
+
+  it('renders Request Event Log with a single outer frame instead of a nested table card', () => {
+    const cardBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.requestEventsCard:global(.card) {'),
+      usagePageStyles.indexOf('.requestEventsTitleRow')
+    )
+    const tableWrapperBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.requestEventsTableWrapper {'),
+      usagePageStyles.indexOf('.requestEventsTimestamp')
+    )
+
+    expect(cardBlock).toMatch(/padding:\s*0;/)
+    expect(cardBlock).toMatch(/overflow:\s*hidden;/)
+    expect(cardBlock).toMatch(/:global\(\.card-header\)\s*\{[\s\S]*?margin-bottom:\s*0;/)
+    expect(cardBlock).toMatch(/:global\(\.card-header\)\s*\{[\s\S]*?border-bottom:\s*1px solid var\(--border-color\);/)
+    expect(tableWrapperBlock).toMatch(/border:\s*0;/)
+    expect(tableWrapperBlock).toMatch(/border-radius:\s*0;/)
+    expect(tableWrapperBlock).not.toMatch(/border:\s*1px solid/)
   })
 
   it('keeps the Request Event Log timestamp column compact', () => {
@@ -401,6 +461,11 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toMatch(/\.requestEventsReasoningHeader\s*\{[\s\S]*?white-space:\s*nowrap;/)
     expect(usagePageStyles).not.toMatch(/\.requestEventsReasoningHeader\s*\{[^}]*width:/)
     expect(requestEventsSource).toContain('<th className={styles.requestEventsReasoningHeader}>{t(\'usage_stats.reasoning_tokens\')}</th>')
+  })
+
+  it('keeps Request Event Log model and endpoint columns compact', () => {
+    expect(usagePageStyles).toMatch(/\.modelCell\s*\{[\s\S]*?min-width:\s*110px;/)
+    expect(usagePageStyles).toMatch(/\.requestEventsEndpointCell\s*\{[\s\S]*?min-width:\s*100px;/)
   })
 
   it('provides reusable pill controls for usage subpages', () => {

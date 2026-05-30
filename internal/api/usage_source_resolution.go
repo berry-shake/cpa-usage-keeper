@@ -6,7 +6,6 @@ import (
 
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
-	"cpa-usage-keeper/internal/redact"
 )
 
 type usageSourceResolver struct {
@@ -64,12 +63,12 @@ func usageSourceResolutionFromIdentity(item entities.UsageIdentity, fallbackIden
 		safeAIProviderDisplayValue(helper.UsageIdentityDisplayName(item), fallbackIdentity, ""),
 		safeAIProviderDisplayValue(item.Provider, fallbackIdentity, ""),
 		identityType,
-		redact.APIKeyDisplayName(fallbackIdentity),
+		helper.RedactSensitiveValue(fallbackIdentity),
 	)
 	displayName = appendIdentityQualifierIfGeneric(item, displayName)
 	sourceKey := "provider:" + uintToString(item.ID)
 	if item.ID == 0 {
-		sourceKey = "provider:" + redact.APIKeyDisplayName(fallbackIdentity)
+		sourceKey = "provider:" + helper.RedactSensitiveValue(fallbackIdentity)
 	}
 	return usageSourceResolution{
 		DisplayName: displayName,

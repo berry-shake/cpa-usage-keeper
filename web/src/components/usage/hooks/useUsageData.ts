@@ -1,10 +1,17 @@
 import { useEffect, useCallback } from 'react';
 import { ApiError } from '@/lib/api';
-import type { UsageOverviewResponse, UsageSnapshot, UsageTimeRange } from '@/lib/types';
+import type { UsageOverviewResponse, UsageOverviewUsageSnapshot, UsageTimeRange } from '@/lib/types';
 import { USAGE_STATS_STALE_TIME_MS, useUsageStatsStore } from '@/stores';
 import { buildUsageRangeQuery, normalizeUsageRange } from '@/utils/usage/rangeQuery';
 
-export type UsagePayload = Partial<UsageSnapshot>;
+export type UsagePayload = Partial<UsageOverviewUsageSnapshot> & {
+  model_series?: Record<string, {
+    requests_by_hour?: Record<string, number>;
+    requests_by_day?: Record<string, number>;
+    tokens_by_hour?: Record<string, number>;
+    tokens_by_day?: Record<string, number>;
+  }>;
+};
 
 export type UsageOverviewPayload = Omit<UsageOverviewResponse, 'usage'> & {
   usage: UsagePayload;

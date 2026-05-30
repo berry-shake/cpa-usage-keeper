@@ -17,7 +17,6 @@ const usageWithBackendCost: UsageOverviewResponse = {
     requests_by_hour: {},
     tokens_by_day: {},
     tokens_by_hour: {},
-    apis: {},
   },
   summary: {
     request_count: 9,

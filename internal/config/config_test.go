@@ -149,9 +149,6 @@ func TestLoadFromEnvAppliesDefaults(t *testing.T) {
 	if cfg.RedisQueueIdleInterval != time.Second {
 		t.Fatalf("expected default redis queue idle interval 1s, got %s", cfg.RedisQueueIdleInterval)
 	}
-	if cfg.RedisQueueErrorBackoff != RedisQueueErrorBackoffDefault {
-		t.Fatalf("expected default redis queue error backoff 10s, got %s", cfg.RedisQueueErrorBackoff)
-	}
 	if cfg.MetadataSyncInterval != MetadataSyncIntervalDefault {
 		t.Fatalf("expected default metadata sync interval 30s, got %s", cfg.MetadataSyncInterval)
 	}
@@ -571,18 +568,17 @@ func TestLoadFromEnvRejectsNonPositiveRedisQueueIdleInterval(t *testing.T) {
 	}
 }
 
-func TestLoadFromEnvIgnoresRemovedRedisPollerEnvOverrides(t *testing.T) {
+func TestLoadFromEnvIgnoresRemovedMetadataSyncIntervalOverride(t *testing.T) {
 	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
 	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
-	t.Setenv("REDIS_QUEUE_ERROR_BACKOFF", "20s")
 	t.Setenv("REDIS_METADATA_SYNC_INTERVAL", "45s")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
 		t.Fatalf("LoadFromEnv returned error: %v", err)
 	}
-	if cfg.RedisQueueErrorBackoff != RedisQueueErrorBackoffDefault || cfg.MetadataSyncInterval != MetadataSyncIntervalDefault {
-		t.Fatalf("expected removed env overrides to be ignored, got error_backoff=%s metadata_interval=%s", cfg.RedisQueueErrorBackoff, cfg.MetadataSyncInterval)
+	if cfg.MetadataSyncInterval != MetadataSyncIntervalDefault {
+		t.Fatalf("expected removed env overrides to be ignored, got metadata_interval=%s", cfg.MetadataSyncInterval)
 	}
 }
 

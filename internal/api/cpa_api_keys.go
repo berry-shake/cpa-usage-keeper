@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/service"
 	"cpa-usage-keeper/internal/timeutil"
 
@@ -128,16 +129,8 @@ func listCPAAPIKeyOptionRows(c *gin.Context, provider service.CPAAPIKeyProvider)
 	return response, nil
 }
 
-func cpaAPIKeyDisplayLabel(row entities.CPAAPIKey) string {
-	label := row.DisplayKey
-	if strings.TrimSpace(row.KeyAlias) != "" {
-		label = strings.TrimSpace(row.KeyAlias)
-	}
-	return label
-}
-
 func toCPAAPIKeyResponse(row entities.CPAAPIKey) cpaAPIKeyResponse {
-	label := cpaAPIKeyDisplayLabel(row)
+	label := helper.CPAAPIKeyDisplayName(row)
 	var lastSyncedAt *string
 	if row.LastSyncedAt != nil {
 		value := timeutil.FormatStorageTime(*row.LastSyncedAt)
@@ -146,14 +139,14 @@ func toCPAAPIKeyResponse(row entities.CPAAPIKey) cpaAPIKeyResponse {
 	return cpaAPIKeyResponse{
 		ID:           strconv.FormatInt(row.ID, 10),
 		KeyAlias:     row.KeyAlias,
-		DisplayKey:   row.DisplayKey,
+		DisplayKey:   helper.CPAAPIKeyMaskedDisplayKey(row),
 		Label:        label,
 		LastSyncedAt: lastSyncedAt,
 	}
 }
 
 func toCPAAPIKeyOption(row entities.CPAAPIKey) cpaAPIKeyOption {
-	label := cpaAPIKeyDisplayLabel(row)
+	label := helper.CPAAPIKeyDisplayName(row)
 	return cpaAPIKeyOption{
 		ID:    strconv.FormatInt(row.ID, 10),
 		Label: label,

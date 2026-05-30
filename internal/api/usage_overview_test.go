@@ -14,18 +14,10 @@ import (
 )
 
 type usageFilterStub struct {
-	usage         *dto.StatisticsSnapshot
 	overview      *servicedto.UsageOverviewSnapshot
 	err           error
 	lastFilter    servicedto.UsageFilter
-	filterCalls   int
 	overviewCalls int
-}
-
-func (s *usageFilterStub) GetUsageWithFilter(_ context.Context, filter servicedto.UsageFilter) (*dto.StatisticsSnapshot, error) {
-	s.lastFilter = filter
-	s.filterCalls++
-	return s.usage, s.err
 }
 
 func (s *usageFilterStub) GetUsageOverview(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
@@ -208,20 +200,6 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 			TokensByHour: map[string]int64{
 				"2026-04-22T11:00:00Z": 20,
 			},
-			APIs: map[string]dto.APISnapshot{
-				"provider-a": {
-					TotalRequests: 1,
-					SuccessCount:  1,
-					TotalTokens:   20,
-					Models: map[string]dto.ModelSnapshot{
-						"claude-sonnet": {
-							TotalRequests: 1,
-							SuccessCount:  1,
-							TotalTokens:   20,
-						},
-					},
-				},
-			},
 		},
 		Summary: servicedto.UsageOverviewSummary{
 			RequestCount:    1,
@@ -293,8 +271,8 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 	if contains(body, `"details":`) {
 		t.Fatalf("expected overview response to omit request details: %s", body)
 	}
-	if provider.filterCalls != 0 {
-		t.Fatalf("expected GetUsageWithFilter not to be called, got %d", provider.filterCalls)
+	if contains(body, `"apis":`) || contains(body, "sk-alpha123456") {
+		t.Fatalf("expected overview response to omit api key dimension: %s", body)
 	}
 	if provider.overviewCalls != 1 {
 		t.Fatalf("expected GetUsageOverview to be called once, got %d", provider.overviewCalls)

@@ -1,191 +1,21 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildChartData, buildUsageFromDetails, calculateCacheRate, calculateCost, filterUsageByWindow, filterUsageSnapshot, getApiStats, resolveUsageFilterWindow, sanitizeChartLines } from '@/utils/usage';
-import type { UsageSnapshot } from '@/lib/types';
+import { describe, expect, it } from 'vitest';
+import { buildChartData, calculateCacheRate, calculateCost, getOverviewModelNames, resolveUsageFilterWindow, sanitizeChartLines } from '@/utils/usage';
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-const formatTestLocalDayKey = (date: Date): string => {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
-
-const localDayKeyForBoundarySample = formatTestLocalDayKey(new Date('2026-04-22T16:30:00.000Z'));
-
-const usage: UsageSnapshot = {
-  total_requests: 2,
-  success_count: 2,
-  failure_count: 0,
-  total_tokens: 300,
-  requests_by_day: {},
-  requests_by_hour: {},
-  tokens_by_day: {},
-  tokens_by_hour: {},
-  apis: {
-    'provider-a': {
-      display_name: 'Provider A',
-      total_requests: 2,
-      success_count: 2,
-      failure_count: 0,
-      total_tokens: 300,
-      models: {
-        'claude-sonnet': {
-          total_requests: 2,
-          success_count: 2,
-          failure_count: 0,
-          total_tokens: 300,
-          details: [
-            {
-              timestamp: '2026-04-23T00:00:00.000Z',
-              latency_ms: 100,
-              source: 'source-a',
-              auth_index: '1',
-              failed: false,
-              tokens: {
-                input_tokens: 50,
-                output_tokens: 50,
-                reasoning_tokens: 0,
-                cached_tokens: 0,
-                total_tokens: 100,
-              },
-            },
-            {
-              timestamp: '2026-04-23T02:00:00.000Z',
-              latency_ms: 120,
-              source: 'source-a',
-              auth_index: '1',
-              failed: false,
-              tokens: {
-                input_tokens: 100,
-                output_tokens: 100,
-                reasoning_tokens: 0,
-                cached_tokens: 0,
-                total_tokens: 200,
-              },
-            },
-          ],
-        },
-      },
-    },
-  },
-};
-
-describe('local day usage buckets', () => {
-  it('rebuilds day aggregate keys from the browser local day', () => {
-    const rebuilt = buildUsageFromDetails([
-      {
-        timestamp: '2026-04-22T16:30:00.000Z',
-        latency_ms: 100,
-        source: 'source-a',
-        auth_index: '1',
-        failed: false,
-        tokens: {
-          input_tokens: 1,
-          output_tokens: 2,
-          reasoning_tokens: 0,
-          cached_tokens: 0,
-          total_tokens: 3,
-        },
-        __apiName: 'provider-a',
-        __apiDisplayName: 'Provider A',
-        __modelName: 'claude-sonnet',
-        __timestampMs: Date.parse('2026-04-22T16:30:00.000Z'),
-      },
-    ]);
-
-    expect(rebuilt.requests_by_day).toEqual({ [localDayKeyForBoundarySample]: 1 });
-    expect(rebuilt.tokens_by_day).toEqual({ [localDayKeyForBoundarySample]: 3 });
-  });
-
-  it('groups daily chart buckets by local day keys', () => {
+describe('buildChartData', () => {
+  it('uses overview bucket maps directly for daily chart labels', () => {
     const chartData = buildChartData({
       total_requests: 1,
       success_count: 1,
       failure_count: 0,
       total_tokens: 3,
-      requests_by_day: {},
+      requests_by_day: { '2026-04-23': 1 },
       requests_by_hour: {},
-      tokens_by_day: {},
+      tokens_by_day: { '2026-04-23': 3 },
       tokens_by_hour: {},
-      apis: {
-        'provider-a': {
-          display_name: 'Provider A',
-          total_requests: 1,
-          success_count: 1,
-          failure_count: 0,
-          total_tokens: 3,
-          models: {
-            'claude-sonnet': {
-              total_requests: 1,
-              success_count: 1,
-              failure_count: 0,
-              total_tokens: 3,
-              details: [{
-                timestamp: '2026-04-22T16:30:00.000Z',
-                latency_ms: 100,
-                source: 'source-a',
-                auth_index: '1',
-                failed: false,
-                tokens: {
-                  input_tokens: 1,
-                  output_tokens: 2,
-                  reasoning_tokens: 0,
-                  cached_tokens: 0,
-                  total_tokens: 3,
-                },
-              }],
-            },
-          },
-        },
-      },
     }, 'day', 'requests', ['all']);
 
-    expect(chartData.labels).toEqual([localDayKeyForBoundarySample]);
-  });
-});
-
-describe('filterUsageByWindow', () => {
-  it('rebuilds aggregate totals from only the details inside the selected time window', () => {
-    const filtered = filterUsageByWindow(usage, {
-      startMs: Date.parse('2026-04-23T01:00:00.000Z'),
-      endMs: Date.parse('2026-04-23T03:00:00.000Z'),
-      windowMinutes: 120,
-    });
-
-    expect(filtered.total_requests).toBe(1);
-    expect(filtered.total_tokens).toBe(200);
-    expect(filtered.apis['provider-a']?.total_requests).toBe(1);
-    expect(filtered.apis['provider-a']?.total_tokens).toBe(200);
-    expect(filtered.apis['provider-a']?.models['claude-sonnet']?.total_requests).toBe(1);
-    expect(filtered.apis['provider-a']?.models['claude-sonnet']?.total_tokens).toBe(200);
-  });
-});
-
-describe('getApiStats', () => {
-  it('calculates cost for API totals and each expanded model row', () => {
-    const [api] = getApiStats(usage, {
-      'claude-sonnet': {
-        prompt: 10,
-        completion: 20,
-        cache: 1,
-      },
-    });
-
-    expect(api.totalCost).toBeCloseTo(0.0045);
-    expect(api.models['claude-sonnet']?.cost).toBeCloseTo(0.0045);
-  });
-});
-
-describe('filterUsageSnapshot', () => {
-  it('filters today against the current local day instead of the latest event day', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-04-24T00:30:00.000Z'));
-
-    const filtered = filterUsageSnapshot(usage, 'today');
-
-    expect(filtered.total_requests).toBe(0);
-    expect(filtered.total_tokens).toBe(0);
+    expect(chartData.labels).toEqual(['2026-04-23']);
+    expect(chartData.datasets[0]?.data).toEqual([1]);
   });
 });
 
@@ -195,7 +25,7 @@ describe('resolveUsageFilterWindow', () => {
     const expectedStart = new Date(nowMs);
     expectedStart.setHours(0, 0, 0, 0);
 
-    const window = resolveUsageFilterWindow(usage, 'today', { nowMs });
+    const window = resolveUsageFilterWindow(null, 'today', { nowMs });
 
     expect(window).toEqual({
       startMs: expectedStart.getTime(),
@@ -213,7 +43,7 @@ describe('resolveUsageFilterWindow', () => {
     expectedEnd.setDate(expectedEnd.getDate() + 1);
     expectedEnd.setMilliseconds(expectedEnd.getMilliseconds() - 1);
 
-    const window = resolveUsageFilterWindow(usage, 'yesterday', { nowMs });
+    const window = resolveUsageFilterWindow(null, 'yesterday', { nowMs });
 
     expect(window).toEqual({
       startMs: expectedStart.getTime(),
@@ -225,7 +55,7 @@ describe('resolveUsageFilterWindow', () => {
   it('resolves 30d as a rolling thirty-day window', () => {
     const nowMs = Date.parse('2026-04-23T12:34:56.000Z');
 
-    const window = resolveUsageFilterWindow(usage, '30d', { nowMs });
+    const window = resolveUsageFilterWindow(null, '30d', { nowMs });
 
     expect(window).toEqual({
       startMs: nowMs - 30 * 24 * 60 * 60 * 1000,
@@ -238,6 +68,37 @@ describe('resolveUsageFilterWindow', () => {
 describe('sanitizeChartLines', () => {
   it('falls back to all when persisted lines no longer exist in the current overview payload', () => {
     expect(sanitizeChartLines(['stale-model'], ['gpt-5.4', 'gpt-5.4-mini'])).toEqual(['all']);
+  });
+});
+
+describe('getOverviewModelNames', () => {
+  it('reads model line options from overview series instead of usage api snapshots', () => {
+    expect(getOverviewModelNames({
+      series: {
+        requests: {},
+        tokens: {},
+        rpm: {},
+        tpm: {},
+        cost: {},
+        input_tokens: {},
+        output_tokens: {},
+        cached_tokens: {},
+        reasoning_tokens: {},
+        models: {
+          'claude-sonnet': {
+            requests: {},
+            tokens: {},
+            rpm: {},
+            tpm: {},
+            cost: {},
+            input_tokens: {},
+            output_tokens: {},
+            cached_tokens: {},
+            reasoning_tokens: {},
+          },
+        },
+      },
+    })).toEqual(['claude-sonnet']);
   });
 });
 
@@ -261,7 +122,6 @@ describe('calculateCost', () => {
       },
       prices,
     );
-    // promptTokens = 1000 - 600 = 400 → 400*15 + 100*75 + 600*1.5 = 6000+7500+900 = 14400 micro-units
     expect(cost).toBeCloseTo((400 * 15 + 100 * 75 + 600 * 1.5) / 1_000_000, 9);
   });
 
@@ -274,7 +134,6 @@ describe('calculateCost', () => {
       },
       prices,
     );
-    // promptTokens stays 400 (no subtraction) → same total as the OpenAI case for the same physical request
     expect(cost).toBeCloseTo((400 * 15 + 100 * 75 + 600 * 1.5) / 1_000_000, 9);
   });
 
@@ -287,7 +146,6 @@ describe('calculateCost', () => {
       },
       prices,
     );
-    // 用 anthropic 公式：promptTokens=1，不会被减成 0
     expect(cost).toBeGreaterThan(0);
   });
 });

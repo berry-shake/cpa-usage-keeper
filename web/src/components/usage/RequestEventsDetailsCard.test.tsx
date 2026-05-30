@@ -8,14 +8,17 @@ const events: UsageEvent[] = [
   {
     id: '101',
     timestamp: '2026-04-23T02:00:00.000Z',
+    api_key: 'Production Key',
     model: 'claude-sonnet',
     reasoning_effort: 'medium',
+    endpoint: 'POST /v1/messages',
     source: 'Provider A',
     source_raw: 'source-a',
     source_type: 'openai',
     auth_index: '1',
     failed: false,
     latency_ms: 120,
+    ttft_ms: 45,
     tokens: {
       input_tokens: 100,
       output_tokens: 60,
@@ -58,8 +61,21 @@ describe('RequestEventsDetailsCard pagination', () => {
     const html = renderCard();
 
     expect(html).toContain('120 total events');
-    expect(html).toContain('Reasoning Level');
+    expect(html).toContain('Effort');
+    expect(html).not.toContain('Reasoning Level');
+    expect(html.indexOf('<th>Timestamp</th>')).toBeLessThan(html.indexOf('<th>Source</th>'));
+    expect(html.indexOf('<th>Timestamp</th>')).toBeLessThan(html.indexOf('<th>API Key</th>'));
+    expect(html.indexOf('<th>API Key</th>')).toBeLessThan(html.indexOf('<th>Source</th>'));
+    expect(html.indexOf('<th>Source</th>')).toBeLessThan(html.indexOf('<th>Model</th>'));
+    expect(html.indexOf('<th>Model</th>')).toBeLessThan(html.indexOf('<th title="Reasoning Effort">Effort</th>'));
+    expect(html.indexOf('<th title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('<th title="Using latency_ms in ms">Latency</th>'));
+    expect(html.indexOf('<th title="Using latency_ms in ms">Latency</th>')).toBeLessThan(html.indexOf('<th>Type</th>'));
+    expect(html.indexOf('<th>Type</th>')).toBeLessThan(html.indexOf('<th>Endpoint</th>'));
+    expect(html).toContain('class="_requestEventsAPIKeyCell_');
+    expect(html).toContain('title="Production Key">Production Key</td>');
     expect(html).toContain('<td>medium</td>');
+    expect(html).toMatch(/<td>SSE<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/messages">\/messages<\/td>/);
+    expect(html.indexOf('>45ms</td>')).toBeLessThan(html.indexOf('>120ms</td>'));
     expect(html).toContain('1 / 6');
     expect(html).toContain('20');
     expect(html).toContain('50');
@@ -78,6 +94,39 @@ describe('RequestEventsDetailsCard pagination', () => {
 
     expect(html).toContain('2026/05/13 00:38:19');
     expect(html).not.toContain('5/13/2026, 12:38:19 AM');
+  });
+
+  it('keeps the TTFT column visible when TTFT is missing', () => {
+    const html = renderCard({
+      events: [{ ...events[0], ttft_ms: undefined }],
+    });
+
+    expect(html.indexOf('<th title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('<th title="Using latency_ms in ms">Latency</th>'));
+    expect(html).toMatch(/Success<\/span><\/td><td class="[^"]*durationCell[^"]*">-<\/td><td class="[^"]*durationCell[^"]*">120ms<\/td>/);
+  });
+
+  it('shows a dash for zero TTFT values', () => {
+    const html = renderCard({
+      events: [{ ...events[0], ttft_ms: 0 }],
+    });
+
+    expect(html).toMatch(/Success<\/span><\/td><td class="[^"]*durationCell[^"]*">-<\/td><td class="[^"]*durationCell[^"]*">120ms<\/td>/);
+  });
+
+  it('maps GET endpoints to WS and strips the v1 prefix', () => {
+    const html = renderCard({
+      events: [{ ...events[0], endpoint: 'GET /v1/responses' }],
+    });
+
+    expect(html).toMatch(/<td>WS<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/responses">\/responses<\/td>/);
+  });
+
+  it('strips the v1 prefix when endpoint has no request method', () => {
+    const html = renderCard({
+      events: [{ ...events[0], endpoint: '/v1/chat/completions' }],
+    });
+
+    expect(html).toMatch(/<td>-<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/chat\/completions">\/chat\/completions<\/td>/);
   });
 
   it('renders cache rate after cached tokens with two decimal places', () => {

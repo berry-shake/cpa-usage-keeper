@@ -513,7 +513,6 @@ func testAppConfig(t *testing.T) config.Config {
 		CPABaseURL:              "https://cpa.example.com",
 		CPAManagementKey:        "secret",
 		RedisQueueIdleInterval:  time.Second,
-		RedisQueueErrorBackoff:  10 * time.Second,
 		MetadataSyncInterval:    30 * time.Second,
 		SQLitePath:              t.TempDir() + "/app.db",
 		BackupEnabled:           true,

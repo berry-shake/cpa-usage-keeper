@@ -46,8 +46,10 @@ type RedisIngestRunner struct {
 	now func() time.Time
 	// sleep 允许测试替换等待逻辑，生产环境使用可被 context 打断的 timer。
 	sleep func(context.Context, time.Duration) bool
-	// failureBackoff 只在连续失败路径递增，任何成功拉取都会 reset。
+	// failureBackoff 只在普通连续失败路径递增，任何成功拉取都会 reset。
 	failureBackoff *RedisIngestBackoff
+	// startupAllFailedBackoff 只在启动探测三条入口全部失败时递增。
+	startupAllFailedBackoff *RedisIngestBackoff
 	// opMu 串行化远端拉取和 inbox 写入，避免同一 runner 内不同路径重复消费。
 	opMu sync.Mutex
 	// mu 保护状态字段，Status、日志记录和 runner goroutine 都会访问这些字段。
@@ -87,8 +89,10 @@ func NewRedisIngestRunner(sub UsageSubscriptionSource, redis UsagePullSource, ht
 		now: time.Now,
 		// 默认使用 context-aware sleep，保证关停时不会卡住。
 		sleep: sleepContext,
-		// 失败退避从配置初始值开始，最大值默认 30s。
+		// 普通失败退避保留原来的 1s 起步，不影响已有降级和单链路失败逻辑。
 		failureBackoff: NewRedisIngestBackoff(resolvePositiveDuration(cfg.HTTPBackoffInitial, time.Second), resolvePositiveDuration(cfg.HTTPBackoffMax, 30*time.Second)),
+		// 三入口全部失败时从 10s 起步独立退避，避免 CPA 整体不可用时高频重连。
+		startupAllFailedBackoff: NewRedisIngestBackoff(RedisIngestAllFailedRetryInitial, 30*time.Second),
 		// 新 runner 尚未完成启动探测，所以先标记 unknown/starting。
 		mode:     RedisIngestSyncModeUnknown,
 		subState: RedisIngestSubStateStarting,
@@ -115,6 +119,8 @@ func (r *RedisIngestRunner) Run(ctx context.Context) error {
 		// 启动优先尝试 Redis subscribe，只有订阅成功才进入最复杂的 subscribe 模式。
 		sub, subErr := r.subscribeSource.Subscribe(ctx)
 		if subErr == nil {
+			// 任一启动入口恢复后，下一次整体故障重新从 10s 开始。
+			r.startupAllFailedBackoff.Reset()
 			// 订阅连上后先进入 backfill 阶段，补订阅建立前可能遗漏的队列数据。
 			r.recordState(RedisIngestSyncModeSubscribe, RedisIngestSubStateSubscribeBackfill, "subscribe_connected", "", "")
 			// subscribe 模式内部会处理断线、降级轮询和固定间隔重连。
@@ -130,6 +136,8 @@ func (r *RedisIngestRunner) Run(ctx context.Context) error {
 		// 启动探测第二步：Redis LPOP 成功就把长期模式固定为 redis_pull。
 		redisCount, redisErr := r.serialPullAndWrite(ctx, RedisIngestSourceRedisPull, r.redisSource)
 		if redisErr == nil {
+			// 任一启动入口恢复后，下一次整体故障重新从 10s 开始。
+			r.startupAllFailedBackoff.Reset()
 			// 成功拉取说明远端恢复，清掉连续失败退避。
 			r.failureBackoff.Reset()
 			// 记录 redis_pull 长期模式，message_count 不进 status，避免状态字符串频繁变化。
@@ -153,6 +161,8 @@ func (r *RedisIngestRunner) Run(ctx context.Context) error {
 		// 启动探测第三步：HTTP 成功就把长期模式固定为 http_pull。
 		httpCount, httpErr := r.serialPullAndWrite(ctx, RedisIngestSourceHTTPPull, r.httpSource)
 		if httpErr == nil {
+			// 任一启动入口恢复后，下一次整体故障重新从 10s 开始。
+			r.startupAllFailedBackoff.Reset()
 			// HTTP 成功说明兜底链路可用，重置连续失败退避。
 			r.failureBackoff.Reset()
 			// 记录 http_pull 固定模式；该模式不再尝试 Redis/subscribe，符合启动选择规则。
@@ -165,10 +175,16 @@ func (r *RedisIngestRunner) Run(ctx context.Context) error {
 			// http_pull 模式退出后重新探测，避免异常退出后永久停止。
 			continue
 		}
+		if errors.Is(httpErr, errRedisIngestInboxWrite) {
+			if !r.pauseAfterInboxWriteFailure(ctx, "http_inbox_write_failed", httpErr) {
+				return nil
+			}
+			continue
+		}
 		// 三条远端入口都失败时合并错误，状态和日志能同时看到完整失败链。
 		joined := errors.Join(subErr, redisErr, httpErr)
 		// 连续启动失败使用指数退避，避免 CPA 故障时高频刷错误。
-		delay := r.failureBackoff.NextDelay()
+		delay := r.startupAllFailedBackoff.NextDelay()
 		// 记录最终启动失败，Status.LastError 展示合并后的失败原因。
 		r.recordError("startup_failed", joined)
 		// 下一次探测等待时间属于重复轮询细节，只放 debug，避免 error 日志成倍输出。
@@ -703,8 +719,12 @@ func (r *RedisIngestRunner) validate() error {
 		r.sleep = sleepContext
 	}
 	if r.failureBackoff == nil {
-		// backoff 缺失时恢复 1s 到 30s 的失败退避。
+		// backoff 缺失时恢复 1s 到 30s 的普通失败退避。
 		r.failureBackoff = NewRedisIngestBackoff(time.Second, 30*time.Second)
+	}
+	if r.startupAllFailedBackoff == nil {
+		// 三入口全部失败的退避独立恢复为 10s 到 30s。
+		r.startupAllFailedBackoff = NewRedisIngestBackoff(RedisIngestAllFailedRetryInitial, 30*time.Second)
 	}
 	return nil
 }
