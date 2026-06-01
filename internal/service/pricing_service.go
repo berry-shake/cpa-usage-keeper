@@ -90,6 +90,11 @@ func (s *pricingService) SyncRemotePricing(ctx context.Context) (*RemotePricingS
 	if err != nil {
 		return nil, err
 	}
+	// 把已有 model_price_settings 行的模型也并入同步范围：
+	// effectiveModels 只看 CPA backend 当前活跃模型 / usage_events DISTINCT，
+	// 会漏掉「历史定过价、当前不活跃」的模型（典型如老版本 Claude），导致同步永远
+	// 不会用新解析器纠正它们的 pricing_style / cache_creation 字段。
+	usedModels = mergeWithExistingPriceSettings(s.db, usedModels)
 
 	fetcher := s.remotePricesFetcher
 	if fetcher == nil {
@@ -184,4 +189,40 @@ func normalizeCPAModels(result *response.ModelsResult) []string {
 	}
 	sort.Strings(models)
 	return models
+}
+
+// mergeWithExistingPriceSettings 把 model_price_settings 表已有的模型并入 sync 范围。
+// 读表失败时不阻断同步，仅退化为原 used 列表，保留可用性。
+func mergeWithExistingPriceSettings(db *gorm.DB, used []string) []string {
+	settings, err := repository.ListModelPriceSettings(db)
+	if err != nil {
+		logrus.WithError(err).Warn("failed to load existing price settings for sync, falling back to used models only")
+		return used
+	}
+	seen := make(map[string]struct{}, len(used)+len(settings))
+	merged := make([]string, 0, len(used)+len(settings))
+	for _, modelName := range used {
+		trimmed := strings.TrimSpace(modelName)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		merged = append(merged, trimmed)
+	}
+	for _, setting := range settings {
+		trimmed := strings.TrimSpace(setting.Model)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		merged = append(merged, trimmed)
+	}
+	sort.Strings(merged)
+	return merged
 }

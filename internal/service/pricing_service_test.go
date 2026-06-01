@@ -14,6 +14,7 @@ import (
 	"cpa-usage-keeper/internal/cpa/dto/response"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/repository"
+	repodto "cpa-usage-keeper/internal/repository/dto"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -341,6 +342,58 @@ func TestPricingServiceSyncRemotePricingUpsertsMatchedUsedModels(t *testing.T) {
 	}
 	if len(settings) != 1 || settings[0].Model != "claude-sonnet" || settings[0].CompletionPricePer1M != 15 {
 		t.Fatalf("unexpected saved settings: %+v", settings)
+	}
+}
+
+func TestPricingServiceSyncRemotePricingRefreshesInactiveModelsWithExistingPriceRows(t *testing.T) {
+	// 历史定过价但近期没流量的模型（不在 effectiveModels 里），
+	// 同步时也应该被新解析器拉到的远端价格覆盖。
+	db := openPricingServiceTestDatabase(t)
+
+	// 预置一行老的 Claude 模型记录（pricing_style 还是默认 openai），
+	// 但不写任何 usage_event，模拟「历史定过价、现在不活跃」。
+	if _, err := repository.UpsertModelPriceSetting(db, repodto.ModelPriceSettingInput{
+		Model:                "claude-3-7-sonnet-20250219",
+		PricingStyle:         "openai",
+		PromptPricePer1M:     3,
+		CompletionPricePer1M: 15,
+		CachePricePer1M:      0.3,
+	}); err != nil {
+		t.Fatalf("seed legacy price setting: %v", err)
+	}
+
+	service := NewPricingService(db).(*pricingService)
+	service.remotePricesFetcher = stubRemotePricesFetcher{
+		result: &RemoteModelPricesResult{
+			Prices: map[string]RemoteModelPrice{
+				"claude-3-7-sonnet-20250219": {
+					PromptPricePer1M:        3,
+					CompletionPricePer1M:    15,
+					CachePricePer1M:         0.3,
+					CacheCreationPricePer1M: 3.75,
+					PricingStyle:            "claude",
+				},
+			},
+			ImportedCount: 1,
+		},
+	}
+
+	if _, err := service.SyncRemotePricing(context.Background()); err != nil {
+		t.Fatalf("sync remote pricing: %v", err)
+	}
+
+	settings, err := repository.ListModelPriceSettings(db)
+	if err != nil {
+		t.Fatalf("list pricing settings: %v", err)
+	}
+	if len(settings) != 1 || settings[0].Model != "claude-3-7-sonnet-20250219" {
+		t.Fatalf("expected exactly the legacy row, got %+v", settings)
+	}
+	if settings[0].PricingStyle != "claude" {
+		t.Fatalf("legacy row should be upgraded to claude style, got %q", settings[0].PricingStyle)
+	}
+	if settings[0].CacheCreationPricePer1M != 3.75 {
+		t.Fatalf("legacy row should pick up cache_creation 3.75/1M, got %v", settings[0].CacheCreationPricePer1M)
 	}
 }
 
