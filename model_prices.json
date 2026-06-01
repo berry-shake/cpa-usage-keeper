@@ -2,27 +2,32 @@
   "claude-opus-4-7": {
     "prompt": 5,
     "completion": 25,
-    "cache": 0.5
+    "cache": 0.5,
+    "cache_creation": 6.25
   },
   "claude-opus-4-6": {
     "prompt": 5,
     "completion": 25,
-    "cache": 0.5
+    "cache": 0.5,
+    "cache_creation": 6.25
   },
   "claude-sonnet-4-6": {
     "prompt": 3,
     "completion": 15,
-    "cache": 0.3
+    "cache": 0.3,
+    "cache_creation": 3.75
   },
   "claude-haiku-4-5-20251001": {
     "prompt": 1,
     "completion": 5,
-    "cache": 0.1
+    "cache": 0.1,
+    "cache_creation": 1.25
   },
   "claude-haiku-4-5": {
     "prompt": 1,
     "completion": 5,
-    "cache": 0.1
+    "cache": 0.1,
+    "cache_creation": 1.25
   },
   "gpt-5.5": {
     "prompt": 5,
