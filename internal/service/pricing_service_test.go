@@ -344,6 +344,55 @@ func TestPricingServiceSyncRemotePricingUpsertsMatchedUsedModels(t *testing.T) {
 	}
 }
 
+func TestPricingServiceSyncRemotePricingPersistsClaudeStyleAndCacheCreation(t *testing.T) {
+	db := openPricingServiceTestDatabase(t)
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
+		{EventKey: "evt-1", Model: "claude-sonnet-4-5", Timestamp: time.Unix(1, 0), APIGroupKey: "provider-a"},
+	}); err != nil {
+		t.Fatalf("insert usage event: %v", err)
+	}
+
+	service := NewPricingService(db).(*pricingService)
+	service.remotePricesFetcher = stubRemotePricesFetcher{
+		result: &RemoteModelPricesResult{
+			Prices: map[string]RemoteModelPrice{
+				"claude-sonnet-4-5": {
+					PromptPricePer1M:        3,
+					CompletionPricePer1M:    15,
+					CachePricePer1M:         0.3,
+					CacheCreationPricePer1M: 3.75,
+					PricingStyle:            "claude",
+				},
+			},
+			ImportedCount: 1,
+			SourceURL:     "https://example.test/prices.json",
+			SourceURLs:    []string{"https://example.test/prices.json"},
+		},
+	}
+
+	if _, err := service.SyncRemotePricing(context.Background()); err != nil {
+		t.Fatalf("sync remote pricing: %v", err)
+	}
+
+	settings, err := repository.ListModelPriceSettings(db)
+	if err != nil {
+		t.Fatalf("list pricing settings: %v", err)
+	}
+	if len(settings) != 1 {
+		t.Fatalf("expected exactly one synced setting, got %+v", settings)
+	}
+	saved := settings[0]
+	if saved.Model != "claude-sonnet-4-5" {
+		t.Fatalf("unexpected synced model: %+v", saved)
+	}
+	if saved.PricingStyle != "claude" {
+		t.Fatalf("expected claude pricing style, got %q", saved.PricingStyle)
+	}
+	if saved.CacheCreationPricePer1M != 3.75 {
+		t.Fatalf("expected cache_creation 3.75/1M, got %v", saved.CacheCreationPricePer1M)
+	}
+}
+
 type stubModelsFetcher struct {
 	result *response.ModelsResult
 	err    error

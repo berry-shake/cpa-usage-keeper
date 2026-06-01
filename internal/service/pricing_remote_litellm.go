@@ -102,7 +102,8 @@ func convertLiteLLMEntry(entry map[string]any) (RemoteModelPrice, bool) {
 	prompt, hasPrompt := readFirstPrice(entry, promptPriceFields)
 	completion, hasCompletion := readFirstPrice(entry, completionPriceFields)
 	cache, hasCache := readFirstPrice(entry, cachePriceFields)
-	if !hasPrompt && !hasCompletion && !hasCache {
+	cacheCreation, hasCacheCreation := readFirstPrice(entry, cacheCreationPriceFields)
+	if !hasPrompt && !hasCompletion && !hasCache && !hasCacheCreation {
 		return RemoteModelPrice{}, false
 	}
 	if !hasPrompt {
@@ -114,10 +115,15 @@ func convertLiteLLMEntry(entry map[string]any) (RemoteModelPrice, bool) {
 	if !hasCache {
 		cache = 0
 	}
+	if !hasCacheCreation {
+		cacheCreation = 0
+	}
 	return RemoteModelPrice{
-		PromptPricePer1M:     prompt,
-		CompletionPricePer1M: completion,
-		CachePricePer1M:      cache,
+		PromptPricePer1M:        prompt,
+		CompletionPricePer1M:    completion,
+		CachePricePer1M:         cache,
+		CacheCreationPricePer1M: cacheCreation,
+		PricingStyle:            inferRemotePricingStyle(entry, hasCacheCreation),
 	}, true
 }
 

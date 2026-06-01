@@ -111,10 +111,12 @@ func (s *pricingService) SyncRemotePricing(ctx context.Context) (*RemotePricingS
 	for _, modelName := range matchedModels {
 		price := matchedPrices[modelName]
 		setting, err := repository.UpsertModelPriceSetting(s.db, repodto.ModelPriceSettingInput{
-			Model:                modelName,
-			PromptPricePer1M:     price.PromptPricePer1M,
-			CompletionPricePer1M: price.CompletionPricePer1M,
-			CachePricePer1M:      price.CachePricePer1M,
+			Model:                   modelName,
+			PricingStyle:            price.PricingStyle,
+			PromptPricePer1M:        price.PromptPricePer1M,
+			CompletionPricePer1M:    price.CompletionPricePer1M,
+			CachePricePer1M:         price.CachePricePer1M,
+			CacheCreationPricePer1M: price.CacheCreationPricePer1M,
 		})
 		if err != nil {
 			return nil, err

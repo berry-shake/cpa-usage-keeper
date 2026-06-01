@@ -24,9 +24,13 @@ const (
 )
 
 type RemoteModelPrice struct {
-	PromptPricePer1M     float64
-	CompletionPricePer1M float64
-	CachePricePer1M      float64
+	PromptPricePer1M        float64
+	CompletionPricePer1M    float64
+	CachePricePer1M         float64
+	CacheCreationPricePer1M float64
+	// PricingStyle 当远端条目能识别出 Claude 风格时为 entities.ModelPricingStyleClaude，
+	// 否则保持空串，由 UpsertModelPriceSetting 走默认 openai。
+	PricingStyle string
 }
 
 type RemoteModelPricesResult struct {
@@ -142,6 +146,30 @@ var cachePriceFields = []priceFieldDefinition{
 			"cache",
 			"cache_price",
 			"cache_read_price",
+		},
+		scale: priceScalePerMillion,
+	},
+}
+
+var cacheCreationPriceFields = []priceFieldDefinition{
+	{
+		keys: []string{
+			"cache_creation_input_token_cost",
+			"cache_creation_cost_per_token",
+			"cache_write_input_token_cost",
+			"cache_write_cost_per_token",
+		},
+		scale: priceScalePerToken,
+	},
+	{
+		keys: []string{
+			"cache_creation_input_cost_per_1m_tokens",
+			"cache_creation_price_per_1m",
+			"cache_write_price_per_1m",
+			"cache_creation",
+			"cache_write",
+			"cache_creation_price",
+			"cache_write_price",
 		},
 		scale: priceScalePerMillion,
 	},
@@ -409,7 +437,8 @@ func convertEntryToModelPrice(entry any) (RemoteModelPrice, bool) {
 	prompt, hasPrompt := readFirstPrice(pricingRecord, promptPriceFields)
 	completion, hasCompletion := readFirstPrice(pricingRecord, completionPriceFields)
 	cache, hasCache := readFirstPrice(pricingRecord, cachePriceFields)
-	if !hasPrompt && !hasCompletion && !hasCache {
+	cacheCreation, hasCacheCreation := readFirstPrice(pricingRecord, cacheCreationPriceFields)
+	if !hasPrompt && !hasCompletion && !hasCache && !hasCacheCreation {
 		return RemoteModelPrice{}, false
 	}
 
@@ -423,12 +452,32 @@ func convertEntryToModelPrice(entry any) (RemoteModelPrice, bool) {
 	if !hasCache {
 		cache = resolvedPrompt
 	}
+	if !hasCacheCreation {
+		cacheCreation = 0
+	}
 
 	return RemoteModelPrice{
-		PromptPricePer1M:     resolvedPrompt,
-		CompletionPricePer1M: completion,
-		CachePricePer1M:      cache,
+		PromptPricePer1M:        resolvedPrompt,
+		CompletionPricePer1M:    completion,
+		CachePricePer1M:         cache,
+		CacheCreationPricePer1M: cacheCreation,
+		PricingStyle:            inferRemotePricingStyle(pricingRecord, hasCacheCreation),
 	}, true
+}
+
+// inferRemotePricingStyle 在远端目录足够明确时返回 entities.ModelPricingStyleClaude，
+// 否则返回空串，让 UpsertModelPriceSetting 走默认 openai 或保留 DB 既有值。
+// 触发条件按强→弱：litellm_provider=="anthropic"；有 cache_creation 单价。
+func inferRemotePricingStyle(record map[string]any, hasCacheCreation bool) string {
+	if provider, ok := record["litellm_provider"].(string); ok {
+		if strings.EqualFold(strings.TrimSpace(provider), "anthropic") {
+			return entities.ModelPricingStyleClaude
+		}
+	}
+	if hasCacheCreation {
+		return entities.ModelPricingStyleClaude
+	}
+	return ""
 }
 
 func extractModelName(entry map[string]any) string {
