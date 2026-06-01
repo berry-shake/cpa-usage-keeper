@@ -62,6 +62,10 @@ export function CredentialBadge({ children, tone = 'neutral' }: { children: Reac
   return <span className={`${styles.credentialBadge} ${styles[`credentialBadge${capitalize(tone)}`]}`.trim()}>{children}</span>
 }
 
+export function CredentialPriorityBadge({ children }: { children: ReactNode }) {
+  return <span className={styles.credentialPriorityBadge}>{children}</span>
+}
+
 export function MetricPill({ label, value }: { label: string; value: ReactNode }) {
   return (
     <span className={styles.credentialMetricPill}>

@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	quotaWindowFiveHourSeconds int64 = 5 * 60 * 60
-	quotaWindowSevenDaySeconds int64 = 7 * 24 * 60 * 60
+	quotaWindowFiveHourSeconds  int64 = 5 * 60 * 60
+	quotaWindowSevenDaySeconds  int64 = 7 * 24 * 60 * 60
+	quotaWindowThirtyDaySeconds int64 = 30 * 24 * 60 * 60
 )
 
 func NormalizeQuotaRows(output ProviderOutput) []QuotaRow {
@@ -104,7 +105,7 @@ func appendClaudeWindowQuotaRow(rows []QuotaRow, key string, label string, scope
 }
 
 func normalizeCodexQuotaRows(result CodexResult) []QuotaRow {
-	// Codex 根据 limit_window_seconds 明确区分 5h/Weekly；未知窗口只标记 Window，不猜测。
+	// Codex 根据 limit_window_seconds 明确区分 5h/Weekly/Monthly；未知窗口回退到 primary/secondary 角色。
 	if result.Usage == nil {
 		return nil
 	}
@@ -138,33 +139,70 @@ func appendCodexWindowQuotaRows(rows []QuotaRow, keyPrefix string, primaryLabel 
 	return rows
 }
 
-func codexWindowLabel(label string, seconds int64) string {
+func codexWindowLabel(key string, label string, seconds int64) string {
 	switch seconds {
-	case 18000:
-		if strings.Contains(label, "Weekly") {
-			return strings.Replace(label, "Weekly", "5h", 1)
-		}
-		return label
-	case 604800:
-		if strings.Contains(label, "5h") {
-			return strings.Replace(label, "5h", "Weekly", 1)
-		}
-		return label
+	case quotaWindowFiveHourSeconds:
+		return codexKnownWindowLabel(label, "5h")
+	case quotaWindowSevenDaySeconds:
+		return codexKnownWindowLabel(label, "Weekly")
+	case quotaWindowThirtyDaySeconds:
+		return codexKnownWindowLabel(label, "Monthly")
 	}
-	return codexUnknownWindowLabel(label)
+	return codexRoleWindowLabel(key, label)
 }
 
-func codexUnknownWindowLabel(label string) string {
-	if label == "5h" || label == "Weekly" {
-		return "Window"
+func codexKnownWindowLabel(label string, replacement string) string {
+	if label == "5h" || label == "Weekly" || label == "Monthly" || label == "Window" {
+		return replacement
 	}
-	if strings.Contains(label, "5h") {
-		return strings.Replace(label, "5h", "Window", 1)
-	}
-	if strings.Contains(label, "Weekly") {
-		return strings.Replace(label, "Weekly", "Window", 1)
+	for _, candidate := range []string{"5h", "Weekly", "Monthly", "Window"} {
+		if strings.Contains(label, candidate) {
+			return strings.Replace(label, candidate, replacement, 1)
+		}
 	}
 	return label
+}
+
+func codexRoleWindowLabel(key string, label string) string {
+	role := codexWindowRole(key)
+	if role == "" {
+		return label
+	}
+	fallback := codexPrefixedWindowRole(key, role)
+	if label == "" || label == "5h" || label == "Weekly" || label == "Monthly" || label == "Window" {
+		return fallback
+	}
+	for _, candidate := range []string{"5h", "Weekly", "Monthly", "Window"} {
+		if strings.Contains(label, candidate) {
+			return strings.Replace(label, candidate, role, 1)
+		}
+	}
+	return fallback
+}
+
+func codexWindowRole(key string) string {
+	if strings.HasSuffix(key, ".primary_window") {
+		return "Primary"
+	}
+	if strings.HasSuffix(key, ".secondary_window") {
+		return "Secondary"
+	}
+	return ""
+}
+
+func codexPrefixedWindowRole(key string, role string) string {
+	if strings.HasPrefix(key, "code_review_rate_limit.") {
+		return "Code Review " + role
+	}
+	if strings.HasPrefix(key, "additional_rate_limits.") {
+		name := strings.TrimPrefix(key, "additional_rate_limits.")
+		name = strings.TrimSuffix(name, ".primary_window")
+		name = strings.TrimSuffix(name, ".secondary_window")
+		if name != "" {
+			return name + " " + role
+		}
+	}
+	return role
 }
 
 func appendCodexWindowQuotaRow(rows []QuotaRow, key string, label string, scope string, metric string, info *CodexRateLimitInfo, window *CodexUsageWindow) []QuotaRow {
@@ -172,7 +210,7 @@ func appendCodexWindowQuotaRow(rows []QuotaRow, key string, label string, scope 
 	if window == nil {
 		return rows
 	}
-	label = codexWindowLabel(label, window.LimitWindowSeconds)
+	label = codexWindowLabel(key, label, window.LimitWindowSeconds)
 	row := QuotaRow{
 		Key:          key,
 		Label:        label,

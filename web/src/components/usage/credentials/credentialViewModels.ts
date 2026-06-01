@@ -33,6 +33,7 @@ export interface AuthFileCredentialRow {
   providerLabel: string
   typeLabel: string
   authTypeLabel: string
+  priorityLabel?: string
   planTypeLabel?: string
   planTypeTone?: PlanTypeTone
   remainingDaysLabel?: string
@@ -46,9 +47,7 @@ export interface AuthFileCredentialRow {
   quotaLoading: boolean
   quotaError?: string
   refreshStatus?: 'queued' | 'running' | 'completed' | 'failed'
-  primaryQuota?: DisplayQuota
-  secondaryQuota?: DisplayQuota
-  extraQuota: DisplayQuota[]
+  displayQuotas: DisplayQuota[]
 }
 
 export interface AiProviderCredentialRow {
@@ -58,6 +57,7 @@ export interface AiProviderCredentialRow {
   providerLabel: string
   typeLabel: string
   authTypeLabel: string
+  priorityLabel?: string
   totalRequests: number
   successCount: number
   failureCount: number
@@ -122,12 +122,8 @@ export function buildAuthFileCredentialRows(
   return identities.map((identity) => {
     const quota = quotas.get(identity.identity) ?? []
     const state = quotaStates.get(identity.identity)
-    const displayQuotas = quota.map(toDisplayQuota)
+    const displayQuotas = quota.map(toDisplayQuota).filter(isDisplayableQuota)
     const planType = firstNonEmpty(...quota.map((row) => row.planType), identity.plan_type)
-    // 先挑 5h 主窗口，再挑 Weekly 次窗口，其余限额保留到 chips 中展示。
-    const primaryQuota = displayQuotas.find(isPrimaryQuota)
-    const secondaryQuota = displayQuotas.find((item) => item !== primaryQuota && isSecondaryQuota(item))
-    const extraQuota = displayQuotas.filter((item) => item !== primaryQuota && item !== secondaryQuota)
 
     return {
       identity,
@@ -136,6 +132,7 @@ export function buildAuthFileCredentialRows(
       providerLabel: credentialProviderLabel(identity),
       typeLabel: credentialTypeLabel(identity),
       authTypeLabel: credentialAuthTypeLabel(identity),
+      priorityLabel: credentialPriorityLabel(identity.priority),
       planTypeLabel: credentialPlanTypeLabel(planType),
       planTypeTone: credentialPlanTypeTone(planType),
       remainingDaysLabel: remainingDaysLabel(identity.active_until),
@@ -149,9 +146,7 @@ export function buildAuthFileCredentialRows(
       quotaLoading: state?.quotaLoading ?? false,
       quotaError: state?.quotaError,
       refreshStatus: state?.refreshStatus,
-      primaryQuota,
-      secondaryQuota,
-      extraQuota,
+      displayQuotas,
     }
   })
 }
@@ -164,6 +159,7 @@ export function buildAiProviderCredentialRows(identities: UsageIdentity[]): AiPr
     providerLabel: credentialProviderLabel(identity),
     typeLabel: credentialTypeLabel(identity),
     authTypeLabel: credentialAuthTypeLabel(identity),
+    priorityLabel: credentialPriorityLabel(identity.priority),
     totalRequests: safeNumber(identity.total_requests),
     successCount: safeNumber(identity.success_count),
     failureCount: safeNumber(identity.failure_count),
@@ -175,7 +171,7 @@ export function buildAiProviderCredentialRows(identities: UsageIdentity[]): AiPr
   }))
 }
 
-function toDisplayQuota(row: UsageQuotaRow): DisplayQuota {
+function toDisplayQuota(row: UsageQuotaRow): DisplayQuota | undefined {
   // 后端 quota row 可能是 used、remaining 或 remainingFraction，这里统一成展示进度。
   const used = finiteNumber(row.used)
   const limit = finiteNumber(row.limit)
@@ -184,6 +180,9 @@ function toDisplayQuota(row: UsageQuotaRow): DisplayQuota {
 
   const windowSeconds = finiteNumber(row.window?.seconds)
   const label = quotaLabel(row, windowSeconds)
+  if (!label) {
+    return undefined
+  }
 
   return {
     key: row.key,
@@ -223,32 +222,89 @@ function formatQuotaWindowCost(cost: number): string {
   }).format(cost || 0).replace(/^US\$/, '$')
 }
 
-function quotaLabel(row: UsageQuotaRow, windowSeconds?: number): string {
-  // 对已知窗口按秒数纠正标签；未知窗口不猜 5h/Weekly，避免误导用户。
+function quotaLabel(row: UsageQuotaRow, windowSeconds?: number): string | undefined {
+  // 对已知窗口按秒数纠正标签；未知窗口不展示 Window 占位，避免误导用户。
   const label = row.label || row.metric || row.scope || row.key
-  if (windowSeconds === 604800 && label.includes('5h')) {
-    return label.replace('5h', 'Weekly')
+  if (windowSeconds === 18000) {
+    return knownWindowLabel(label, '5h')
   }
-  if (windowSeconds === 18000 && label.includes('Weekly')) {
-    return label.replace('Weekly', '5h')
+  if (windowSeconds === 604800) {
+    return knownWindowLabel(label, 'Weekly')
   }
-  if (windowSeconds !== undefined && windowSeconds !== 18000 && windowSeconds !== 604800) {
-    return unknownWindowLabel(label)
+  if (windowSeconds === 2592000) {
+    return knownWindowLabel(label, 'Monthly')
+  }
+  if (windowSeconds !== undefined) {
+    return unknownWindowLabel(row, label)
+  }
+  if (genericWindowLabel(label)) {
+    return unknownWindowLabel(row, label)
   }
   return label
 }
 
-function unknownWindowLabel(label: string): string {
-  if (label === '5h' || label === 'Weekly') {
-    return 'Window'
+function knownWindowLabel(label: string, replacement: string): string {
+  if (label === '5h' || label === 'Weekly' || label === 'Monthly' || label === 'Window') {
+    return replacement
   }
-  if (label.includes('5h')) {
-    return label.replace('5h', 'Window')
-  }
-  if (label.includes('Weekly')) {
-    return label.replace('Weekly', 'Window')
+  for (const candidate of ['5h', 'Weekly', 'Monthly', 'Window']) {
+    if (label.includes(candidate)) {
+      return label.replace(candidate, replacement)
+    }
   }
   return label
+}
+
+function genericWindowLabel(label: string): boolean {
+  return /\bWindow\b/.test(label)
+}
+
+function unknownWindowLabel(row: UsageQuotaRow, label: string): string | undefined {
+  const role = quotaWindowRole(row.key)
+  if (!role) {
+    return genericWindowLabel(label) ? undefined : label
+  }
+  for (const candidate of ['5h', 'Weekly', 'Monthly', 'Window']) {
+    if (label === candidate) {
+      return role
+    }
+    if (label.includes(candidate)) {
+      return label.replace(candidate, role)
+    }
+  }
+  return quotaRoleLabel(row)
+}
+
+function quotaRoleLabel(row: UsageQuotaRow): string | undefined {
+  const role = quotaWindowRole(row.key)
+  if (!role) {
+    return undefined
+  }
+  const prefix = quotaWindowRolePrefix(row)
+  return prefix ? `${prefix} ${role}` : role
+}
+
+function quotaWindowRole(key: string): string | undefined {
+  if (key.endsWith('.primary_window')) {
+    return 'Primary'
+  }
+  if (key.endsWith('.secondary_window')) {
+    return 'Secondary'
+  }
+  return undefined
+}
+
+function quotaWindowRolePrefix(row: UsageQuotaRow): string {
+  if (row.key.startsWith('code_review_rate_limit.')) {
+    return 'Code Review'
+  }
+  if (!row.key.startsWith('additional_rate_limits.')) {
+    return ''
+  }
+  const keyName = row.key
+    .replace(/^additional_rate_limits\./, '')
+    .replace(/\.(primary|secondary)_window$/, '')
+  return firstNonEmpty(row.metric, keyName) ?? ''
 }
 
 function quotaPercent(row: UsageQuotaRow, used?: number, limit?: number): { percent: number | null; kind: DisplayQuota['percentKind'] } {
@@ -292,20 +348,8 @@ function quotaBarPercent(percent: number | null, kind: DisplayQuota['percentKind
   return kind === 'used' ? clampPercent(100 - percent) : percent
 }
 
-function isPrimaryQuota(quota: DisplayQuota): boolean {
-  if (quota.windowSeconds !== undefined) {
-    return quota.windowSeconds === 18000
-  }
-  const haystack = `${quota.key} ${quota.label}`.toLowerCase()
-  return haystack.includes('5h') || haystack.includes('five_hour')
-}
-
-function isSecondaryQuota(quota: DisplayQuota): boolean {
-  if (quota.windowSeconds !== undefined) {
-    return quota.windowSeconds === 604800
-  }
-  const haystack = `${quota.key} ${quota.label}`.toLowerCase()
-  return haystack.includes('weekly') || haystack.includes('seven_day')
+function isDisplayableQuota(quota: DisplayQuota | undefined): quota is DisplayQuota {
+  return quota !== undefined && quota.barPercent !== null
 }
 
 function credentialDisplayName(identity: UsageIdentity): string {
@@ -322,6 +366,13 @@ function credentialTypeLabel(identity: UsageIdentity): string {
 
 function credentialAuthTypeLabel(identity: UsageIdentity): string {
   return firstNonEmpty(identity.auth_type_name) ?? (identity.auth_type === 1 ? 'Auth file' : 'AI provider')
+}
+
+function credentialPriorityLabel(priority: number | undefined): string | undefined {
+  if (typeof priority !== 'number' || !Number.isFinite(priority)) {
+    return undefined
+  }
+  return `P${priority}`
 }
 
 function credentialPlanTypeLabel(planType?: string): string | undefined {

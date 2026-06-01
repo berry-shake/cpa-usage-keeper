@@ -39,6 +39,7 @@ describe('AiProviderCredentialsSection', () => {
       providerLabel: 'anthropic',
       typeLabel: 'claude',
       authTypeLabel: 'apikey',
+      priorityLabel: 'P5',
       totalRequests: 0,
       successCount: 0,
       failureCount: 0,
@@ -52,7 +53,18 @@ describe('AiProviderCredentialsSection', () => {
     } as AiProviderCredentialRow & Record<string, unknown>
 
     const html = renderToStaticMarkup(
-      <AiProviderCredentialsSection rows={[row]} total={1} page={1} totalPages={1} loading={false} onPageChange={() => undefined} />,
+      <AiProviderCredentialsSection
+        rows={[row]}
+        total={1}
+        page={1}
+        totalPages={1}
+        pageSize={10}
+        sort="priority"
+        loading={false}
+        onPageChange={() => undefined}
+        onPageSizeChange={() => undefined}
+        onSortChange={() => undefined}
+      />,
     )
 
     expect(html.match(/usage_stats\.total_requests/g)).toHaveLength(1)
@@ -60,6 +72,8 @@ describe('AiProviderCredentialsSection', () => {
     expect(html.match(/usage_stats\.total_tokens/g)).toHaveLength(1)
     expect(html.match(/usage_stats\.cache_rate/g)).toHaveLength(1)
     expect(html).toContain('claude')
+    expect(html).toContain('P5')
+    expect(html).toContain('usage_stats.credentials_sort_priority')
     expect(html).not.toContain('Team')
     expect(html).not.toContain('25d')
     expect(html).not.toContain('5h')

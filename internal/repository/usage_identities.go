@@ -150,7 +150,7 @@ func ListActiveUsageIdentitiesPage(ctx context.Context, db *gorm.DB, request Lis
 		return nil, 0, nil, fmt.Errorf("count active usage identities page: %w", err)
 	}
 	var identities []entities.UsageIdentity
-	if err := applyUsageIdentityPageSort(query.Select(usageIdentityReadColumns), request.Sort).Offset((page - 1) * pageSize).Limit(pageSize).Find(&identities).Error; err != nil {
+	if err := applyUsageIdentityPageSort(query.Select(usageIdentityReadColumns), request.Sort, request.AuthType).Offset((page - 1) * pageSize).Limit(pageSize).Find(&identities).Error; err != nil {
 		return nil, 0, nil, fmt.Errorf("list active usage identities page: %w", err)
 	}
 	return identities, total, typeCounts, nil
@@ -201,10 +201,15 @@ func applyUsageIdentityTypesFilter(query *gorm.DB, types []string) *gorm.DB {
 	}
 }
 
-func applyUsageIdentityPageSort(query *gorm.DB, sort string) *gorm.DB {
+func applyUsageIdentityPageSort(query *gorm.DB, sort string, authType *entities.UsageIdentityAuthType) *gorm.DB {
 	switch sort {
 	case UsageIdentityPageSortPriority:
-		return query.Order("priority IS NULL ASC").Order("priority DESC").Order("id ASC")
+		// Auth Files 的 priority 同分需要稳定按名称排列；AI Provider 只保留同步顺序兜底。
+		query = query.Order("priority IS NULL ASC").Order("priority DESC")
+		if authType != nil && *authType == entities.UsageIdentityAuthTypeAuthFile {
+			query = query.Order("LOWER(name) ASC")
+		}
+		return query.Order("id ASC")
 	case UsageIdentityPageSortTotalTokens:
 		return query.Order("total_tokens DESC").Order("id ASC")
 	default:

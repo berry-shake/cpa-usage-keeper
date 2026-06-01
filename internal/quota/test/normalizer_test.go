@@ -129,16 +129,58 @@ func TestNormalizeCodexPrimaryWindowUsesWindowSecondsForWeeklyLabel(t *testing.T
 	}
 }
 
-func TestNormalizeCodexUnknownWindowDoesNotGuessFiveHourOrWeekly(t *testing.T) {
+func TestNormalizeCodexPrimaryWindowUsesWindowSecondsForMonthlyLabel(t *testing.T) {
 	rows := quota.NormalizeQuotaRows(quota.ProviderOutput{Provider: "codex", Result: quota.CodexResult{Usage: &quota.CodexUsagePayload{
 		RateLimit: &quota.CodexRateLimitInfo{
-			PrimaryWindow: &quota.CodexUsageWindow{UsedPercent: 10, LimitWindowSeconds: 3600},
+			PrimaryWindow: &quota.CodexUsageWindow{UsedPercent: 10, LimitWindowSeconds: 2592000},
 		},
+		CodeReviewRateLimit: &quota.CodexRateLimitInfo{
+			PrimaryWindow: &quota.CodexUsageWindow{UsedPercent: 25, LimitWindowSeconds: 2592000},
+		},
+		AdditionalRateLimits: []quota.CodexAdditionalRateLimit{{
+			LimitName: "codex-spark",
+			RateLimit: &quota.CodexRateLimitInfo{
+				PrimaryWindow: &quota.CodexUsageWindow{UsedPercent: 40, LimitWindowSeconds: 2592000},
+			},
+		}},
 	}}})
 
 	primary := findQuotaRow(t, rows, "rate_limit.primary_window")
-	assertQuotaText(t, primary, "Window", "window", "")
+	assertQuotaText(t, primary, "Monthly", "window", "")
+	assertIntField(t, primary.Window.Seconds, 2592000, "primary monthly window seconds")
+	codeReview := findQuotaRow(t, rows, "code_review_rate_limit.primary_window")
+	assertQuotaText(t, codeReview, "Code Review Monthly", "code_review", "")
+	additional := findQuotaRow(t, rows, "additional_rate_limits.codex-spark.primary_window")
+	assertQuotaText(t, additional, "codex-spark Monthly", "additional", "codex-spark")
+}
+
+func TestNormalizeCodexUnknownWindowKeepsRoleLabelWithoutGenericWindow(t *testing.T) {
+	rows := quota.NormalizeQuotaRows(quota.ProviderOutput{Provider: "codex", Result: quota.CodexResult{Usage: &quota.CodexUsagePayload{
+		RateLimit: &quota.CodexRateLimitInfo{
+			PrimaryWindow:   &quota.CodexUsageWindow{UsedPercent: 10, LimitWindowSeconds: 3600},
+			SecondaryWindow: &quota.CodexUsageWindow{UsedPercent: 20, LimitWindowSeconds: 7200},
+		},
+		CodeReviewRateLimit: &quota.CodexRateLimitInfo{
+			PrimaryWindow: &quota.CodexUsageWindow{UsedPercent: 30, LimitWindowSeconds: 3600},
+		},
+		AdditionalRateLimits: []quota.CodexAdditionalRateLimit{{
+			LimitName: "GPT-5.3-Codex-Spark",
+			RateLimit: &quota.CodexRateLimitInfo{
+				SecondaryWindow: &quota.CodexUsageWindow{UsedPercent: 40, LimitWindowSeconds: 7200},
+			},
+		}},
+	}}})
+
+	primary := findQuotaRow(t, rows, "rate_limit.primary_window")
+	assertQuotaText(t, primary, "Primary", "window", "")
 	assertIntField(t, primary.Window.Seconds, 3600, "primary unknown window seconds")
+	secondary := findQuotaRow(t, rows, "rate_limit.secondary_window")
+	assertQuotaText(t, secondary, "Secondary", "window", "")
+	assertIntField(t, secondary.Window.Seconds, 7200, "secondary unknown window seconds")
+	codeReview := findQuotaRow(t, rows, "code_review_rate_limit.primary_window")
+	assertQuotaText(t, codeReview, "Code Review Primary", "code_review", "")
+	additional := findQuotaRow(t, rows, "additional_rate_limits.GPT-5.3-Codex-Spark.secondary_window")
+	assertQuotaText(t, additional, "GPT-5.3-Codex-Spark Secondary", "additional", "GPT-5.3-Codex-Spark")
 }
 
 func TestNormalizeGeminiCLIQuotaRows(t *testing.T) {

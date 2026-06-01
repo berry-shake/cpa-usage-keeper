@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -821,6 +822,9 @@ func TestUsageIdentityListActivePageFiltersEnabledAuthFilesAndOrdersByPriority(t
 	enabled := false
 	rows := []entities.UsageIdentity{
 		{Identity: "default", Name: "Default", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", Priority: nil, Disabled: nil, TotalRequests: 40, TotalTokens: 400, CreatedAt: now, UpdatedAt: now},
+		{Identity: "priority-5-zeta", Name: "Zeta", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", Priority: intPtr(5), Disabled: &enabled, TotalRequests: 25, TotalTokens: 250, CreatedAt: now, UpdatedAt: now},
+		{Identity: "priority-5-alpha", Name: "Alpha", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", Priority: intPtr(5), Disabled: &enabled, TotalRequests: 22, TotalTokens: 220, CreatedAt: now, UpdatedAt: now},
+		{Identity: "priority-5-beta-lower", Name: "beta", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", Priority: intPtr(5), Disabled: &enabled, TotalRequests: 21, TotalTokens: 210, CreatedAt: now, UpdatedAt: now},
 		{Identity: "priority-1", Name: "Priority 1", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", Priority: intPtr(1), Disabled: &enabled, TotalRequests: 10, TotalTokens: 100, CreatedAt: now, UpdatedAt: now},
 		{Identity: "priority-5", Name: "Priority 5", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", Priority: intPtr(5), Disabled: &enabled, TotalRequests: 20, TotalTokens: 200, CreatedAt: now, UpdatedAt: now},
 		{Identity: "disabled", Name: "Disabled", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", Priority: intPtr(0), Disabled: &disabled, TotalRequests: 99, TotalTokens: 999, CreatedAt: now, UpdatedAt: now},
@@ -835,11 +839,11 @@ func TestUsageIdentityListActivePageFiltersEnabledAuthFilesAndOrdersByPriority(t
 	if err != nil {
 		t.Fatalf("list page: %v", err)
 	}
-	if total != 3 {
-		t.Fatalf("expected total 3, got %d", total)
+	if total != 6 {
+		t.Fatalf("expected total 6, got %d", total)
 	}
-	if got := []string{items[0].Identity, items[1].Identity, items[2].Identity}; !reflect.DeepEqual(got, []string{"priority-5", "priority-1", "default"}) {
-		t.Fatalf("expected enabled auth files sorted by priority desc with missing priority last, got %v", got)
+	if got := []string{items[0].Identity, items[1].Identity, items[2].Identity, items[3].Identity, items[4].Identity, items[5].Identity}; !reflect.DeepEqual(got, []string{"priority-5-alpha", "priority-5-beta-lower", "priority-5", "priority-5-zeta", "priority-1", "default"}) {
+		t.Fatalf("expected enabled auth files sorted by priority desc, name asc case-insensitively, then missing priority last, got %v", got)
 	}
 }
 
@@ -873,6 +877,55 @@ func TestUsageIdentityListActivePageOrdersByTotalTokensDesc(t *testing.T) {
 	}
 	if got := []string{items[0].Identity, items[1].Identity, items[2].Identity}; !reflect.DeepEqual(got, []string{"high", "middle", "low"}) {
 		t.Fatalf("expected page sorted by total tokens desc, got %v", got)
+	}
+}
+
+func TestUsageIdentityListActivePageOrdersAIProvidersByPriorityWithoutNameTieBreak(t *testing.T) {
+	db := openTestDatabase(t)
+	now := time.Date(2026, 5, 11, 12, 30, 0, 0, time.UTC)
+	rows := []entities.UsageIdentity{
+		{Identity: "priority-5-zeta", Name: "Zeta", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Type: "openai", Provider: "OpenAI", Priority: intPtr(5), CreatedAt: now, UpdatedAt: now},
+		{Identity: "priority-5-alpha", Name: "Alpha", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Type: "openai", Provider: "OpenAI", Priority: intPtr(5), CreatedAt: now, UpdatedAt: now},
+		{Identity: "priority-1", Name: "Priority 1", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Type: "openai", Provider: "OpenAI", Priority: intPtr(1), CreatedAt: now, UpdatedAt: now},
+		{Identity: "default", Name: "Default", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Type: "openai", Provider: "OpenAI", Priority: nil, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed usage identities: %v", err)
+	}
+	authType := entities.UsageIdentityAuthTypeAIProvider
+
+	items, total, _, err := ListActiveUsageIdentitiesPage(context.Background(), db, ListUsageIdentitiesPageRequest{AuthType: &authType, Sort: UsageIdentityPageSortPriority, Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("list page: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("expected total 4, got %d", total)
+	}
+	if got := []string{items[0].Identity, items[1].Identity, items[2].Identity, items[3].Identity}; !reflect.DeepEqual(got, []string{"priority-5-zeta", "priority-5-alpha", "priority-1", "default"}) {
+		t.Fatalf("expected AI providers sorted by priority desc and id asc without name tie-break, got %v", got)
+	}
+}
+
+func TestUsageIdentityPrioritySortUsesPortableNullAndNameOrdering(t *testing.T) {
+	db := openTestDatabase(t).Session(&gorm.Session{DryRun: true})
+	authType := entities.UsageIdentityAuthTypeAuthFile
+	var rows []entities.UsageIdentity
+
+	statement := applyUsageIdentityPageSort(db.Model(&entities.UsageIdentity{}), UsageIdentityPageSortPriority, &authType).Find(&rows).Statement
+	sql := statement.SQL.String()
+
+	for _, expected := range []string{
+		"priority IS NULL ASC",
+		"priority DESC",
+		"LOWER(name) ASC",
+		"id ASC",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("expected priority sort SQL to include %q, got %s", expected, sql)
+		}
+	}
+	if strings.Contains(sql, "COLLATE NOCASE") {
+		t.Fatalf("expected priority sort SQL to avoid sqlite-specific COLLATE NOCASE, got %s", sql)
 	}
 }
 

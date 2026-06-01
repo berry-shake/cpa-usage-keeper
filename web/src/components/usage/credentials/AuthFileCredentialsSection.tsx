@@ -6,7 +6,7 @@ import quotaTokenIcon from '@/assets/icons/quota-token.svg'
 import styles from './CredentialSections.module.scss'
 import type { AuthFileCredentialRow, DisplayQuota, PlanTypeTone } from './credentialViewModels'
 import type { UsageIdentityPageSort } from '@/lib/api'
-import { CredentialBadge, CredentialRowShell, CredentialSectionShell, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
+import { CredentialBadge, CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
 
 type Translate = (key: string, options?: Record<string, string>) => string
 
@@ -77,6 +77,7 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
                 <CredentialBadge>{row.typeLabel}</CredentialBadge>
                 {row.planTypeLabel && <CredentialPlanBadge tone={row.planTypeTone}>{row.planTypeLabel}</CredentialPlanBadge>}
                 {row.remainingDaysLabel && <span className={styles.credentialRemainingDaysBadge}>{row.remainingDaysLabel}</span>}
+                {row.priorityLabel && <CredentialPriorityBadge>{row.priorityLabel}</CredentialPriorityBadge>}
               </span>
             )}
             badges={null}
@@ -151,27 +152,16 @@ function AuthFileQuotaPanel({ row }: { row: AuthFileCredentialRow }) {
   if (row.refreshStatus === 'queued' || row.refreshStatus === 'running') {
     return <div className={styles.credentialQuotaRefreshStatus}>{t(`usage_stats.credentials_refresh_status_${row.refreshStatus}`)}</div>
   }
-  if (!row.primaryQuota && !row.secondaryQuota && row.extraQuota.length === 0) {
+  if (row.displayQuotas.length === 0) {
     return <div className={styles.credentialQuotaState}>{t('usage_stats.credentials_quota_unavailable')}</div>
   }
 
   return (
     <div className={styles.credentialQuotaPanel}>
       <div className={styles.credentialQuotaBars}>
-        {/* 主/次窗口固定优先展示，额外窗口放到下方 chips，避免宽度被无限撑开。 */}
-        {row.primaryQuota && <QuotaBar quota={row.primaryQuota} />}
-        {row.secondaryQuota && <QuotaBar quota={row.secondaryQuota} />}
+        {/* 每个可计算进度的 quota 都独占一个稳定块；不可进度化 quota 在 view model 中已过滤。 */}
+        {row.displayQuotas.map((quota) => <QuotaBar key={quota.key} quota={quota} />)}
       </div>
-      {row.extraQuota.length > 0 && (
-        <div className={styles.credentialQuotaChips}>
-          {row.extraQuota.map((quota) => (
-            <span key={quota.key} className={styles.credentialQuotaChip}>
-              <span>{quota.label}</span>
-              {quota.remaining !== undefined && <strong>{formatCredentialNumber(quota.remaining)}</strong>}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

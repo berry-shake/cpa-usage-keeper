@@ -29,14 +29,24 @@ describe('Credential section styles', () => {
     expect(credentialStyles).toMatch(/\.credentialQuotaBars\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(150px, 1fr\)\);/)
     expect(credentialStyles).toMatch(/\.credentialQuotaBars\s*\{[\s\S]*?gap:\s*14px;/)
     expect(credentialStyles).toMatch(/\.credentialQuotaBarBlock\s*\{[\s\S]*?min-width:\s*150px;/)
+    expect(credentialStyles).not.toContain('credentialQuotaChips')
+    expect(credentialStyles).not.toContain('credentialQuotaChip')
     expect(credentialStyles).not.toContain('credentialQuotaSidePanel')
     expect(credentialStyles).not.toContain('credentialQuotaRow')
   })
 
   it('keeps Auth Files quota actions inside the mobile card boundary', () => {
     expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialQuotaSideWithAction\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto;/)
-    expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialQuotaBars\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 120px\), 1fr\)\);/)
+    expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialQuotaBars\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
     expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialQuotaBarBlock\s*\{[\s\S]*?min-width:\s*0;/)
+  })
+
+  it('renders compact priority badges without lengthening credential names', () => {
+    expect(credentialStyles).toMatch(/\.credentialPriorityBadge\s*\{[\s\S]*?min-width:\s*22px;/)
+    expect(credentialShellSource).toContain('CredentialPriorityBadge')
+    expect(authFileSectionSource).toContain('row.priorityLabel')
+    expect(authFileSectionSource).toMatch(/row\.planTypeLabel[\s\S]*?row\.remainingDaysLabel[\s\S]*?row\.priorityLabel/)
+    expect(aiProviderSectionSource).toContain('row.priorityLabel')
   })
 
   it('keeps Total Requests fixed and wraps the breakdown only when it overflows', () => {

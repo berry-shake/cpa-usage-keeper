@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import styles from './CredentialSections.module.scss'
 import type { AiProviderCredentialRow } from './credentialViewModels'
 import type { UsageIdentityPageSort } from '@/lib/api'
-import { CredentialBadge, CredentialRowShell, CredentialSectionShell, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheRateTone, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
+import { CredentialBadge, CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheRateTone, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
 
 interface AiProviderCredentialsSectionProps {
   rows: AiProviderCredentialRow[]
@@ -33,7 +33,12 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
         <CredentialRowShell
           key={row.identity.id || row.identity.identity}
           title={row.displayName}
-          subtitle={<CredentialBadge>{row.typeLabel}</CredentialBadge>}
+          subtitle={(
+            <span className={styles.credentialIdentityBadges}>
+              <CredentialBadge>{row.typeLabel}</CredentialBadge>
+              {row.priorityLabel && <CredentialPriorityBadge>{row.priorityLabel}</CredentialPriorityBadge>}
+            </span>
+          )}
           badges={null}
           metrics={(
             <>
@@ -55,6 +60,7 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
         sortValue={sort}
         sortLabel={t('usage_stats.credentials_sort_label')}
         sortOptions={[
+          { value: 'priority', label: t('usage_stats.credentials_sort_priority') },
           { value: 'total_requests', label: t('usage_stats.credentials_sort_total_requests') },
           { value: 'total_tokens', label: t('usage_stats.credentials_sort_total_tokens') },
         ]}
