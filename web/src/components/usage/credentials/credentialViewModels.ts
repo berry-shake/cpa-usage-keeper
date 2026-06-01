@@ -378,7 +378,6 @@ function cacheRate(identity: UsageIdentity): number | null {
   return calculateCacheRate({
     inputTokens: identity.input_tokens,
     cachedTokens: identity.cached_tokens,
-    sourceType: identity.type,
   })
 }
 

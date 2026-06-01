@@ -5,9 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { Select, type SelectOption } from '@/components/ui/Select';
-import { IconCheck } from '@/components/ui/icons';
 import type { PricingSyncMeta } from '@/components/usage/hooks/usePricingData';
-import type { ModelPrice } from '@/utils/usage';
+import type { ModelPrice, PricingStyle } from '@/lib/types';
 import styles from '@/pages/UsagePage.module.scss';
 
 const formatDisplayName = (value: string): string => {
@@ -41,28 +40,36 @@ const parsePriceValue = (value: string): number | null => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
+const parseCachePriceValue = (value: string, style: PricingStyle, prompt: number): number | null => {
+  if (value.trim() !== '') return parsePriceValue(value);
+  return style === 'openai' ? prompt : 0;
+};
+
+const parseCacheCreationPriceValue = (value: string, style: PricingStyle): number | null => {
+  if (style !== 'claude') return 0;
+  return value.trim() === '' ? 0 : parsePriceValue(value);
+};
+
+const pricingStyleOptions = (t: (key: string) => string): SelectOption[] => [
+  { value: 'openai', label: t('usage_stats.model_price_style_openai') },
+  { value: 'claude', label: t('usage_stats.model_price_style_claude') },
+];
+
 export const buildPricingModelOptions = (
   modelNames: string[],
   modelPrices: Record<string, ModelPrice>,
   placeholder: string,
-  configuredSuffix: React.ReactNode,
-  configuredLabel: string,
 ): SelectOption[] => {
   const configuredModels = new Set(Object.keys(modelPrices));
-  const sortedModelNames = [...modelNames].sort((left, right) => {
-    const leftConfigured = configuredModels.has(left);
-    const rightConfigured = configuredModels.has(right);
-    if (leftConfigured !== rightConfigured) return leftConfigured ? 1 : -1;
-    return formatDisplayName(left).localeCompare(formatDisplayName(right));
-  });
+  const sortedModelNames = [...modelNames]
+    .filter((name) => !configuredModels.has(name))
+    .sort((left, right) => formatDisplayName(left).localeCompare(formatDisplayName(right)));
 
   return [
     { value: '', label: placeholder },
     ...sortedModelNames.map((name) => ({
       value: name,
       label: formatDisplayName(name),
-      suffix: configuredModels.has(name) ? configuredSuffix : undefined,
-      suffixAriaLabel: configuredModels.has(name) ? configuredLabel : undefined,
     })),
   ];
 };
@@ -80,28 +87,36 @@ export function PriceSettingsCard({
 
   // 新增价格表单先暂存输入值，保存成功后再一次性同步到父级配置。
   const [selectedModel, setSelectedModel] = useState('');
+  const [pricingStyle, setPricingStyle] = useState<PricingStyle>('openai');
   const [promptPrice, setPromptPrice] = useState('');
   const [completionPrice, setCompletionPrice] = useState('');
   const [cachePrice, setCachePrice] = useState('');
+  const [cacheCreationPrice, setCacheCreationPrice] = useState('');
 
   // 编辑弹窗独立保存草稿值，避免用户取消时污染已保存价格。
   const [editModel, setEditModel] = useState<string | null>(null);
+  const [editStyle, setEditStyle] = useState<PricingStyle>('openai');
   const [editPrompt, setEditPrompt] = useState('');
   const [editCompletion, setEditCompletion] = useState('');
   const [editCache, setEditCache] = useState('');
+  const [editCacheCreation, setEditCacheCreation] = useState('');
 
   const handleSavePrice = () => {
     if (!selectedModel) return;
     const prompt = parsePriceValue(promptPrice);
     const completion = parsePriceValue(completionPrice);
-    const cache = cachePrice.trim() === '' ? prompt : parsePriceValue(cachePrice);
-    if (prompt === null || completion === null || cache === null) return;
-    const newPrices = { ...modelPrices, [selectedModel]: { prompt, completion, cache } };
+    if (prompt === null || completion === null) return;
+    const cache = parseCachePriceValue(cachePrice, pricingStyle, prompt);
+    const cacheCreation = parseCacheCreationPriceValue(cacheCreationPrice, pricingStyle);
+    if (cache === null || cacheCreation === null) return;
+    const newPrices = { ...modelPrices, [selectedModel]: { style: pricingStyle, prompt, completion, cache, cacheCreation } };
     onPricesChange(newPrices);
     setSelectedModel('');
+    setPricingStyle('openai');
     setPromptPrice('');
     setCompletionPrice('');
     setCachePrice('');
+    setCacheCreationPrice('');
   };
 
   const handleDeletePrice = (model: string) => {
@@ -113,18 +128,22 @@ export function PriceSettingsCard({
   const handleOpenEdit = (model: string) => {
     const price = modelPrices[model];
     setEditModel(model);
+    setEditStyle(price?.style ?? 'openai');
     setEditPrompt(price?.prompt?.toString() || '');
     setEditCompletion(price?.completion?.toString() || '');
     setEditCache(price?.cache?.toString() || '');
+    setEditCacheCreation(price?.cacheCreation?.toString() || '');
   };
 
   const handleSaveEdit = () => {
     if (!editModel) return;
     const prompt = parsePriceValue(editPrompt);
     const completion = parsePriceValue(editCompletion);
-    const cache = editCache.trim() === '' ? prompt : parsePriceValue(editCache);
-    if (prompt === null || completion === null || cache === null) return;
-    const newPrices = { ...modelPrices, [editModel]: { prompt, completion, cache } };
+    if (prompt === null || completion === null) return;
+    const cache = parseCachePriceValue(editCache, editStyle, prompt);
+    const cacheCreation = parseCacheCreationPriceValue(editCacheCreation, editStyle);
+    if (cache === null || cacheCreation === null) return;
+    const newPrices = { ...modelPrices, [editModel]: { style: editStyle, prompt, completion, cache, cacheCreation } };
     onPricesChange(newPrices);
     setEditModel(null);
   };
@@ -133,13 +152,17 @@ export function PriceSettingsCard({
     setSelectedModel(value);
     const price = modelPrices[value];
     if (price) {
+      setPricingStyle(price.style);
       setPromptPrice(price.prompt.toString());
       setCompletionPrice(price.completion.toString());
       setCachePrice(price.cache.toString());
+      setCacheCreationPrice(price.cacheCreation.toString());
     } else {
+      setPricingStyle('openai');
       setPromptPrice('');
       setCompletionPrice('');
       setCachePrice('');
+      setCacheCreationPrice('');
     }
   };
 
@@ -148,11 +171,10 @@ export function PriceSettingsCard({
       modelNames,
       modelPrices,
       t('usage_stats.model_price_select_placeholder'),
-      <IconCheck size={10} />,
-      t('usage_stats.model_price_configured')
     ),
     [modelNames, modelPrices, t]
   );
+  const styleOptions = useMemo(() => pricingStyleOptions(t), [t]);
   const savedPriceEntries = useMemo(
     () => Object.entries(modelPrices).sort(([left], [right]) => left.localeCompare(right)),
     [modelPrices]
@@ -173,137 +195,156 @@ export function PriceSettingsCard({
   }, [syncMeta, t]);
 
   return (
-    <Card
-      title={
-        <PriceSettingsTitle
-          eyebrow={t('usage_stats.model_price_settings_eyebrow')}
-          title={t('usage_stats.model_price_settings_title')}
-          subtitle={t('usage_stats.model_price_settings_subtitle')}
-        />
-      }
-      extra={
-        <Button
-          variant="secondary"
-          size="sm"
-          loading={syncingPrices}
-          disabled={syncingPrices || loading || modelNames.length === 0}
-          onClick={() => void onSyncPrices()}
-        >
-          {t('usage_stats.model_price_sync')}
-        </Button>
-      }
-      className={`${styles.detailsFixedCard} ${styles.pricingFixedCard}`}
-    >
-      <div className={styles.pricingSection}>
-        {loading && modelNames.length === 0 && Object.keys(modelPrices).length === 0 ? (
-          <div className={styles.hint}>{t('common.loading')}</div>
-        ) : (
-          <>
-            <div className={styles.priceSyncSummary}>{syncSummary}</div>
-            <div className={styles.priceForm}>
-              <div className={styles.formRow}>
-                <div className={styles.formField}>
-                  <label>{t('usage_stats.model_name')}</label>
-                  <Select
-                    value={selectedModel}
-                    options={options}
-                    onChange={handleModelSelect}
-                    placeholder={t('usage_stats.model_price_select_placeholder')}
-                    className={styles.usagePillControl}
-                  />
-                </div>
-                <div className={styles.formField}>
-                  <label>{t('usage_stats.model_price_prompt')} ($/1M)</label>
-                  <Input
-                    type="number"
-                    value={promptPrice}
-                    onChange={(e) => setPromptPrice(e.target.value)}
-                    placeholder="0.00"
-                    step="0.0001"
-                    className={styles.usagePillControl}
-                  />
-                </div>
-                <div className={styles.formField}>
-                  <label>{t('usage_stats.model_price_completion')} ($/1M)</label>
-                  <Input
-                    type="number"
-                    value={completionPrice}
-                    onChange={(e) => setCompletionPrice(e.target.value)}
-                    placeholder="0.00"
-                    step="0.0001"
-                    className={styles.usagePillControl}
-                  />
-                </div>
-                <div className={styles.formField}>
-                  <label>{t('usage_stats.model_price_cache')} ($/1M)</label>
-                  <Input
-                    type="number"
-                    value={cachePrice}
-                    onChange={(e) => setCachePrice(e.target.value)}
-                    placeholder="0.00"
-                    step="0.0001"
-                    className={styles.usagePillControl}
-                  />
-                </div>
-                <Button variant="primary" className={styles.usagePillAction} onClick={handleSavePrice} disabled={!selectedModel}>
-                  {t('common.save')}
-                </Button>
-              </div>
-            </div>
-
-            <div className={styles.pricesList}>
-              <h4 className={styles.pricesTitle}>{t('usage_stats.saved_prices')}</h4>
-              {savedPriceEntries.length > 0 ? (
-                <div className={styles.pricesGrid}>
-                  {savedPriceEntries.map(([model, price]) => (
-                    <div key={model} className={styles.priceItem}>
-                      <span className={styles.priceModel}>{formatDisplayName(model)}</span>
-                      <div className={styles.priceActions}>
-                        <Button variant="secondary" size="sm" className={styles.usagePillAction} onClick={() => handleOpenEdit(model)}>
-                          {t('common.edit')}
-                        </Button>
-                        <Button variant="danger" size="sm" className={`${styles.usagePillAction} ${styles.usagePillActionDanger}`} onClick={() => handleDeletePrice(model)}>
-                          {t('common.delete')}
-                        </Button>
-                      </div>
-                      <div className={styles.priceMeta}>
-                        <div className={styles.priceMetaCell}>
-                          <span className={styles.priceMetaLabel}>
-                            {t('usage_stats.model_price_prompt')}
-                          </span>
-                          <span className={styles.priceMetaValue}>
-                            ${price.prompt.toFixed(4)}<em>/1M</em>
-                          </span>
-                        </div>
-                        <div className={styles.priceMetaCell}>
-                          <span className={styles.priceMetaLabel}>
-                            {t('usage_stats.model_price_completion')}
-                          </span>
-                          <span className={styles.priceMetaValue}>
-                            ${price.completion.toFixed(4)}<em>/1M</em>
-                          </span>
-                        </div>
-                        <div className={styles.priceMetaCell}>
-                          <span className={styles.priceMetaLabel}>
-                            {t('usage_stats.model_price_cache')}
-                          </span>
-                          <span className={styles.priceMetaValue}>
-                            ${price.cache.toFixed(4)}<em>/1M</em>
-                          </span>
-                        </div>
-                      </div>
+    <>
+      <Card
+        title={
+          <PriceSettingsTitle
+            eyebrow={t('usage_stats.model_price_settings_eyebrow')}
+            title={t('usage_stats.model_price_settings_title')}
+            subtitle={t('usage_stats.model_price_settings_subtitle')}
+          />
+        }
+        extra={
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={syncingPrices}
+            disabled={syncingPrices || loading || modelNames.length === 0}
+            onClick={() => void onSyncPrices()}
+          >
+            {t('usage_stats.model_price_sync')}
+          </Button>
+        }
+        className={`${styles.detailsFixedCard} ${styles.pricingFixedCard}`}
+      >
+        <div className={styles.pricingSection}>
+          {loading && modelNames.length === 0 && Object.keys(modelPrices).length === 0 ? (
+            <div className={styles.hint}>{t('common.loading')}</div>
+          ) : (
+            <>
+              <div className={styles.priceSyncSummary}>{syncSummary}</div>
+              <div className={styles.priceForm}>
+                <div className={styles.formRow}>
+                  <div className={styles.formField}>
+                    <label>{t('usage_stats.model_name')}</label>
+                    <Select
+                      value={selectedModel}
+                      options={options}
+                      onChange={handleModelSelect}
+                      placeholder={t('usage_stats.model_price_select_placeholder')}
+                      className={styles.usagePillControl}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t('usage_stats.model_price_style')}</label>
+                    <Select
+                      value={pricingStyle}
+                      options={styleOptions}
+                      onChange={(value) => setPricingStyle(value === 'claude' ? 'claude' : 'openai')}
+                      className={styles.usagePillControl}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t('usage_stats.model_price_prompt')} ($/1M)</label>
+                    <Input
+                      type="number"
+                      value={promptPrice}
+                      onChange={(e) => setPromptPrice(e.target.value)}
+                      placeholder="0.00"
+                      step="0.0001"
+                      className={styles.usagePillControl}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t('usage_stats.model_price_completion')} ($/1M)</label>
+                    <Input
+                      type="number"
+                      value={completionPrice}
+                      onChange={(e) => setCompletionPrice(e.target.value)}
+                      placeholder="0.00"
+                      step="0.0001"
+                      className={styles.usagePillControl}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t(pricingStyle === 'claude' ? 'usage_stats.model_price_cache_read' : 'usage_stats.model_price_cache')} ($/1M)</label>
+                    <Input
+                      type="number"
+                      value={cachePrice}
+                      onChange={(e) => setCachePrice(e.target.value)}
+                      placeholder="0.00"
+                      step="0.0001"
+                      className={styles.usagePillControl}
+                    />
+                  </div>
+                  {pricingStyle === 'claude' && (
+                    <div className={styles.formField}>
+                      <label>{t('usage_stats.model_price_cache_write')} ($/1M)</label>
+                      <Input
+                        type="number"
+                        value={cacheCreationPrice}
+                        onChange={(e) => setCacheCreationPrice(e.target.value)}
+                        placeholder="0.00"
+                        step="0.0001"
+                        className={styles.usagePillControl}
+                      />
                     </div>
-                  ))}
+                  )}
+                  <Button variant="primary" className={styles.usagePillAction} onClick={handleSavePrice} disabled={!selectedModel}>
+                    {t('common.save')}
+                  </Button>
                 </div>
-              ) : (
-                <div className={styles.hint}>{t('usage_stats.model_price_empty')}</div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
+              </div>
 
-      {/* 编辑弹窗沿用同一套价格输入和操作按钮样式。 */}
+              <div className={styles.pricesList}>
+                <h4 className={styles.pricesTitle}>{t('usage_stats.saved_prices')}</h4>
+                {savedPriceEntries.length > 0 ? (
+                  <div className={styles.pricesGrid}>
+                    {savedPriceEntries.map(([model, price]) => (
+                      <div key={model} className={styles.priceItem}>
+                        <div className={styles.priceInfo}>
+                          <span className={styles.priceModel}>{formatDisplayName(model)}</span>
+                          <div className={styles.priceMeta}>
+                            <span>
+                              {t('usage_stats.model_price_style')}: {t(price.style === 'claude' ? 'usage_stats.model_price_style_claude' : 'usage_stats.model_price_style_openai')}
+                            </span>
+                            <span>
+                              {t('usage_stats.model_price_prompt')}: ${price.prompt.toFixed(4)}/1M
+                            </span>
+                            <span>
+                              {t('usage_stats.model_price_completion')}: ${price.completion.toFixed(4)}/1M
+                            </span>
+                            <span>
+                              {t(price.style === 'claude' ? 'usage_stats.model_price_cache_read' : 'usage_stats.model_price_cache')}: ${price.cache.toFixed(4)}/1M
+                            </span>
+                            {price.style === 'claude' && (
+                              <span>
+                                {t('usage_stats.model_price_cache_write')}: ${price.cacheCreation.toFixed(4)}/1M
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className={styles.priceActions}>
+                          <Button variant="secondary" size="sm" className={styles.usagePillAction} onClick={() => handleOpenEdit(model)}>
+                            {t('common.edit')}
+                          </Button>
+                          <Button variant="danger" size="sm" className={`${styles.usagePillAction} ${styles.usagePillActionDanger}`} onClick={() => handleDeletePrice(model)}>
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className={styles.hint}>{t('usage_stats.model_price_empty')}</div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
+
+      {/* 编辑弹窗不作为价格卡片内容参与布局，只负责编辑当前模型价格。 */}
       <Modal
         open={editModel !== null}
         title={formatDisplayName(editModel ?? '')}
@@ -321,6 +362,15 @@ export function PriceSettingsCard({
         width={420}
       >
         <div className={styles.editModalBody}>
+          <div className={styles.formField}>
+            <label>{t('usage_stats.model_price_style')}</label>
+            <Select
+              value={editStyle}
+              options={styleOptions}
+              onChange={(value) => setEditStyle(value === 'claude' ? 'claude' : 'openai')}
+              className={styles.usagePillControl}
+            />
+          </div>
           <div className={styles.formField}>
             <label>{t('usage_stats.model_price_prompt')} ($/1M)</label>
             <Input
@@ -344,7 +394,7 @@ export function PriceSettingsCard({
             />
           </div>
           <div className={styles.formField}>
-            <label>{t('usage_stats.model_price_cache')} ($/1M)</label>
+            <label>{t(editStyle === 'claude' ? 'usage_stats.model_price_cache_read' : 'usage_stats.model_price_cache')} ($/1M)</label>
             <Input
               type="number"
               value={editCache}
@@ -354,8 +404,21 @@ export function PriceSettingsCard({
               className={styles.usagePillControl}
             />
           </div>
+          {editStyle === 'claude' && (
+            <div className={styles.formField}>
+              <label>{t('usage_stats.model_price_cache_write')} ($/1M)</label>
+              <Input
+                type="number"
+                value={editCacheCreation}
+                onChange={(e) => setEditCacheCreation(e.target.value)}
+                placeholder="0.00"
+                step="0.0001"
+                className={styles.usagePillControl}
+              />
+            </div>
+          )}
         </div>
       </Modal>
-    </Card>
+    </>
   );
 }

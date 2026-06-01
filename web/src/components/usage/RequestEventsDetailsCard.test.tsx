@@ -1,7 +1,12 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { RequestEventsDetailsCard } from './RequestEventsDetailsCard';
+import {
+  RequestEventsDetailsCard,
+  resolveRequestEventColumnMenuFocusIndex,
+  toggleRequestEventColumnId,
+  type RequestEventColumnId,
+} from './RequestEventsDetailsCard';
 import type { UsageEvent } from '@/lib/types';
 
 const events: UsageEvent[] = [
@@ -24,8 +29,13 @@ const events: UsageEvent[] = [
       output_tokens: 60,
       reasoning_tokens: 20,
       cached_tokens: 20,
+      cache_read_tokens: 20,
+      cache_creation_tokens: 0,
       total_tokens: 200,
     },
+    cost_usd: 0.1234,
+    cost_available: true,
+    pricing_style: 'claude',
   },
 ];
 
@@ -44,7 +54,6 @@ const renderCard = (props: Partial<React.ComponentProps<typeof RequestEventsDeta
       modelFilter="__all__"
       sourceFilter="__all__"
       resultFilter="__all__"
-      modelPrices={{}}
       onPageChange={() => undefined}
       onPageSizeChange={() => undefined}
       onModelFilterChange={() => undefined}
@@ -139,7 +148,7 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('<td>25</td><td>25.00%</td><td>200</td>');
   });
 
-  it('uses Claude token semantics for cache rate', () => {
+  it('keeps cache rate based on normalized input for all providers', () => {
     const html = renderCard({
       events: [{
         ...events[0],
@@ -148,8 +157,8 @@ describe('RequestEventsDetailsCard pagination', () => {
       }],
     });
 
-    expect(html).toContain('<td>600</td><td>60.00%</td><td>500</td>');
-    expect(html).not.toContain('150.00%');
+    expect(html).toContain('<td>600</td><td>150.00%</td><td>500</td>');
+    expect(html).not.toContain('60.00%');
   });
 
   it('shows a dash for cache rate when input tokens are zero', () => {
@@ -281,14 +290,62 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('model-5');
   });
 
-  it('shows per-event cost when model pricing exists', () => {
+  it('shows per-event cost returned by the backend', () => {
+    const html = renderCard();
+
+    expect(html).toContain('Total Cost');
+    expect(html).toContain('$0.1234');
+  });
+
+  it('shows a dash when backend cost is unavailable', () => {
     const html = renderCard({
-      modelPrices: {
-        'claude-sonnet': { prompt: 15, completion: 75, cache: 1.5 },
-      },
+      events: [{ ...events[0], cost_usd: 0, cost_available: false }],
     });
 
     expect(html).toContain('Total Cost');
-    expect(html).toContain('$0.0057');
+    expect(html).toContain('title="Set pricing to calculate cost">-</td>');
+  });
+
+  it('renders a column selector before the page size control', () => {
+    const html = renderCard();
+
+    expect(html).toContain('aria-label="Columns"');
+    expect(html.indexOf('aria-label="Columns"')).toBeLessThan(html.indexOf('<span>Size</span>'));
+    expect(html).toContain('>All</span>');
+  });
+
+  it('can render only the selected request event columns', () => {
+    const html = renderCard({
+      initialVisibleColumnIds: ['timestamp', 'model', 'total_cost'],
+    });
+
+    expect(html).toContain('<th>Timestamp</th>');
+    expect(html).toContain('<th>Model</th>');
+    expect(html).toContain('<th>Total Cost</th>');
+    expect(html).toContain('2026/04/23 02:00:00');
+    expect(html).toContain('<td class="_modelCell_');
+    expect(html).toContain('$0.1234');
+    expect(html).not.toContain('<th>API Key</th>');
+    expect(html).not.toContain('<th>Source</th>');
+    expect(html).not.toContain('<th title="Time to First Token">TTFT</th>');
+    expect(html).not.toContain('<th title="Using latency_ms in ms">Latency</th>');
+    expect(html).not.toContain('title="Production Key">Production Key</td>');
+  });
+
+  it('keeps at least one request event column selected', () => {
+    const selected: RequestEventColumnId[] = ['timestamp'];
+
+    expect(toggleRequestEventColumnId(selected, 'timestamp')).toEqual(['timestamp']);
+    expect(toggleRequestEventColumnId(selected, 'model')).toEqual(['timestamp', 'model']);
+  });
+
+  it('cycles column menu focus for arrow and tab navigation', () => {
+    expect(resolveRequestEventColumnMenuFocusIndex(0, 3, 'ArrowDown')).toBe(1);
+    expect(resolveRequestEventColumnMenuFocusIndex(2, 3, 'ArrowDown')).toBe(0);
+    expect(resolveRequestEventColumnMenuFocusIndex(0, 3, 'ArrowUp')).toBe(2);
+    expect(resolveRequestEventColumnMenuFocusIndex(2, 3, 'Tab')).toBe(0);
+    expect(resolveRequestEventColumnMenuFocusIndex(0, 3, 'Tab', true)).toBe(2);
+    expect(resolveRequestEventColumnMenuFocusIndex(1, 3, 'Escape')).toBeNull();
+    expect(resolveRequestEventColumnMenuFocusIndex(0, 0, 'ArrowDown')).toBeNull();
   });
 });

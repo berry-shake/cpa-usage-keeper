@@ -127,7 +127,8 @@ describe('UsagePage toolbar styles', () => {
     expect(apiKeyBodyBlock).toMatch(/height:\s*var\(--settings-list-scroll-height\);/)
     expect(apiKeySettingsMobileBlock).toMatch(/\.apiKeySettingsBody\s*\{[\s\S]*?height:\s*var\(--settings-list-scroll-height\);/)
     expect(pricingGridBlock).toMatch(/height:\s*var\(--settings-list-scroll-height\);/)
-    expect(pricingGridBlock).toMatch(/\.pricesGrid\s*\{[\s\S]*?overflow:\s*auto;/)
+    expect(pricingGridBlock).toMatch(/\.pricesGrid\s*\{[\s\S]*?overflow-y:\s*auto;/)
+    expect(pricingGridBlock).toMatch(/\.pricesGrid\s*\{[\s\S]*?overflow-x:\s*hidden;/)
     expect(pricingGridBlock).not.toMatch(/@include mobile\s*\{[\s\S]*?overflow:\s*visible;/)
   })
 

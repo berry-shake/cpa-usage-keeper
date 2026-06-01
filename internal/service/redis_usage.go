@@ -70,7 +70,6 @@ func trimRedisOptionalString(value *string) *string {
 
 // toUsageEvent 保持 Redis payload 的 model/request_id 语义，缺失时间才用本地拉取时间兜底。
 func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) entities.UsageEvent {
-	tokens := normalizeTokens(d.Tokens)
 	apiGroupKey := firstNonEmpty(d.APIKey, d.Provider, d.Endpoint, "unknown")
 	model := firstNonEmpty(d.Model, "unknown")
 	timestamp := timeutil.NormalizeStorageTime(d.Timestamp)
@@ -97,12 +96,12 @@ func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) entities.UsageEvent
 		Failed:              d.Failed,
 		LatencyMS:           max(d.LatencyMS, 0),
 		TTFTMS:              d.TTFTMS,
-		InputTokens:         tokens.InputTokens,
-		OutputTokens:        tokens.OutputTokens,
-		ReasoningTokens:     tokens.ReasoningTokens,
-		CachedTokens:        tokens.CachedTokens,
-		CacheReadTokens:     tokens.CacheReadTokens,
-		CacheCreationTokens: tokens.CacheCreationTokens,
-		TotalTokens:         tokens.TotalTokens,
+		InputTokens:         d.Tokens.InputTokens,
+		OutputTokens:        d.Tokens.OutputTokens,
+		ReasoningTokens:     d.Tokens.ReasoningTokens,
+		CachedTokens:        d.Tokens.CachedTokens,
+		CacheReadTokens:     d.Tokens.CacheReadTokens,
+		CacheCreationTokens: d.Tokens.CacheCreationTokens,
+		TotalTokens:         d.Tokens.TotalTokens,
 	}
 }

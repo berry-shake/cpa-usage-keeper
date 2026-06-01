@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"path/filepath"
 	"strconv"
@@ -371,6 +372,308 @@ func TestProcessRedisUsageInboxDoesNotFetchMetadata(t *testing.T) {
 	}
 	if inbox.Status != repository.RedisUsageInboxStatusProcessed || inbox.UsageEventKey != "redis-no-metadata" {
 		t.Fatalf("expected inbox row processed, got %+v", inbox)
+	}
+}
+
+func TestProcessRedisUsageInboxNormalizesClaudeTokensForOAuthProvider(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		QueueKey: cpa.ManagementUsageQueueKey,
+		RawMessage: `{
+			"timestamp":"2026-04-27T08:00:00Z",
+			"provider":"claude",
+			"auth_type":"oauth",
+			"auth_index":"auth-claude",
+			"model":"claude-sonnet",
+			"request_id":"oauth-claude-cache",
+			"tokens":{
+				"input_tokens":100,
+				"output_tokens":30,
+				"cached_tokens":999,
+				"cache_read_tokens":20,
+				"cache_creation_tokens":10,
+				"total_tokens":160
+			}
+		}`,
+		PoppedAt: time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	if result == nil || result.InsertedEvents != 1 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	event := loadUsageEventByKey(t, db, "oauth-claude-cache")
+	if event.InputTokens != 130 || event.CachedTokens != 20 || event.CacheReadTokens != 20 || event.CacheCreationTokens != 10 || event.OutputTokens != 30 || event.TotalTokens != 160 {
+		t.Fatalf("expected Claude oauth tokens to be normalized, got %+v", event)
+	}
+}
+
+func TestProcessRedisUsageInboxNormalizesAPIKeyTokensByUsageIdentityType(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if err := db.Create(&entities.UsageIdentity{
+		Name:         "Claude Provider",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "provider-auth-index",
+		Type:         "claude",
+		Provider:     "Team Display Name",
+	}).Error; err != nil {
+		t.Fatalf("seed usage identity: %v", err)
+	}
+	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		QueueKey: cpa.ManagementUsageQueueKey,
+		RawMessage: `{
+			"timestamp":"2026-04-27T08:00:00Z",
+			"provider":"Team Display Name",
+			"auth_type":"apikey",
+			"auth_index":"provider-auth-index",
+			"model":"claude-sonnet",
+			"request_id":"apikey-claude-cache",
+			"tokens":{
+				"input_tokens":100,
+				"output_tokens":30,
+				"cache_read_tokens":20,
+				"cache_creation_tokens":10,
+				"total_tokens":160
+			}
+		}`,
+		PoppedAt: time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	if _, err := service.ProcessRedisUsageInbox(context.Background()); err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	event := loadUsageEventByKey(t, db, "apikey-claude-cache")
+	if event.InputTokens != 130 || event.CachedTokens != 20 || event.CacheReadTokens != 20 || event.CacheCreationTokens != 10 || event.OutputTokens != 30 || event.TotalTokens != 160 {
+		t.Fatalf("expected API key identity type to drive Claude normalization, got %+v", event)
+	}
+}
+
+func TestNormalizeRedisUsageEventsResolvesAPIKeyAuthTypeAlias(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if err := db.Create(&entities.UsageIdentity{
+		Name:         "Claude Provider",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "provider-auth-index",
+		Type:         "claude",
+		Provider:     "Team Display Name",
+	}).Error; err != nil {
+		t.Fatalf("seed usage identity: %v", err)
+	}
+	events := []entities.UsageEvent{{
+		AuthType:            "api_key",
+		AuthIndex:           "provider-auth-index",
+		Model:               "claude-sonnet",
+		InputTokens:         100,
+		OutputTokens:        30,
+		CacheReadTokens:     20,
+		CacheCreationTokens: 10,
+		TotalTokens:         160,
+	}}
+
+	normalized, err := normalizeRedisUsageEvents(context.Background(), db, events)
+	if err != nil {
+		t.Fatalf("normalizeRedisUsageEvents returned error: %v", err)
+	}
+	if len(normalized) != 1 {
+		t.Fatalf("expected one normalized event, got %d", len(normalized))
+	}
+	event := normalized[0]
+	if event.InputTokens != 130 || event.CachedTokens != 20 || event.CacheReadTokens != 20 || event.CacheCreationTokens != 10 || event.OutputTokens != 30 || event.TotalTokens != 160 {
+		t.Fatalf("expected api_key alias to resolve Claude identity type, got %+v", event)
+	}
+}
+
+func TestProcessRedisUsageInboxDoesNotFallbackWhenUsageTypeLookupErrors(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	rows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		QueueKey:   cpa.ManagementUsageQueueKey,
+		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Team Display Name","auth_type":"apikey","auth_index":"provider-auth-index","model":"claude-sonnet","request_id":"type-lookup-error","tokens":{"input_tokens":100,"output_tokens":30,"cache_read_tokens":20,"cache_creation_tokens":10,"total_tokens":160}}`,
+		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	if err := db.Migrator().DropTable(&entities.UsageIdentity{}); err != nil {
+		t.Fatalf("drop usage identity table: %v", err)
+	}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	result, err := service.ProcessRedisUsageInbox(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "load active usage identity types for redis usage") {
+		t.Fatalf("expected usage type lookup error, got result=%+v err=%v", result, err)
+	}
+	if result == nil || result.Status != "failed" {
+		t.Fatalf("expected failed result, got %+v", result)
+	}
+	assertUsageEventCount(t, db, 0)
+	var inbox entities.RedisUsageInbox
+	if err := db.First(&inbox, rows[0].ID).Error; err != nil {
+		t.Fatalf("load inbox row: %v", err)
+	}
+	if inbox.Status != repository.RedisUsageInboxStatusProcessFailed || !strings.Contains(inbox.LastError, "load active usage identity types for redis usage") {
+		t.Fatalf("expected inbox row process_failed with lookup error, got %+v", inbox)
+	}
+}
+
+func TestBuildUsageEventTypeResolverBatchesAPIKeyIdentityLookup(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	identities := make([]entities.UsageIdentity, 0, 901)
+	events := make([]entities.UsageEvent, 0, 901)
+	for i := 0; i < 901; i++ {
+		authIndex := fmt.Sprintf("provider-auth-%03d", i)
+		identities = append(identities, entities.UsageIdentity{
+			Name:         authIndex,
+			AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+			AuthTypeName: "apikey",
+			Identity:     authIndex,
+			Type:         "claude",
+			Provider:     "Claude",
+		})
+		events = append(events, entities.UsageEvent{
+			AuthType:  "apikey",
+			AuthIndex: authIndex,
+		})
+	}
+	if err := db.CreateInBatches(&identities, 100).Error; err != nil {
+		t.Fatalf("seed usage identities: %v", err)
+	}
+	usageIdentityQueries := 0
+	callbackName := "test:capture_usage_identity_type_lookup_batches"
+	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		sql := tx.Statement.SQL.String()
+		if strings.Contains(sql, "FROM `usage_identities`") || strings.Contains(sql, `FROM "usage_identities"`) {
+			usageIdentityQueries++
+		}
+	}); err != nil {
+		t.Fatalf("register query callback returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	resolver, err := buildUsageEventTypeResolver(context.Background(), db, events)
+	if err != nil {
+		t.Fatalf("buildUsageEventTypeResolver returned error: %v", err)
+	}
+	if len(resolver.byAuthIndex) != len(events) {
+		t.Fatalf("expected resolver to load %d types, got %d", len(events), len(resolver.byAuthIndex))
+	}
+	if usageIdentityQueries != 2 {
+		t.Fatalf("expected 901 auth indexes to be loaded in two SELECT batches, got %d queries", usageIdentityQueries)
+	}
+}
+
+func TestBuildUsageEventTypeResolverIgnoresBlankActiveType(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if err := db.Create(&entities.UsageIdentity{
+		Name:         "Blank Active",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "blank-active-auth-index",
+		Type:         " ",
+		Provider:     "Blank",
+	}).Error; err != nil {
+		t.Fatalf("seed usage identities: %v", err)
+	}
+
+	resolver, err := buildUsageEventTypeResolver(context.Background(), db, []entities.UsageEvent{{
+		AuthType:  "apikey",
+		AuthIndex: "blank-active-auth-index",
+	}})
+	if err != nil {
+		t.Fatalf("buildUsageEventTypeResolver returned error: %v", err)
+	}
+	if got := resolver.byAuthIndex["blank-active-auth-index"]; got != "" {
+		t.Fatalf("expected blank active type to remain unresolved for OpenAI-style fallback, got %q", got)
+	}
+}
+
+func TestProcessRedisUsageInboxFallsBackToDeletedUsageIdentityType(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	deletedAt := time.Date(2026, 4, 26, 8, 0, 0, 0, time.UTC)
+	if err := db.Create(&entities.UsageIdentity{
+		Name:         "Deleted Claude Provider",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "deleted-auth-index",
+		Type:         "claude",
+		Provider:     "Deleted Team",
+		IsDeleted:    true,
+		DeletedAt:    &deletedAt,
+	}).Error; err != nil {
+		t.Fatalf("seed deleted usage identity: %v", err)
+	}
+	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		QueueKey:   cpa.ManagementUsageQueueKey,
+		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Deleted Team","auth_type":"apikey","auth_index":"deleted-auth-index","model":"claude-sonnet","request_id":"deleted-identity-claude","tokens":{"input_tokens":100,"output_tokens":30,"cache_read_tokens":20,"cache_creation_tokens":10,"total_tokens":160}}`,
+		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	if _, err := service.ProcessRedisUsageInbox(context.Background()); err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	event := loadUsageEventByKey(t, db, "deleted-identity-claude")
+	if event.InputTokens != 130 || event.CachedTokens != 20 {
+		t.Fatalf("expected deleted identity metadata fallback to normalize Claude tokens, got %+v", event)
+	}
+}
+
+func TestProcessRedisUsageInboxUsesOpenAIStyleForKimiAndMissingType(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	logs := captureSyncDebugLogs(t)
+	if err := db.Create(&entities.UsageIdentity{
+		Name:         "Kimi Provider",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "kimi-auth-index",
+		Type:         "kimi",
+		Provider:     "Kimi",
+	}).Error; err != nil {
+		t.Fatalf("seed kimi usage identity: %v", err)
+	}
+	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
+		{
+			QueueKey:   cpa.ManagementUsageQueueKey,
+			RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Kimi","auth_type":"apikey","auth_index":"kimi-auth-index","model":"kimi-k2","request_id":"kimi-openai-style","tokens":{"input_tokens":100,"output_tokens":30,"cached_tokens":20,"cache_read_tokens":20,"cache_creation_tokens":10}}`,
+			PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+		},
+		{
+			QueueKey:   cpa.ManagementUsageQueueKey,
+			RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Unknown","auth_type":"apikey","auth_index":"missing-auth-index","model":"unknown-model","request_id":"missing-type-openai-style","tokens":{"input_tokens":100,"output_tokens":30,"cached_tokens":20,"cache_read_tokens":20,"cache_creation_tokens":10}}`,
+			PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed inbox rows: %v", err)
+	}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	if _, err := service.ProcessRedisUsageInbox(context.Background()); err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	for _, eventKey := range []string{"kimi-openai-style", "missing-type-openai-style"} {
+		event := loadUsageEventByKey(t, db, eventKey)
+		if event.InputTokens != 100 || event.CachedTokens != 20 || event.CacheReadTokens != 20 || event.CacheCreationTokens != 10 || event.OutputTokens != 30 || event.TotalTokens != 130 {
+			t.Fatalf("expected %s to use OpenAI-style token normalization, got %+v", eventKey, event)
+		}
+	}
+	if output := logs.String(); !strings.Contains(output, "usage identity type not found for redis usage event") || !strings.Contains(output, "missing-auth-index") {
+		t.Fatalf("expected missing type warning log, got:\n%s", output)
 	}
 }
 
@@ -1464,6 +1767,15 @@ func closeTestDatabase(t *testing.T, db *gorm.DB) {
 			t.Fatalf("close database: %v", err)
 		}
 	})
+}
+
+func loadUsageEventByKey(t *testing.T, db *gorm.DB, eventKey string) entities.UsageEvent {
+	t.Helper()
+	var event entities.UsageEvent
+	if err := db.Where("event_key = ?", eventKey).First(&event).Error; err != nil {
+		t.Fatalf("load usage event %q: %v", eventKey, err)
+	}
+	return event
 }
 
 func captureSyncDebugLogs(t *testing.T) *bytes.Buffer {

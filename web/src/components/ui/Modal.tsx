@@ -37,13 +37,6 @@ const scrollLockSnapshot = {
   scrollY: 0,
   contentScrollTop: 0,
   contentEl: null as HTMLElement | null,
-  bodyPosition: '',
-  bodyTop: '',
-  bodyLeft: '',
-  bodyRight: '',
-  bodyWidth: '',
-  bodyOverflow: '',
-  htmlOverflow: '',
 };
 
 const resolveContentScrollContainer = () => {
@@ -52,34 +45,21 @@ const resolveContentScrollContainer = () => {
   return contentEl instanceof HTMLElement ? contentEl : null;
 };
 
+const isModalBodyScrollTarget = (target: EventTarget | null) =>
+  target instanceof Element && target.closest('.modal-body') !== null;
+
 const lockScroll = () => {
   if (typeof document === 'undefined') return;
   if (activeModalCount === 0) {
-    const body = document.body;
     const html = document.documentElement;
     const contentEl = resolveContentScrollContainer();
 
     scrollLockSnapshot.scrollY = window.scrollY || window.pageYOffset || html.scrollTop || 0;
     scrollLockSnapshot.contentEl = contentEl;
     scrollLockSnapshot.contentScrollTop = contentEl?.scrollTop ?? 0;
-    scrollLockSnapshot.bodyPosition = body.style.position;
-    scrollLockSnapshot.bodyTop = body.style.top;
-    scrollLockSnapshot.bodyLeft = body.style.left;
-    scrollLockSnapshot.bodyRight = body.style.right;
-    scrollLockSnapshot.bodyWidth = body.style.width;
-    scrollLockSnapshot.bodyOverflow = body.style.overflow;
-    scrollLockSnapshot.htmlOverflow = html.style.overflow;
 
-    body.classList.add(MODAL_LOCK_CLASS);
+    document.body.classList.add(MODAL_LOCK_CLASS);
     html.classList.add(MODAL_LOCK_CLASS);
-
-    body.style.position = 'fixed';
-    body.style.top = `-${scrollLockSnapshot.scrollY}px`;
-    body.style.left = '0';
-    body.style.right = '0';
-    body.style.width = '100%';
-    body.style.overflow = 'hidden';
-    html.style.overflow = 'hidden';
   }
   activeModalCount += 1;
 };
@@ -88,22 +68,13 @@ const unlockScroll = () => {
   if (typeof document === 'undefined') return;
   activeModalCount = Math.max(0, activeModalCount - 1);
   if (activeModalCount === 0) {
-    const body = document.body;
     const html = document.documentElement;
     const scrollY = scrollLockSnapshot.scrollY;
     const contentScrollTop = scrollLockSnapshot.contentScrollTop;
     const contentEl = scrollLockSnapshot.contentEl;
 
-    body.classList.remove(MODAL_LOCK_CLASS);
+    document.body.classList.remove(MODAL_LOCK_CLASS);
     html.classList.remove(MODAL_LOCK_CLASS);
-
-    body.style.position = scrollLockSnapshot.bodyPosition;
-    body.style.top = scrollLockSnapshot.bodyTop;
-    body.style.left = scrollLockSnapshot.bodyLeft;
-    body.style.right = scrollLockSnapshot.bodyRight;
-    body.style.width = scrollLockSnapshot.bodyWidth;
-    body.style.overflow = scrollLockSnapshot.bodyOverflow;
-    html.style.overflow = scrollLockSnapshot.htmlOverflow;
 
     if (contentEl) {
       contentEl.scrollTo({ top: contentScrollTop, left: 0, behavior: 'auto' });
@@ -132,6 +103,7 @@ export function Modal({
   const [isClosing, setIsClosing] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
@@ -267,13 +239,38 @@ export function Modal({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [closeDisabled, getFocusableElements, handleClose, open]);
 
+  useEffect(() => {
+    if (!open && !isVisible) return;
+
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    const blockOverlayWheel = (event: WheelEvent) => {
+      if (isModalBodyScrollTarget(event.target)) return;
+      event.preventDefault();
+    };
+    const blockOverlayTouchMove = (event: TouchEvent) => {
+      if (isModalBodyScrollTarget(event.target)) return;
+      event.preventDefault();
+    };
+
+    // 不改 body 的 inline 布局属性，避免弹窗打开时触发页面跳顶或后台表格宽度重排；只拦截遮罩层自身滚动。
+    overlay.addEventListener('wheel', blockOverlayWheel, { passive: false });
+    overlay.addEventListener('touchmove', blockOverlayTouchMove, { passive: false });
+
+    return () => {
+      overlay.removeEventListener('wheel', blockOverlayWheel);
+      overlay.removeEventListener('touchmove', blockOverlayTouchMove);
+    };
+  }, [isVisible, open]);
+
   if (!open && !isVisible) return null;
 
   const overlayClass = `modal-overlay ${isClosing ? 'modal-overlay-closing' : 'modal-overlay-entering'}`;
   const modalClass = `modal ${isClosing ? 'modal-closing' : 'modal-entering'}${className ? ` ${className}` : ''}`;
 
   const modalContent = (
-    <div className={overlayClass}>
+    <div ref={overlayRef} className={overlayClass}>
       <div
         ref={modalRef}
         className={modalClass}

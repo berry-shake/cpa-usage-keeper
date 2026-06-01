@@ -4,9 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { buildPricingModelOptions, PriceSettingsCard } from './PriceSettingsCard';
 
-const configuredBadge = <span data-testid="configured" />;
-const countOccurrences = (text: string, value: string) => text.split(value).length - 1;
-
 describe('PriceSettingsCard', () => {
   it('uses the model pricing settings title', () => {
     const html = renderToStaticMarkup(
@@ -14,6 +11,7 @@ describe('PriceSettingsCard', () => {
         modelNames={[]}
         modelPrices={{}}
         onPricesChange={() => undefined}
+        onSyncPrices={async () => undefined}
         loading={false}
       />,
     );
@@ -21,31 +19,52 @@ describe('PriceSettingsCard', () => {
     expect(html).toContain('Model Pricing Table');
     expect(html).toContain('Pricing');
   });
+
+  it('renders Claude pricing style with cache read and write prices', () => {
+    const html = renderToStaticMarkup(
+      <PriceSettingsCard
+        modelNames={['claude-sonnet']}
+        modelPrices={{
+          'claude-sonnet': {
+            style: 'claude',
+            prompt: 3,
+            completion: 15,
+            cache: 0.3,
+            cacheCreation: 3.75,
+          },
+        }}
+        onPricesChange={() => undefined}
+        onSyncPrices={async () => undefined}
+        loading={false}
+      />,
+    );
+
+    expect(html).toContain('Claude');
+    expect(html).toContain('Cache Read');
+    expect(html).toContain('$0.3000/1M');
+    expect(html).toContain('Cache Write');
+    expect(html).toContain('$3.7500/1M');
+  });
 });
 
 describe('buildPricingModelOptions', () => {
-  it('keeps unpriced models selectable before priced models and marks priced models', () => {
+  it('keeps only unpriced models selectable', () => {
     const options = buildPricingModelOptions(
       ['priced-zeta', 'unpriced-beta', 'priced-alpha', 'unpriced-alpha'],
       {
-        'priced-zeta': { prompt: 3, completion: 15, cache: 0.3 },
-        'priced-alpha': { prompt: 2, completion: 8, cache: 0.2 },
+        'priced-zeta': { style: 'openai', prompt: 3, completion: 15, cache: 0.3, cacheCreation: 0 },
+        'priced-alpha': { style: 'openai', prompt: 2, completion: 8, cache: 0.2, cacheCreation: 0 },
       },
       'Select model',
-      configuredBadge,
-      'Configured',
     );
 
     expect(options.map((option) => option.value)).toEqual([
       '',
       'unpriced-alpha',
       'unpriced-beta',
-      'priced-alpha',
-      'priced-zeta',
     ]);
     expect(options.find((option) => option.value === 'unpriced-alpha')?.suffix).toBeUndefined();
-    expect(options.find((option) => option.value === 'priced-alpha')?.suffix).toBe(configuredBadge);
-    expect(options.find((option) => option.value === 'priced-alpha')?.suffixAriaLabel).toBe('Configured');
+    expect(options.find((option) => option.value === 'priced-alpha')).toBeUndefined();
   });
 });
 
@@ -71,24 +90,5 @@ describe('PriceSettingsCard', () => {
 
     expect(html).toContain('Sync Remote Prices');
     expect(html).toContain('matched 1 models');
-  });
-
-  it('renders saved prices as three metric cells', () => {
-    const html = renderToStaticMarkup(
-      <PriceSettingsCard
-        modelNames={['claude-sonnet']}
-        modelPrices={{
-          'claude-sonnet': { prompt: 3, completion: 15, cache: 0.3 },
-        }}
-        onPricesChange={() => {}}
-        onSyncPrices={async () => {}}
-      />
-    );
-
-    expect(html).toContain('_priceMetaCell_');
-    expect(countOccurrences(html, '_priceMetaCell_')).toBe(3);
-    expect(html).toContain('$3.0000');
-    expect(html).toContain('$15.0000');
-    expect(html).toContain('$0.3000');
   });
 });

@@ -18,12 +18,6 @@ export {
 export type { UsageTimeRange, UsageFilterWindow } from '@/lib/types';
 export type { UsagePayload } from '@/components/usage/hooks/useUsageData';
 
-export interface ModelPrice {
-  prompt: number;
-  completion: number;
-  cache: number;
-}
-
 export interface ChartDataset {
   label: string;
   data: number[];
@@ -51,20 +45,6 @@ interface UsageModelSeriesLine {
 
 interface UsagePayloadWithModelSeries {
   model_series?: Record<string, UsageModelSeriesLine>;
-}
-
-interface UsageCostDetail {
-  source_type?: string;
-  __modelName?: string;
-  tokens: {
-    input_tokens: number;
-    output_tokens: number;
-    reasoning_tokens: number;
-    cached_tokens: number;
-    cache_tokens?: number;
-    total_tokens: number;
-  };
-  [key: string]: unknown;
 }
 
 export interface StatusBlockDetail {
@@ -304,68 +284,21 @@ export function resolveUsageFilterWindow(
   };
 }
 
-export function loadModelPrices(): Record<string, ModelPrice> {
-  try {
-    const raw = window.localStorage.getItem('cpa-model-prices');
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, ModelPrice>;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-export function saveModelPrices(prices: Record<string, ModelPrice>): void {
-  window.localStorage.setItem('cpa-model-prices', JSON.stringify(prices));
-}
-
-export function calculateCost(detail: UsageCostDetail, modelPrices: Record<string, ModelPrice>): number {
-  const modelName = detail.__modelName ?? '';
-  const pricing = modelPrices[modelName];
-  if (!pricing) return 0;
-
-  const inputTokens = Math.max(toNumber(detail.tokens.input_tokens), 0);
-  const completionTokens = Math.max(toNumber(detail.tokens.output_tokens), 0);
-  const cachedTokens = Math.max(
-    toNumber(detail.tokens.cached_tokens),
-    toNumber(detail.tokens.cache_tokens)
-  );
-  // Anthropic 的 input_tokens 已不含 cached（与 OpenAI/Gemini 风格相反），不能再减一次。
-  const promptTokens = isAnthropicStyleProvider(detail.source_type)
-    ? inputTokens
-    : Math.max(inputTokens - cachedTokens, 0);
-
-  return (
-    (promptTokens / 1_000_000) * pricing.prompt +
-    (completionTokens / 1_000_000) * pricing.completion +
-    (cachedTokens / 1_000_000) * pricing.cache
-  );
-}
-
 export function calculateCacheRate({
   inputTokens,
   cachedTokens,
-  sourceType,
 }: {
   inputTokens: unknown;
   cachedTokens: unknown;
-  sourceType?: unknown;
 }): number | null {
   const input = Math.max(toNumber(inputTokens), 0);
   const cached = Math.max(toNumber(cachedTokens), 0);
-  const denominator = isAnthropicStyleProvider(sourceType) ? input + cached : input;
+  // token 已在后端按 provider type 归一化，前端只按统一字段展示缓存占比。
+  const denominator = input;
   if (denominator <= 0) {
     return null;
   }
   return (cached / denominator) * 100;
-}
-
-// CPA 把 provider 原始口径直接落库；Anthropic 的 input_tokens 不含 cached，其它 provider 都含。
-// 计算成本/缓存率时需要按 source_type 区分公式。
-export function isAnthropicStyleProvider(sourceType: unknown): boolean {
-  if (typeof sourceType !== 'string') return false;
-  const value = sourceType.trim().toLowerCase();
-  return value === 'claude' || value === 'anthropic';
 }
 
 export function buildCandidateUsageSourceIds({ apiKey, prefix }: { apiKey?: string; prefix?: string }): string[] {

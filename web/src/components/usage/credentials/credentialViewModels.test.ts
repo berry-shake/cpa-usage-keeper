@@ -145,7 +145,7 @@ describe('credentialViewModels', () => {
       ]],
     ])
 
-    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1', displayName: 'Claude Auth', total_requests: 10, success_count: 9, input_tokens: 750, cached_tokens: 250, total_tokens: 1500 })], quotas)
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1', displayName: 'Claude Auth', total_requests: 10, success_count: 9, input_tokens: 1000, cached_tokens: 250, total_tokens: 1500 })], quotas)
 
     expect(rows[0].displayName).toBe('Claude Auth')
     expect(rows[0].typeLabel).toBe('claude')
@@ -179,9 +179,9 @@ describe('credentialViewModels', () => {
     expect(rows[0].primaryQuota?.windowUsage).toEqual({ tokens: '0', cost: '$0.00' })
   })
 
-  it('uses Claude token semantics for auth file cache rate', () => {
+  it('uses normalized input token semantics for auth file cache rate', () => {
     const rows = buildAuthFileCredentialRows([
-      identity({ identity: 'auth-claude', type: 'claude', input_tokens: 400, cached_tokens: 600 }),
+      identity({ identity: 'auth-claude', type: 'claude', input_tokens: 1000, cached_tokens: 600 }),
     ])
 
     expect(rows[0].cacheRate).toBe(60)

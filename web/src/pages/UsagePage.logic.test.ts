@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, normalizeUsageTabValue, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldLoadPricingOnUsageTabEntry, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
+import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, normalizeUsageTabValue, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
 import type { StatusResponse, UsageFilterWindow } from '@/lib/types';
 
 const createAutoRefreshTestDocument = (visibilityState: DocumentVisibilityState = 'visible') => {
@@ -314,17 +314,6 @@ describe('UsagePage active tab auto-refresh guard', () => {
     expect(shouldAutoRefreshUsageTab({ activeTab: 'overview', eventsPage: 2 })).toBe(true);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'analysis', eventsPage: 1 })).toBe(false);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'settings', eventsPage: 1 })).toBe(false);
-  });
-});
-
-describe('UsagePage Request Events pricing preload', () => {
-  it('loads only model prices when entering Request Events but not for other tab entry paths', () => {
-    expect(shouldLoadPricingOnUsageTabEntry('events')).toBe(true);
-    expect(shouldLoadPricingOnUsageTabEntry('overview')).toBe(false);
-    expect(shouldLoadPricingOnUsageTabEntry('analysis')).toBe(false);
-    expect(shouldLoadPricingOnUsageTabEntry('auth-files')).toBe(false);
-    expect(shouldLoadPricingOnUsageTabEntry('ai-provider')).toBe(false);
-    expect(shouldLoadPricingOnUsageTabEntry('settings')).toBe(false);
   });
 });
 

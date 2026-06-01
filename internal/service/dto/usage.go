@@ -61,6 +61,9 @@ type UsageEventRecord struct {
 	CacheReadTokens     int64
 	CacheCreationTokens int64
 	TotalTokens         int64
+	CostUSD             float64
+	CostAvailable       bool
+	PricingStyle        string
 }
 
 // UsageCredentialStat 是按凭证和模型聚合的服务层 usage 统计结果。
