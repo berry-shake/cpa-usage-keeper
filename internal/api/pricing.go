@@ -104,10 +104,12 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 		response := make([]pricingEntryResponse, 0, len(result.Pricing))
 		for _, setting := range result.Pricing {
 			response = append(response, pricingEntryResponse{
-				Model:                setting.Model,
-				PromptPricePer1M:     setting.PromptPricePer1M,
-				CompletionPricePer1M: setting.CompletionPricePer1M,
-				CachePricePer1M:      setting.CachePricePer1M,
+				Model:                   setting.Model,
+				PricingStyle:            setting.PricingStyle,
+				PromptPricePer1M:        setting.PromptPricePer1M,
+				CompletionPricePer1M:    setting.CompletionPricePer1M,
+				CachePricePer1M:         setting.CachePricePer1M,
+				CacheCreationPricePer1M: setting.CacheCreationPricePer1M,
 			})
 		}
 

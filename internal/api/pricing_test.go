@@ -168,10 +168,12 @@ func TestSyncPricingRoute(t *testing.T) {
 			UnmatchedModels: []string{"unmatched-model"},
 			SyncedAt:        time.Date(2026, 5, 3, 1, 2, 3, 0, time.UTC),
 			Pricing: []entities.ModelPriceSetting{{
-				Model:                "claude-sonnet",
-				PromptPricePer1M:     3,
-				CompletionPricePer1M: 15,
-				CachePricePer1M:      0.3,
+				Model:                   "claude-sonnet",
+				PricingStyle:            "claude",
+				PromptPricePer1M:        3,
+				CompletionPricePer1M:    15,
+				CachePricePer1M:         0.3,
+				CacheCreationPricePer1M: 3.75,
 			}},
 		},
 	}
@@ -186,6 +188,8 @@ func TestSyncPricingRoute(t *testing.T) {
 		!contains(body, `"matched_count":1`) ||
 		!contains(body, `"updated_count":1`) ||
 		!contains(body, `"model":"claude-sonnet"`) ||
+		!contains(body, `"pricing_style":"claude"`) ||
+		!contains(body, `"cache_creation_price_per_1m":3.75`) ||
 		!contains(body, `"synced_at":"2026-05-03T01:02:03Z"`) {
 		t.Fatalf("unexpected sync response: %d %s", resp.Code, body)
 	}
