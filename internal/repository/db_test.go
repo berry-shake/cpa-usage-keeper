@@ -54,8 +54,8 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
 		t.Fatalf("count schema migrations: %v", err)
 	}
-	if count != 32 {
-		t.Fatalf("expected fresh database to mark 32 migrations applied, got %d", count)
+	if count != 33 {
+		t.Fatalf("expected fresh database to mark 33 migrations applied, got %d", count)
 	}
 	if strings.Contains(logs.String(), "schema migration started") {
 		t.Fatalf("expected fresh database creation not to run version migrations, got logs:\n%s", logs.String())
@@ -291,6 +291,38 @@ func TestInsertUsageEventsPersistsServiceTier(t *testing.T) {
 	}
 	if got.ServiceTier != "standard" {
 		t.Fatalf("expected service_tier to persist, got %q", got.ServiceTier)
+	}
+}
+
+func TestInsertUsageEventsPersistsExecutorType(t *testing.T) {
+	db := openTestDatabase(t)
+	events := []entities.UsageEvent{{
+		EventKey:     "event-executor-type",
+		APIGroupKey:  "provider-a",
+		Model:        "claude-sonnet",
+		ExecutorType: "responses",
+		Timestamp:    time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC),
+		Source:       "source-a",
+		AuthIndex:    "auth-1",
+		TotalTokens:  10,
+	}}
+
+	inserted, deduped, err := InsertUsageEvents(db, events)
+	if err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+	if inserted != 1 || deduped != 0 {
+		t.Fatalf("expected inserted=1 deduped=0, got inserted=%d deduped=%d", inserted, deduped)
+	}
+
+	var got struct {
+		ExecutorType string `gorm:"column:executor_type"`
+	}
+	if err := db.Table("usage_events").Select("executor_type").Where("event_key = ?", "event-executor-type").First(&got).Error; err != nil {
+		t.Fatalf("load usage event executor_type: %v", err)
+	}
+	if got.ExecutorType != "responses" {
+		t.Fatalf("expected executor_type to persist, got %q", got.ExecutorType)
 	}
 }
 

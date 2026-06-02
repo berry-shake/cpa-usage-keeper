@@ -109,6 +109,62 @@ func TestRedisIngestRunnerSubscribeBackfillDrainsRedisBeforeReceiving(t *testing
 	}
 }
 
+func TestRedisIngestRunnerSubscribeBackfillContinuesAfterFullControlOnlyBatch(t *testing.T) {
+	delegate := newFakeInboxWriter()
+	writer := poller.NewControlAwareRedisInboxWriter(delegate, &controlObserverStub{})
+	sub := &blockingSubscription{messages: make(chan string)}
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{sub: sub},
+		&fakePullSource{batches: [][]string{
+			{`{"refresh":true}`},
+			{`{"request_id":"redis-after-control"}`},
+		}},
+		&fakePullSource{},
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 1, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	entry := delegate.waitForInsert(t)
+	cancel()
+	if entry.source != poller.RedisIngestSourceRedisPull {
+		t.Fatalf("expected Redis backfill source, got %q", entry.source)
+	}
+	if len(entry.messages) != 1 || entry.messages[0] != `{"request_id":"redis-after-control"}` {
+		t.Fatalf("expected usage after full control batch, got %+v", entry.messages)
+	}
+}
+
+func TestRedisIngestRunnerSubscribeBackfillStopsAfterPartialControlOnlyBatch(t *testing.T) {
+	delegate := newFakeInboxWriter()
+	writer := poller.NewControlAwareRedisInboxWriter(delegate, &controlObserverStub{})
+	sub := &blockingSubscription{messages: make(chan string)}
+	redisSource := &fakePullSource{batches: [][]string{
+		{`{"refresh":true}`},
+		{`{"request_id":"should-not-pull"}`},
+	}}
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{sub: sub},
+		redisSource,
+		&fakePullSource{},
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	_ = waitForStatus(t, runner, func(status poller.Status) bool {
+		return status.LastStatus == "subscribing"
+	})
+	cancel()
+	if calls := redisSource.callCount(); calls != 1 {
+		t.Fatalf("expected backfill to stop after partial control-only batch, got %d calls", calls)
+	}
+}
+
 func TestRedisIngestRunnerInfoLogsSubscribeBackfillOnce(t *testing.T) {
 	logs := capturePollerLogs(t, logrus.InfoLevel)
 	writer := newFakeInboxWriter()
@@ -284,6 +340,37 @@ func TestRedisIngestRunnerDegradedHTTPSuccessClearsStatusError(t *testing.T) {
 		return status.LastError == "" && status.LastWarning == "" && status.SyncRunning
 	})
 	cancel()
+}
+
+func TestRedisIngestRunnerMarksMetadataPollingRequiredOnSubscribeDisconnect(t *testing.T) {
+	observer := &controlObserverStub{}
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{sub: failingSubscription{err: io.EOF}},
+		&fakePullSource{},
+		&fakePullSource{},
+		newFakeInboxWriter(),
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond},
+	)
+	runner.SetControlMessageObserver(observer)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = runner.Run(ctx)
+		close(done)
+	}()
+
+	_ = waitForStatus(t, runner, func(status poller.Status) bool {
+		return status.LastStatus == "subscribe_degraded_polling" || strings.Contains(status.LastError, "EOF")
+	})
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runner to stop")
+	}
+	if observer.polling == 0 {
+		t.Fatal("expected subscribe disconnect to restore metadata polling")
+	}
 }
 
 func TestRedisIngestRunnerInboxWriteFailureDoesNotConsumeFallbackSource(t *testing.T) {

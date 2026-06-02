@@ -40,6 +40,7 @@ type usageEventPayload struct {
 	APIKey          string                 `json:"api_key,omitempty"`
 	Model           string                 `json:"model"`
 	ReasoningEffort string                 `json:"reasoning_effort,omitempty"`
+	ExecutorType    string                 `json:"executor_type,omitempty"`
 	Endpoint        string                 `json:"endpoint,omitempty"`
 	Source          string                 `json:"source"`
 	SourceRaw       string                 `json:"source_raw,omitempty"`
@@ -164,6 +165,7 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 			APIKey:          usageEventAPIKeyLabel(row.APIGroupKey, apiKeyInfos),
 			Model:           row.Model,
 			ReasoningEffort: strings.TrimSpace(row.ReasoningEffort),
+			ExecutorType:    strings.TrimSpace(row.ExecutorType),
 			Endpoint:        strings.TrimSpace(row.Endpoint),
 			Source:          source,
 			SourceType:      identity.Type,

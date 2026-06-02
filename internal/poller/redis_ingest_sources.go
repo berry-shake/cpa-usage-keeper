@@ -30,3 +30,13 @@ type RedisInboxWriter interface {
 	// Insert 把 raw usage JSON 批量写入 redis_usage_inboxes；source 用于调用方标记来源。
 	Insert(ctx context.Context, source string, messages []string, receivedAt time.Time) (int, error)
 }
+
+// RedisControlMessageObserver 接收 usage 通道里的 metadata 控制信号。
+type RedisControlMessageObserver interface {
+	// MarkRefreshSupported 表示 CPA 已支持 metadata refresh 通知，周期轮询可以 no-op。
+	MarkRefreshSupported()
+	// RequestMetadataRefresh 表示 CPA metadata 配置已变化，需要 debounce 后同步。
+	RequestMetadataRefresh()
+	// MarkRefreshPollingRequired 表示 usage 链路降级或失败，metadata 同步必须恢复轮询。
+	MarkRefreshPollingRequired(reason string)
+}

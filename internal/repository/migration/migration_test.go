@@ -51,6 +51,7 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260528_add_usage_event_cpa_response_fields",
 		"20260531_model_price_pricing_style",
 		"20260601_backfill_claude_usage_tokens",
+		"20260602_add_usage_event_executor_type",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected ordered migrations %v, got %v", want, got)
@@ -72,7 +73,7 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 	if !db.Migrator().HasTable("schema_migrations") {
 		t.Fatal("expected schema_migrations table to exist")
 	}
-	for _, column := range []string{"provider", "endpoint", "auth_type", "request_id"} {
+	for _, column := range []string{"provider", "endpoint", "auth_type", "request_id", "executor_type"} {
 		if !db.Migrator().HasColumn(&entities.UsageEvent{}, column) {
 			t.Fatalf("expected usage_events.%s column to exist", column)
 		}
@@ -118,6 +119,7 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 		"20260528_add_usage_event_cpa_response_fields",
 		"20260531_model_price_pricing_style",
 		"20260601_backfill_claude_usage_tokens",
+		"20260602_add_usage_event_executor_type",
 	}
 	if len(versions) != len(expected) {
 		t.Fatalf("expected migration versions %v, got %v", expected, versions)

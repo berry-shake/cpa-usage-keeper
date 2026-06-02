@@ -40,6 +40,8 @@ type RedisIngestRunner struct {
 	httpSource UsagePullSource
 	// writer 是唯一落库出口，保证订阅、Redis pull、HTTP pull 都先进入 redis_usage_inboxes。
 	writer RedisInboxWriter
+	// controlObserver 接收 usage 链路降级信号，控制 metadata 同步回到轮询模式。
+	controlObserver RedisControlMessageObserver
 	// config 保存批量大小和空闲等待时间，避免状态机中散落硬编码。
 	config RedisIngestRunnerConfig
 	// now 允许测试控制时间，特别是恢复探测和退避截断。
@@ -97,6 +99,14 @@ func NewRedisIngestRunner(sub UsageSubscriptionSource, redis UsagePullSource, ht
 		mode:     RedisIngestSyncModeUnknown,
 		subState: RedisIngestSubStateStarting,
 	}
+}
+
+func (r *RedisIngestRunner) SetControlMessageObserver(observer RedisControlMessageObserver) {
+	// observer 跟状态字段共用锁，避免 Run 中失败回调读取到半更新状态。
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// observer 可以为空，用于测试或未来关闭 metadata 控制联动。
+	r.controlObserver = observer
 }
 
 func (r *RedisIngestRunner) Run(ctx context.Context) error {
@@ -298,6 +308,9 @@ func (r *RedisIngestRunner) drainBackfillSource(ctx context.Context, sourceName 
 		}
 		total += count
 		batches++
+		if !r.pulledFullBatch(count) {
+			return total, batches, nil
+		}
 	}
 }
 
@@ -389,11 +402,11 @@ func (r *RedisIngestRunner) runSubscribeDegradedPolling(ctx context.Context) (Us
 			r.recordAvailable(RedisIngestSyncModeSubscribe, RedisIngestSubStateSubscribeDegradedPolling, pullStatus(count), count)
 			// Redis pull 成功表示降级拉取链路健康，清掉连续失败退避。
 			r.failureBackoff.Reset()
-			if count > 0 {
-				// 有数据时立即下一轮，尽快把 backlog drain 到 inbox。
+			if r.pulledFullBatch(count) {
+				// 拉满批量时立即下一轮，尽快把可能存在的 backlog drain 到 inbox。
 				continue
 			}
-			// 无数据时睡到 idle interval，但不能睡过下一次 subscribe 恢复探测点。
+			// 未拉满时认为当前 backlog 基本清空，睡到 idle interval，但不能睡过下一次 subscribe 恢复探测点。
 			if !r.sleepUntilRecovery(ctx, r.config.IdleInterval, nextSubscribeRetryAt) {
 				return nil, context.Canceled
 			}
@@ -416,11 +429,11 @@ func (r *RedisIngestRunner) runSubscribeDegradedPolling(ctx context.Context) (Us
 			r.recordAvailable(RedisIngestSyncModeSubscribe, RedisIngestSubStateSubscribeDegradedPolling, pullStatus(count), count)
 			// HTTP 成功表示兜底链路健康，清掉失败退避。
 			r.failureBackoff.Reset()
-			if count > 0 {
-				// 有数据时立即继续拉，避免 backlog 积压。
+			if r.pulledFullBatch(count) {
+				// 拉满批量时立即继续拉，避免 backlog 积压。
 				continue
 			}
-			// 无数据时同样不能睡过 subscribe 恢复探测点。
+			// 未拉满时同样不能睡过 subscribe 恢复探测点。
 			if !r.sleepUntilRecovery(ctx, r.config.IdleInterval, nextSubscribeRetryAt) {
 				return nil, context.Canceled
 			}
@@ -466,7 +479,7 @@ func (r *RedisIngestRunner) runRedisPullMode(ctx context.Context) error {
 					r.failureBackoff.Reset()
 					degraded = false
 					r.recordState(RedisIngestSyncModeRedisPull, RedisIngestSubStateRedisPullActive, pullStatus(count), "", "")
-					if count > 0 {
+					if r.pulledFullBatch(count) {
 						continue
 					}
 					if !r.sleep(ctx, r.config.IdleInterval) {
@@ -491,10 +504,10 @@ func (r *RedisIngestRunner) runRedisPullMode(ctx context.Context) error {
 				r.recordAvailable(RedisIngestSyncModeRedisPull, RedisIngestSubStateRedisPullDegradedHTTP, pullStatus(count), count)
 				// HTTP 成功后清退避。
 				r.failureBackoff.Reset()
-				if count > 0 {
+				if r.pulledFullBatch(count) {
 					continue
 				}
-				// 空批次按 idle interval 等待，但不能睡过下一次 Redis 恢复探测点。
+				// 未拉满时按 idle interval 等待，但不能睡过下一次 Redis 恢复探测点。
 				if !r.sleepUntilRecovery(ctx, r.config.IdleInterval, nextRedisRetryAt) {
 					return context.Canceled
 				}
@@ -525,11 +538,11 @@ func (r *RedisIngestRunner) runRedisPullMode(ctx context.Context) error {
 			r.recordAvailable(RedisIngestSyncModeRedisPull, RedisIngestSubStateRedisPullActive, pullStatus(count), count)
 			// Redis 成功后清掉失败退避。
 			r.failureBackoff.Reset()
-			if count > 0 {
-				// 有数据时不 sleep，继续快速 drain。
+			if r.pulledFullBatch(count) {
+				// 拉满批量时不 sleep，继续快速 drain。
 				continue
 			}
-			// 空批次按 idle interval 等待，降低 CPU 和远端请求频率。
+			// 未拉满时按 idle interval 等待，降低 CPU 和远端请求频率。
 			if !r.sleep(ctx, r.config.IdleInterval) {
 				return context.Canceled
 			}
@@ -556,7 +569,7 @@ func (r *RedisIngestRunner) runRedisPullMode(ctx context.Context) error {
 			r.recordState(RedisIngestSyncModeRedisPull, RedisIngestSubStateRedisPullDegradedHTTP, pullStatus(count), "", "")
 			// HTTP 已经接管拉取，不能把 Redis 失败继续保留在状态快照中。
 			r.recordAvailable(RedisIngestSyncModeRedisPull, RedisIngestSubStateRedisPullDegradedHTTP, pullStatus(count), count)
-			if count > 0 {
+			if r.pulledFullBatch(count) {
 				continue
 			}
 			if !r.sleepUntilRecovery(ctx, r.config.IdleInterval, nextRedisRetryAt) {
@@ -599,11 +612,11 @@ func (r *RedisIngestRunner) runHTTPPullMode(ctx context.Context) error {
 			r.recordRecovery(RedisIngestSyncModeHTTPPull, RedisIngestSubStateHTTPPullActive, "http_pull_recovered", count)
 			// HTTP 成功后清掉连续失败退避。
 			r.failureBackoff.Reset()
-			if count > 0 {
-				// 有数据时继续快速拉取，避免远端队列积压。
+			if r.pulledFullBatch(count) {
+				// 拉满批量时继续快速拉取，避免远端队列积压。
 				continue
 			}
-			// 空批次时按 idle interval 休眠，避免高频空请求。
+			// 未拉满时按 idle interval 休眠，避免高频空请求。
 			if !r.sleep(ctx, r.config.IdleInterval) {
 				return context.Canceled
 			}
@@ -657,8 +670,8 @@ func (r *RedisIngestRunner) serialPullAndWrite(ctx context.Context, sourceName s
 	if logrus.IsLevelEnabled(logrus.DebugLevel) {
 		logrus.WithFields(logrus.Fields{"source": sourceName, "message_count": len(messages), "inserted_count": inserted}).Debug("redis ingest wrote usage messages")
 	}
-	// 返回实际插入行数，用于状态和日志。
-	return inserted, nil
+	// 返回本次远端实际拉取数量，调用方据此判断是否可能还有下一批。
+	return len(messages), nil
 }
 
 func (r *RedisIngestRunner) Status() Status {
@@ -843,6 +856,8 @@ func (r *RedisIngestRunner) recordFailure(status string, err error, final bool) 
 	if !shouldLogSyncError(err) {
 		return
 	}
+	// 任一 usage 链路失败/降级都让 metadata 恢复轮询；只有后续真实控制消息才能再进通知模式。
+	r.markRefreshPollingRequired(status)
 	// warning/error 状态更新需要锁保护。
 	r.mu.Lock()
 	// 更新时间用于状态快照记录最近失败时间。
@@ -873,6 +888,18 @@ func (r *RedisIngestRunner) recordFailure(status string, err error, final bool) 
 	entry.Warn("redis ingest fallback failed")
 }
 
+func (r *RedisIngestRunner) markRefreshPollingRequired(reason string) {
+	// 先在锁内复制 observer，避免回调时持有 runner 锁造成锁链。
+	r.mu.Lock()
+	observer := r.controlObserver
+	r.mu.Unlock()
+	// 没有 observer 时只保持原有 usage ingest 行为。
+	if observer != nil {
+		// 回调 metadata runner，让它从通知模式回到轮询模式。
+		observer.MarkRefreshPollingRequired(reason)
+	}
+}
+
 func (r *RedisIngestRunner) sleepUntilRecovery(ctx context.Context, delay time.Duration, retryAt time.Time) bool {
 	// 用 runner 时钟计算剩余时间，避免测试替换 now 后混用真实时钟。
 	remaining := retryAt.Sub(r.now())
@@ -900,6 +927,11 @@ func pullStatus(count int) string {
 	}
 	// 空批次不是失败，单独标记 empty。
 	return "empty"
+}
+
+func (r *RedisIngestRunner) pulledFullBatch(count int) bool {
+	// 只有拉满配置批量时，才说明远端后面可能还有下一批。
+	return count >= r.config.BatchSize
 }
 
 func resolvePositiveDuration(value time.Duration, fallback time.Duration) time.Duration {

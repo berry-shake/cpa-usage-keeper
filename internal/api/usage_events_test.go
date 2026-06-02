@@ -69,6 +69,7 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		Timestamp:           time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
 		Model:               "claude-sonnet",
 		ReasoningEffort:     "medium",
+		ExecutorType:        "responses",
 		Endpoint:            "POST /v1/responses",
 		AuthType:            "apikey",
 		Provider:            "OpenAI Mirror",
@@ -130,6 +131,9 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	}
 	if !contains(body, `"ttft_ms":45`) {
 		t.Fatalf("expected ttft_ms in response body: %s", body)
+	}
+	if !contains(body, `"executor_type":"responses"`) {
+		t.Fatalf("expected executor_type in response body: %s", body)
 	}
 	if !contains(body, `"cost_usd":0.1234`) || !contains(body, `"cost_available":true`) || !contains(body, `"pricing_style":"claude"`) {
 		t.Fatalf("expected backend cost fields in response body: %s", body)

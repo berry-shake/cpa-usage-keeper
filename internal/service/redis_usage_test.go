@@ -23,6 +23,7 @@ func TestDecodeRedisUsageMessageMapsPayloadToUsageEvent(t *testing.T) {
 		"model":"claude-sonnet-4-6",
 		"alias":"claude-sonnet-alias",
 		"reasoning_effort":"medium",
+		"executor_type":"responses",
 		"endpoint":"/v1/messages",
 		"auth_type":"api_key",
 		"api_key":"raw-key",
@@ -46,6 +47,9 @@ func TestDecodeRedisUsageMessageMapsPayloadToUsageEvent(t *testing.T) {
 	}
 	if event.ReasoningEffort != "medium" {
 		t.Fatalf("expected reasoning effort to decode, got %q", event.ReasoningEffort)
+	}
+	if event.ExecutorType != "responses" {
+		t.Fatalf("expected executor type to decode, got %q", event.ExecutorType)
 	}
 	if event.ServiceTier != "standard" {
 		t.Fatalf("expected service tier to decode, got %q", event.ServiceTier)
