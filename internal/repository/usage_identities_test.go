@@ -880,6 +880,49 @@ func TestUsageIdentityListActivePageOrdersByTotalTokensDesc(t *testing.T) {
 	}
 }
 
+func TestUsageIdentityListActivePageOrdersByLastUsedDesc(t *testing.T) {
+	db := openTestDatabase(t)
+	now := time.Date(2026, 5, 11, 12, 20, 0, 0, time.UTC)
+	oldLastUsed := now.Add(-2 * time.Hour)
+	recentLastUsed := now.Add(-30 * time.Minute)
+	providerLastUsed := now.Add(-10 * time.Minute)
+	rows := []entities.UsageIdentity{
+		{Identity: "auth-recent-a", Name: "Recent A", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", LastUsedAt: &recentLastUsed, CreatedAt: now, UpdatedAt: now},
+		{Identity: "auth-old", Name: "Old", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", LastUsedAt: &oldLastUsed, CreatedAt: now, UpdatedAt: now},
+		{Identity: "auth-never", Name: "Never", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", CreatedAt: now, UpdatedAt: now},
+		{Identity: "auth-recent-b", Name: "Recent B", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Type: "claude", Provider: "Claude", LastUsedAt: &recentLastUsed, CreatedAt: now, UpdatedAt: now},
+		{Identity: "provider-recent", Name: "Provider Recent", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Type: "openai", Provider: "OpenAI", LastUsedAt: &providerLastUsed, CreatedAt: now, UpdatedAt: now},
+		{Identity: "provider-never", Name: "Provider Never", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Type: "openai", Provider: "OpenAI", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed usage identities: %v", err)
+	}
+
+	authFileType := entities.UsageIdentityAuthTypeAuthFile
+	authFileItems, total, _, err := ListActiveUsageIdentitiesPage(context.Background(), db, ListUsageIdentitiesPageRequest{AuthType: &authFileType, Sort: UsageIdentityPageSortLastUsedAt, Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("list auth file page: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("expected auth file total 4, got %d", total)
+	}
+	if got := []string{authFileItems[0].Identity, authFileItems[1].Identity, authFileItems[2].Identity, authFileItems[3].Identity}; !reflect.DeepEqual(got, []string{"auth-recent-a", "auth-recent-b", "auth-old", "auth-never"}) {
+		t.Fatalf("expected auth files sorted by last used desc, id asc, then missing last_used_at last, got %v", got)
+	}
+
+	providerType := entities.UsageIdentityAuthTypeAIProvider
+	providerItems, total, _, err := ListActiveUsageIdentitiesPage(context.Background(), db, ListUsageIdentitiesPageRequest{AuthType: &providerType, Sort: UsageIdentityPageSortLastUsedAt, Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("list provider page: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected provider total 2, got %d", total)
+	}
+	if got := []string{providerItems[0].Identity, providerItems[1].Identity}; !reflect.DeepEqual(got, []string{"provider-recent", "provider-never"}) {
+		t.Fatalf("expected AI providers sorted by last used desc with missing last_used_at last, got %v", got)
+	}
+}
+
 func TestUsageIdentityListActivePageOrdersAIProvidersByPriorityWithoutNameTieBreak(t *testing.T) {
 	db := openTestDatabase(t)
 	now := time.Date(2026, 5, 11, 12, 30, 0, 0, time.UTC)

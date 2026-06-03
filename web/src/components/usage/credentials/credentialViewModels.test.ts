@@ -205,6 +205,48 @@ describe('credentialViewModels', () => {
     ])
   })
 
+  it('estimates quota window usage only from positive current usage and a partial used percent', () => {
+    const quotas = new Map<string, UsageQuotaRow[]>([
+      ['auth-1', [
+        { key: 'rate_limit.primary_window', label: '5h', usedPercent: 25, window_usage_tokens: 1_000_000, window_usage_cost: 2.5 },
+        { key: 'rate_limit.secondary_window', label: 'Weekly', remainingFraction: 0.75, window_usage_tokens: 500_000, window_usage_cost: 1 },
+      ]],
+    ])
+
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1' })], quotas)
+
+    expect(rows[0].displayQuotas.map((quota) => quota.windowUsageEstimate)).toEqual([
+      { tokens: '4.00M', cost: '$10.00' },
+      { tokens: '2.00M', cost: '$4.00' },
+    ])
+  })
+
+  it('keeps current quota window usage when the used percent or current cost cannot be estimated', () => {
+    const quotas = new Map<string, UsageQuotaRow[]>([
+      ['auth-1', [
+        { key: 'rate_limit.zero_window', label: 'Zero', usedPercent: 0, window_usage_tokens: 393_311, window_usage_cost: 0.458464 },
+        { key: 'rate_limit.full_window', label: 'Full', usedPercent: 100, window_usage_tokens: 1_000, window_usage_cost: 1 },
+        { key: 'rate_limit.free_window', label: 'Free', usedPercent: 50, window_usage_tokens: 1_000, window_usage_cost: 0 },
+        { key: 'rate_limit.empty_window', label: 'Empty', usedPercent: 50, window_usage_tokens: 0, window_usage_cost: 1 },
+      ]],
+    ])
+
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1' })], quotas)
+
+    expect(rows[0].displayQuotas.map((quota) => quota.windowUsage)).toEqual([
+      { tokens: '393.31K', cost: '$0.46' },
+      { tokens: '1.00K', cost: '$1.00' },
+      { tokens: '1.00K', cost: '$0.00' },
+      { tokens: '0', cost: '$1.00' },
+    ])
+    expect(rows[0].displayQuotas.map((quota) => quota.windowUsageEstimate)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
+  })
+
   it('uses an explicit US locale for quota window cost formatting', () => {
     const numberFormatSpy = vi.spyOn(Intl, 'NumberFormat')
     try {

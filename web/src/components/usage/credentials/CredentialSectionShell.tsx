@@ -119,6 +119,7 @@ export function cacheRateTone(value: number | null): 'success' | 'warning' | 'da
 const CREDENTIAL_PAGE_SIZE_OPTIONS = [5, 10, 20, 50]
 
 export function CredentialsPagination({
+  leadingControls,
   page,
   total,
   totalPages,
@@ -133,6 +134,7 @@ export function CredentialsPagination({
   onPageSizeChange,
   onSortChange,
 }: {
+  leadingControls?: ReactNode
   page: number
   total?: number
   totalPages: number
@@ -154,6 +156,7 @@ export function CredentialsPagination({
   return (
     <div className={styles.credentialPagination}>
       <div className={styles.credentialPaginationControls}>
+        {leadingControls}
         {sortOptions && sortOptions.length > 0 && sortLabel && onSortChange && (
           <label className={styles.credentialPageSizeControl}>
             <span>{sortLabel}</span>

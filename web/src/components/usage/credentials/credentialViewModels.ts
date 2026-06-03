@@ -23,6 +23,7 @@ export interface DisplayQuota {
   resetText?: string
   windowSeconds?: number
   windowUsage?: QuotaWindowUsageDisplay
+  windowUsageEstimate?: QuotaWindowUsageDisplay
   status: QuotaStatus
 }
 
@@ -196,6 +197,7 @@ function toDisplayQuota(row: UsageQuotaRow): DisplayQuota | undefined {
     resetText: row.resetAt,
     windowSeconds,
     windowUsage: quotaWindowUsage(row),
+    windowUsageEstimate: quotaWindowUsageEstimate(row, percentDisplay),
     status: quotaStatus(row, percentDisplay.percent, percentDisplay.kind),
   }
 }
@@ -209,6 +211,24 @@ function quotaWindowUsage(row: UsageQuotaRow): QuotaWindowUsageDisplay | undefin
   return {
     tokens: formatCompactTokenValue(tokens),
     cost: formatQuotaWindowCost(cost),
+  }
+}
+
+function quotaWindowUsageEstimate(row: UsageQuotaRow, percentDisplay: { percent: number | null; kind: DisplayQuota['percentKind'] }): QuotaWindowUsageDisplay | undefined {
+  // 估算只在已用百分比可外推时生效；0%、满额或免费窗口都继续展示当前值。
+  const tokens = finiteNumber(row.window_usage_tokens)
+  const cost = finiteNumber(row.window_usage_cost)
+  const usedPercent = quotaUsedPercent(percentDisplay)
+  if (tokens === undefined || cost === undefined || usedPercent === undefined) {
+    return undefined
+  }
+  if (tokens <= 0 || cost <= 0 || usedPercent <= 0 || usedPercent >= 100) {
+    return undefined
+  }
+  const ratio = usedPercent / 100
+  return {
+    tokens: formatCompactTokenValue(tokens / ratio),
+    cost: formatQuotaWindowCost(cost / ratio),
   }
 }
 
@@ -346,6 +366,19 @@ function quotaBarPercent(percent: number | null, kind: DisplayQuota['percentKind
     return null
   }
   return kind === 'used' ? clampPercent(100 - percent) : percent
+}
+
+function quotaUsedPercent(percentDisplay: { percent: number | null; kind: DisplayQuota['percentKind'] }): number | undefined {
+  if (percentDisplay.percent === null) {
+    return undefined
+  }
+  if (percentDisplay.kind === 'used') {
+    return clampPercent(percentDisplay.percent)
+  }
+  if (percentDisplay.kind === 'remaining') {
+    return clampPercent(100 - percentDisplay.percent)
+  }
+  return undefined
 }
 
 function isDisplayableQuota(quota: DisplayQuota | undefined): quota is DisplayQuota {

@@ -74,6 +74,7 @@ describe('AiProviderCredentialsSection', () => {
     expect(html).toContain('claude')
     expect(html).toContain('P5')
     expect(html).toContain('usage_stats.credentials_sort_priority')
+    expect(html).toContain('usage_stats.credentials_sort_last_used')
     expect(html).not.toContain('Team')
     expect(html).not.toContain('25d')
     expect(html).not.toContain('5h')

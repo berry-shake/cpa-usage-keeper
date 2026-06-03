@@ -55,6 +55,7 @@ describe('CredentialSectionShell formatting', () => {
 
   it('renders an optional sort control before pagination buttons', () => {
     const html = renderToStaticMarkup(createElement(CredentialsPagination, {
+      leadingControls: createElement('span', null, 'Quota Usage'),
       page: 1,
       total: 3,
       totalPages: 1,
@@ -70,6 +71,7 @@ describe('CredentialSectionShell formatting', () => {
       onSortChange: () => undefined,
     }))
 
+    expect(html.indexOf('Quota Usage')).toBeLessThan(html.indexOf('Order by'))
     expect(html.indexOf('Order by')).toBeLessThan(html.indexOf('Rows'))
     expect(html).toContain('Priority')
   })

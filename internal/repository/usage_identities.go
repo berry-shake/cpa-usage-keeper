@@ -90,9 +90,10 @@ const (
 	UsageIdentityPageSortPriority      = "priority"
 	UsageIdentityPageSortTotalRequests = "total_requests"
 	UsageIdentityPageSortTotalTokens   = "total_tokens"
+	UsageIdentityPageSortLastUsedAt    = "last_used_at"
 )
 
-const usageIdentityReadColumns = "id, name, auth_type, auth_type_name, identity, type, provider, lookup_key, prefix, base_url, priority, disabled, note, account_id, project_id, active_start, active_until, plan_type, total_requests, success_count, failure_count, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, last_aggregated_usage_event_id, first_used_at, last_used_at, stats_updated_at, is_deleted, created_at, updated_at, deleted_at"
+const usageIdentityReadColumns = "id, name, auth_type, auth_type_name, identity, type, provider, lookup_key, prefix, base_url, file_name, file_path, priority, disabled, note, account_id, project_id, active_start, active_until, plan_type, total_requests, success_count, failure_count, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, last_aggregated_usage_event_id, first_used_at, last_used_at, stats_updated_at, is_deleted, created_at, updated_at, deleted_at"
 
 const usageIdentityAggregationColumns = "id, auth_type, identity, total_requests, success_count, failure_count, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, last_aggregated_usage_event_id, first_used_at, last_used_at"
 
@@ -212,6 +213,8 @@ func applyUsageIdentityPageSort(query *gorm.DB, sort string, authType *entities.
 		return query.Order("id ASC")
 	case UsageIdentityPageSortTotalTokens:
 		return query.Order("total_tokens DESC").Order("id ASC")
+	case UsageIdentityPageSortLastUsedAt:
+		return query.Order("last_used_at IS NULL ASC").Order("last_used_at DESC").Order("id ASC")
 	default:
 		return query.Order("total_requests DESC").Order("id ASC")
 	}
@@ -379,6 +382,8 @@ func normalizeUsageIdentities(identities []entities.UsageIdentity, authType enti
 		identity.LookupKey = strings.TrimSpace(identity.LookupKey)
 		identity.Prefix = strings.TrimSpace(identity.Prefix)
 		identity.BaseURL = strings.TrimSpace(identity.BaseURL)
+		identity.FileName = trimOptionalString(identity.FileName)
+		identity.FilePath = trimOptionalString(identity.FilePath)
 		identity.Note = trimOptionalString(identity.Note)
 		identity.AccountID = trimOptionalString(identity.AccountID)
 		identity.ProjectID = trimOptionalString(identity.ProjectID)
@@ -541,6 +546,8 @@ func usageIdentityMetadataUpdates(identity entities.UsageIdentity) map[string]an
 		"lookup_key":     identity.LookupKey,
 		"prefix":         identity.Prefix,
 		"base_url":       identity.BaseURL,
+		"file_name":      identity.FileName,
+		"file_path":      identity.FilePath,
 		"priority":       identity.Priority,
 		"disabled":       identity.Disabled,
 		"note":           identity.Note,
