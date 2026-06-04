@@ -75,7 +75,7 @@ func (s *Service) GetInspectionStatus(ctx context.Context) (InspectionStatus, er
 	if err != nil {
 		return InspectionStatus{}, err
 	}
-	status := InspectionStatus{Total: len(identities)}
+	status := InspectionStatus{}
 
 	s.cleanupExpiredRefreshTasks(time.Now())
 	s.refreshMu.Lock()
@@ -86,6 +86,8 @@ func (s *Service) GetInspectionStatus(ctx context.Context) (InspectionStatus, er
 			continue
 		}
 		if task.isActive() {
+			// 巡检进度只统计已经进入刷新缓存/队列的记录；不支持的 Auth File 没有任务，不占 total。
+			status.Total++
 			status.Running = true
 			continue
 		}
@@ -93,6 +95,8 @@ func (s *Service) GetInspectionStatus(ctx context.Context) (InspectionStatus, er
 		if !ok {
 			continue
 		}
+		// 只有能产出巡检结果的缓存记录才进入 total/cached，避免 unsupported 或无效缓存卡住完成状态。
+		status.Total++
 		status.Cached++
 		switch result.Status {
 		case InspectionResultStatusNormal:

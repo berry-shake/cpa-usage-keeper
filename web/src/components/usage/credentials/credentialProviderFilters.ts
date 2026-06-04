@@ -1,7 +1,7 @@
 import type { UsageIdentityTypeCount } from '@/lib/types'
 
 export type CredentialProviderFilterScope = 'auth-files' | 'ai-provider'
-export type KnownCredentialProviderFilterKey = 'antigravity' | 'claude' | 'codex' | 'gemini' | 'gemini-cli' | 'iflow' | 'openai'
+export type KnownCredentialProviderFilterKey = 'antigravity' | 'claude' | 'codex' | 'gemini' | 'gemini-cli' | 'iflow' | 'openai' | 'xai'
 export type CredentialProviderFilterKey = 'all' | KnownCredentialProviderFilterKey
 
 export interface CredentialProviderFilterOption {
@@ -23,6 +23,7 @@ const AUTH_FILE_PROVIDER_FILTERS: KnownCredentialProviderFilter[] = [
   { key: 'codex', labelKey: 'usage_stats.credentials_filter_codex', types: ['codex'] },
   { key: 'gemini-cli', labelKey: 'usage_stats.credentials_filter_gemini_cli', types: ['gemini-cli'] },
   { key: 'iflow', labelKey: 'usage_stats.credentials_filter_iflow', types: ['iflow'] },
+  { key: 'xai', labelKey: 'usage_stats.credentials_filter_xai', types: ['xai'] },
 ]
 
 const AI_PROVIDER_FILTERS: KnownCredentialProviderFilter[] = [

@@ -21,7 +21,7 @@ func (p kimiProvider) Check(ctx context.Context, input ProviderInput) (ProviderO
 		AuthIndex: input.Identity.Identity,
 		Method:    p.config.Method,
 		URL:       p.config.URL,
-		Header:    p.config.Headers,
+		Header:    copyHeaders(p.config.Headers),
 	})
 	if err != nil {
 		return ProviderOutput{}, err

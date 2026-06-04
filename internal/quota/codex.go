@@ -18,7 +18,7 @@ func NewCodexProvider(caller ManagementAPICaller, config APICallConfig) Provider
 
 func (p codexProvider) Check(ctx context.Context, input ProviderInput) (ProviderOutput, error) {
 	// 官方接口已允许不带账号 ID；同步到账号时追加 header，否则只使用通用认证头刷新限额。
-	headers := p.config.Headers
+	headers := copyHeaders(p.config.Headers)
 	if accountID := optionalAccountID(input.Identity.AccountID); accountID != "" {
 		headers = mergeHeaders(headers, map[string]string{"Chatgpt-Account-Id": accountID})
 	}

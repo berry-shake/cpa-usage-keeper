@@ -45,6 +45,7 @@ type ProviderConfigs struct {
 	ClaudeUsage         APICallConfig
 	ClaudeProfile       APICallConfig
 	Kimi                APICallConfig
+	XAI                 APICallConfig
 }
 
 func DefaultProviderConfigs() ProviderConfigs {
@@ -128,11 +129,18 @@ func DefaultProviderConfigs() ProviderConfigs {
 				"Authorization": "Bearer $TOKEN$",
 			},
 		},
+		XAI: APICallConfig{
+			Method: "GET",
+			URL:    "https://cli-chat-proxy.grok.com/v1/billing",
+			Headers: map[string]string{
+				"Authorization": "Bearer $TOKEN$",
+			},
+		},
 	}
 }
 
 func (c ProviderConfigs) APICallTemplates() []APICallConfig {
-	templates := make([]APICallConfig, 0, len(c.Antigravity)+6)
+	templates := make([]APICallConfig, 0, len(c.Antigravity)+7)
 	templates = append(templates, c.Antigravity...)
 	templates = append(templates,
 		c.Codex,
@@ -141,6 +149,7 @@ func (c ProviderConfigs) APICallTemplates() []APICallConfig {
 		c.ClaudeUsage,
 		c.ClaudeProfile,
 		c.Kimi,
+		c.XAI,
 	)
 	return templates
 }

@@ -22,6 +22,11 @@ func mergeHeaders(base map[string]string, overrides map[string]string) map[strin
 	return headers
 }
 
+func copyHeaders(headers map[string]string) map[string]string {
+	// CPA api-call 会把 $TOKEN$ 替换成当前认证的真实 token；请求前复制 header，避免污染 provider 配置模板。
+	return mergeHeaders(headers, nil)
+}
+
 func targetHTTPError(response *apicall.Response) error {
 	return ProviderHTTPError{StatusCode: response.StatusCode, Message: targetErrorMessage(response)}
 }

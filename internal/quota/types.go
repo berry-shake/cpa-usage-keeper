@@ -203,6 +203,35 @@ type KimiUsagePayload struct {
 	Limits []KimiLimitItem  `json:"limits,omitempty"`
 }
 
+type XAIMoneyValue struct {
+	Val float64 `json:"val,omitempty"`
+}
+
+type XAIBillingCycle struct {
+	Year  int64 `json:"year,omitempty"`
+	Month int64 `json:"month,omitempty"`
+}
+
+type XAIBillingHistoryItem struct {
+	BillingCycle XAIBillingCycle `json:"billingCycle,omitempty"`
+	IncludedUsed XAIMoneyValue   `json:"includedUsed,omitempty"`
+	OnDemandUsed XAIMoneyValue   `json:"onDemandUsed,omitempty"`
+	TotalUsed    XAIMoneyValue   `json:"totalUsed,omitempty"`
+}
+
+type XAIBillingConfig struct {
+	MonthlyLimit       XAIMoneyValue           `json:"monthlyLimit,omitempty"`
+	Used               XAIMoneyValue           `json:"used,omitempty"`
+	OnDemandCap        XAIMoneyValue           `json:"onDemandCap,omitempty"`
+	BillingPeriodStart string                  `json:"billingPeriodStart,omitempty"`
+	BillingPeriodEnd   string                  `json:"billingPeriodEnd,omitempty"`
+	History            []XAIBillingHistoryItem `json:"history,omitempty"`
+}
+
+type XAIBillingPayload struct {
+	Config *XAIBillingConfig `json:"config,omitempty"`
+}
+
 type AntigravityResult struct {
 	Quota *AntigravityQuotaPayload `json:"quota"`
 }
@@ -223,6 +252,10 @@ type ClaudeResult struct {
 
 type KimiResult struct {
 	Usage *KimiUsagePayload `json:"usage"`
+}
+
+type XAIResult struct {
+	Billing *XAIBillingPayload `json:"billing"`
 }
 
 type ProviderHandler interface {

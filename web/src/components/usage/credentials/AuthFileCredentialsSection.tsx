@@ -658,6 +658,14 @@ export function formatQuotaWindowUsageAriaLabel(t: Translate, windowUsage: NonNu
   })
 }
 
+export function formatQuotaBillingUsageAriaLabel(t: Translate, billingUsage: NonNullable<DisplayQuota['billingUsage']>): string {
+  return t('usage_stats.credentials_quota_billing_usage_aria', {
+    used: billingUsage.used ?? '-',
+    limit: billingUsage.limit ?? '-',
+    remaining: billingUsage.remaining ?? '-',
+  })
+}
+
 function QuotaBar({ quota, quotaUsageMode }: { quota: DisplayQuota; quotaUsageMode: QuotaUsageMode }) {
   const { t } = useTranslation()
   // 条宽使用剩余额度百分比，颜色跟随剩余风险状态从绿到黄到红。
@@ -666,7 +674,8 @@ function QuotaBar({ quota, quotaUsageMode }: { quota: DisplayQuota; quotaUsageMo
   const percentLabel = quota.barPercent === null ? '' : `${Math.round(quota.barPercent)}%`
   const resetLabel = quota.resetText ? formatQuotaResetLabel(quota.resetText) : ''
   const resetDuration = quota.resetText ? formatQuotaResetDuration(quota.resetText) : ''
-  const windowUsage = quotaWindowUsageForMode(quota, quotaUsageMode)
+  const billingUsage = quota.billingUsage
+  const windowUsage = billingUsage ? undefined : quotaWindowUsageForMode(quota, quotaUsageMode)
 
   return (
     <div className={styles.credentialQuotaBarBlock}>
@@ -685,6 +694,14 @@ function QuotaBar({ quota, quotaUsageMode }: { quota: DisplayQuota; quotaUsageMo
         <span className={`${styles.credentialQuotaFill} ${credentialToneClassName('credentialQuotaFill', quota.status)}`.trim()} style={{ width }} />
       </div>
       <div className={styles.credentialQuotaMeta}>
+        {billingUsage && (
+          <strong className={styles.credentialQuotaWindowUsage} aria-label={formatQuotaBillingUsageAriaLabel(t, billingUsage)}>
+            <span className={styles.credentialQuotaUsageMetric}>
+              <img src={quotaCostIcon} alt="" aria-hidden="true" />
+              <span>{formatQuotaBillingUsageText(billingUsage)}</span>
+            </span>
+          </strong>
+        )}
         {windowUsage && (
           <strong className={styles.credentialQuotaWindowUsage} aria-label={formatQuotaWindowUsageAriaLabel(t, windowUsage)}>
             <span className={styles.credentialQuotaUsageMetric}>
@@ -701,6 +718,13 @@ function QuotaBar({ quota, quotaUsageMode }: { quota: DisplayQuota; quotaUsageMo
       </div>
     </div>
   )
+}
+
+function formatQuotaBillingUsageText(billingUsage: NonNullable<DisplayQuota['billingUsage']>): string {
+  if (billingUsage.used && billingUsage.limit) {
+    return `${billingUsage.used} / ${billingUsage.limit}`
+  }
+  return billingUsage.used ?? billingUsage.remaining ?? billingUsage.limit ?? ''
 }
 
 function quotaWindowUsageForMode(quota: DisplayQuota, mode: QuotaUsageMode): DisplayQuota['windowUsage'] {

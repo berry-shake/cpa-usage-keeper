@@ -178,9 +178,9 @@ func TestManualRefreshFallsBackToIdentityTypeWhenProviderUnsupported(t *testing.
 	}
 }
 
-func TestManualRefreshRejectsUnsupportedAuthFile(t *testing.T) {
+func TestManualRefreshSkipsUnsupportedAuthFileWithoutCaching(t *testing.T) {
 	db := openQuotaTestDatabase(t)
-	// Auth File 存在但 provider/type 都没有 handler 时，手动刷新返回 unsupported 而不是创建任务。
+	// Auth File 存在但 provider/type 都没有 handler 时，手动刷新静默跳过，不创建任务缓存或错误缓存。
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "unknown-provider", Type: "unknown-type", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
 
@@ -188,8 +188,18 @@ func TestManualRefreshRejectsUnsupportedAuthFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Refresh returned error: %v", err)
 	}
-	if response.Accepted != 0 || response.Skipped != 1 || len(response.Tasks) != 0 || !hasRefreshRejection(response.Rejected, "auth-1", "unsupported") {
-		t.Fatalf("expected unsupported auth file to be rejected, got %+v", response)
+	if response.Accepted != 0 || response.Skipped != 1 || len(response.Tasks) != 0 || len(response.Rejected) != 0 {
+		t.Fatalf("expected unsupported auth file to be skipped without rejection, got %+v", response)
+	}
+	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "auth-1"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected unsupported auth file to stay out of refresh cache, got %v", err)
+	}
+	cache, err := service.GetCachedQuota(context.Background(), CacheRequest{AuthIndexes: []string{"auth-1"}})
+	if err != nil {
+		t.Fatalf("GetCachedQuota returned error: %v", err)
+	}
+	if len(cache.Items) != 0 {
+		t.Fatalf("expected unsupported auth file to stay out of page cache, got %+v", cache.Items)
 	}
 }
 
@@ -436,6 +446,7 @@ func TestInspectionStatusSummarizesActiveAuthFileCache(t *testing.T) {
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "payment", Name: "Gemini Billing", Provider: "gemini", Type: "gemini-cli", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "other", Name: "Claude Other", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "pending", Name: "Pending", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "unsupported", Name: "Unsupported", Provider: "vertex", Type: "vertex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "disabled", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile, Disabled: boolPtr(true)})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "deleted", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile, IsDeleted: true})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "provider", Provider: "openai", Type: "openai", AuthType: entities.UsageIdentityAuthTypeAIProvider})
@@ -475,6 +486,7 @@ func TestStartInspectionClearsSettledCacheAndStartsOneAuthFileRound(t *testing.T
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-2", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "unsupported", Provider: "vertex", Type: "vertex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "disabled", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile, Disabled: boolPtr(true)})
 	block := make(chan struct{})
 	handler := &refreshHandlerStub{block: block, output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
@@ -494,6 +506,9 @@ func TestStartInspectionClearsSettledCacheAndStartsOneAuthFileRound(t *testing.T
 	}
 	if status.Total != 2 || status.Cached != 0 || !status.Running {
 		t.Fatalf("expected fresh running inspection without stale cache, got %+v", status)
+	}
+	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "unsupported"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected unsupported auth file to stay out of inspection cache, got %v", err)
 	}
 
 	waitForRefreshTask(t, service, "auth-1", RefreshTaskStatusRunning)

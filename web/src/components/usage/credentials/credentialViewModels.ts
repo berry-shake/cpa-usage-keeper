@@ -11,6 +11,12 @@ export interface QuotaWindowUsageDisplay {
   cost: string
 }
 
+export interface QuotaBillingUsageDisplay {
+  used?: string
+  limit?: string
+  remaining?: string
+}
+
 export interface DisplayQuota {
   key: string
   label: string
@@ -24,6 +30,7 @@ export interface DisplayQuota {
   windowSeconds?: number
   windowUsage?: QuotaWindowUsageDisplay
   windowUsageEstimate?: QuotaWindowUsageDisplay
+  billingUsage?: QuotaBillingUsageDisplay
   status: QuotaStatus
 }
 
@@ -198,8 +205,30 @@ function toDisplayQuota(row: UsageQuotaRow): DisplayQuota | undefined {
     windowSeconds,
     windowUsage: quotaWindowUsage(row),
     windowUsageEstimate: quotaWindowUsageEstimate(row, percentDisplay),
+    billingUsage: quotaBillingUsage(row),
     status: quotaStatus(row, percentDisplay.percent, percentDisplay.kind),
   }
+}
+
+function quotaBillingUsage(row: UsageQuotaRow): QuotaBillingUsageDisplay | undefined {
+  if (row.metric !== 'usd_cents') {
+    return undefined
+  }
+  const used = finiteNumber(row.used)
+  const limit = finiteNumber(row.limit)
+  const remaining = finiteNumber(row.remaining)
+  if (used === undefined && limit === undefined && remaining === undefined) {
+    return undefined
+  }
+  return {
+    used: used === undefined ? undefined : formatUSDCents(used),
+    limit: limit === undefined ? undefined : formatUSDCents(limit),
+    remaining: remaining === undefined ? undefined : formatUSDCents(remaining),
+  }
+}
+
+function formatUSDCents(cents: number): string {
+  return formatQuotaWindowCost(cents / 100)
 }
 
 function quotaWindowUsage(row: UsageQuotaRow): QuotaWindowUsageDisplay | undefined {

@@ -22,7 +22,7 @@ func (p claudeProvider) Check(ctx context.Context, input ProviderInput) (Provide
 		AuthIndex: input.Identity.Identity,
 		Method:    p.usageConfig.Method,
 		URL:       p.usageConfig.URL,
-		Header:    p.usageConfig.Headers,
+		Header:    copyHeaders(p.usageConfig.Headers),
 	})
 	if err != nil {
 		return ProviderOutput{}, err
@@ -36,7 +36,7 @@ func (p claudeProvider) Check(ctx context.Context, input ProviderInput) (Provide
 		AuthIndex: input.Identity.Identity,
 		Method:    p.profileConfig.Method,
 		URL:       p.profileConfig.URL,
-		Header:    p.profileConfig.Headers,
+		Header:    copyHeaders(p.profileConfig.Headers),
 	})
 	if err != nil {
 		return ProviderOutput{}, err

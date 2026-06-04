@@ -12,6 +12,7 @@ describe('credentialProviderFilters', () => {
       { type: 'geminicli', count: 5 },
       { type: 'gemin-cli', count: 6 },
       { type: 'kimi', count: 7 },
+      { type: 'xai', count: 12 },
       { type: 'vertex', count: 8 },
       { type: 'openai', count: 9 },
       { type: ' openai ', count: 11 },
@@ -21,11 +22,13 @@ describe('credentialProviderFilters', () => {
     const options = buildCredentialProviderFilterOptions('auth-files', counts)
 
     expect(options.map((option) => [option.key, option.count, option.labelKey ?? option.label])).toEqual([
-      ['all', 66, 'usage_stats.credentials_filter_all'],
+      ['all', 78, 'usage_stats.credentials_filter_all'],
       ['claude', 2, 'usage_stats.credentials_filter_claude'],
       ['gemini-cli', 4, 'usage_stats.credentials_filter_gemini_cli'],
+      ['xai', 12, 'usage_stats.credentials_filter_xai'],
     ])
     expect(countForKnownOption(options, counts, 'auth-files', 'gemini-cli')).toBe(4)
+    expect(countForKnownOption(options, counts, 'auth-files', 'xai')).toBe(12)
   })
 
   it('shows only known AI provider types with dedicated icons', () => {
@@ -55,6 +58,7 @@ describe('credentialProviderFilters', () => {
     expect(credentialProviderFilterTypes('auth-files', 'all')).toEqual([])
     expect(credentialProviderFilterTypes('auth-files', 'claude')).toEqual(['claude'])
     expect(credentialProviderFilterTypes('auth-files', 'gemini-cli')).toEqual(['gemini-cli'])
+    expect(credentialProviderFilterTypes('auth-files', 'xai')).toEqual(['xai'])
     expect(credentialProviderFilterTypes('ai-provider', 'gemini')).toEqual(['gemini'])
     expect(credentialProviderFilterTypes('ai-provider', 'claude')).toEqual(['claude'])
     expect(credentialProviderFilterTypes('ai-provider', 'openai')).toEqual(['openai'])

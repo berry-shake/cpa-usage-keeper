@@ -31,7 +31,7 @@ func (p antigravityProvider) Check(ctx context.Context, input ProviderInput) (Pr
 			AuthIndex: input.Identity.Identity,
 			Method:    config.Method,
 			URL:       config.URL,
-			Header:    config.Headers,
+			Header:    copyHeaders(config.Headers),
 			Data:      map[string]string{"project": *input.Identity.ProjectID},
 		})
 		if err != nil {

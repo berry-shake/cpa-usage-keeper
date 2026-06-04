@@ -157,6 +157,8 @@ func (s *Service) Refresh(ctx context.Context, request RefreshRequest) (RefreshR
 	seen := make(map[string]struct{}, len(request.AuthIndexes))
 	// queuedAuthIndexes 收集本次真正入队的任务，循环结束后交给单个 dispatcher 派发。
 	queuedAuthIndexes := make([]string, 0, len(request.AuthIndexes))
+	// unsupported 只代表这个 Auth File 类型暂不支持限额查询，不需要写任务缓存或前端错误。
+	skippedUnsupported := 0
 	// 创建新任务前先清理过期缓存，避免旧失败/瞬时任务占住同一个 auth_index。
 	s.cleanupExpiredRefreshTasks(time.Now())
 
@@ -198,7 +200,12 @@ func (s *Service) Refresh(ctx context.Context, request RefreshRequest) (RefreshR
 			// 数据库错误等非业务拒绝直接返回，避免继续创建不可靠任务。
 			return RefreshResponse{}, err
 		} else if rejection != "" {
-			// 业务拒绝写入 rejected，常见原因是 not_found/not_auth_file/unsupported。
+			if rejection == "unsupported" {
+				// 不支持查询的 Auth File 静默跳过，不进入轮询队列，也不制造可缓存错误。
+				skippedUnsupported++
+				continue
+			}
+			// 业务拒绝写入 rejected，常见原因是 not_found/not_auth_file。
 			response.Rejected = append(response.Rejected, RefreshRejectedAuthIndex{AuthIndex: authIndex, Error: rejection})
 			// 当前项处理完毕，继续看下一项。
 			continue
@@ -231,7 +238,7 @@ func (s *Service) Refresh(ctx context.Context, request RefreshRequest) (RefreshR
 		}
 	}
 	// Skipped 直接等于 rejected 数量，表示本次未入队的项。
-	response.Skipped = len(response.Rejected)
+	response.Skipped = len(response.Rejected) + skippedUnsupported
 	// 返回入队结果；后台任务完成后由轮询/cache 接口读取。
 	return response, nil
 }
@@ -372,6 +379,11 @@ func (s *Service) runRefreshTaskWithWorker(authIndex string) {
 	response, err := s.Check(ctx, CheckRequest{AuthIndex: authIndex})
 	// provider 或身份校验失败时进入失败状态。
 	if err != nil {
+		if errors.Is(err, ErrUnsupportedType) {
+			// 任务创建后身份类型可能变化为不支持；直接移除任务，避免缓存无意义错误。
+			s.deleteRefreshTask(authIndex)
+			return
+		}
 		// markRefreshTaskFailed 会把友好错误、HTTP 状态和缓存 TTL 写入任务记录。
 		s.markRefreshTaskFailed(authIndex, err)
 		// 失败任务不再计算 token/cost，也不会写 completed quota 缓存。
@@ -381,6 +393,12 @@ func (s *Service) runRefreshTaskWithWorker(authIndex string) {
 	response = s.attachWindowUsageStats(ctx, authIndex, response, time.Now())
 	// quota rows 和 token/cost 都准备好后，把任务切到 completed 并写入长期成功缓存。
 	s.markRefreshTaskCompleted(authIndex, response)
+}
+
+func (s *Service) deleteRefreshTask(authIndex string) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	delete(s.refreshTasks, authIndex)
 }
 
 func refreshTaskErrorMessage(err error) string {

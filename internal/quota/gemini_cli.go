@@ -26,7 +26,7 @@ func (p geminiCLIProvider) Check(ctx context.Context, input ProviderInput) (Prov
 		AuthIndex: input.Identity.Identity,
 		Method:    p.config.Method,
 		URL:       p.config.URL,
-		Header:    p.config.Headers,
+		Header:    copyHeaders(p.config.Headers),
 		Data:      map[string]string{"project": *input.Identity.ProjectID},
 	})
 	if err != nil {
@@ -47,7 +47,7 @@ func (p geminiCLIProvider) checkCodeAssist(ctx context.Context, input ProviderIn
 		AuthIndex: input.Identity.Identity,
 		Method:    p.codeAssistConfig.Method,
 		URL:       p.codeAssistConfig.URL,
-		Header:    p.codeAssistConfig.Headers,
+		Header:    copyHeaders(p.codeAssistConfig.Headers),
 		Data: map[string]any{
 			"cloudaicompanionProject": *input.Identity.ProjectID,
 			"metadata": map[string]string{

@@ -92,6 +92,30 @@ describe('AuthFileCredentialsSection quota usage mode rendering', () => {
     expect(estimatedHtml).toContain('1.00M')
     expect(estimatedHtml).toContain('$2.50')
   })
+
+  it('renders xai billing spend without token usage metrics', () => {
+    const billingRow = {
+      ...row,
+      displayQuotas: [{
+        key: 'billing.monthly',
+        label: 'Monthly Spend',
+        percent: 0.835,
+        barPercent: 99.165,
+        percentKind: 'used',
+        billingUsage: { used: '$1.67', limit: '$200.00', remaining: '$198.33' },
+        status: 'ok',
+      }],
+    } as AuthFileCredentialRow
+
+    const html = renderToStaticMarkup(createElement(AuthFileQuotaPanel, { row: billingRow, quotaUsageMode: 'current' }))
+
+    expect(html).toContain('Monthly Spend')
+    expect(html).toContain('$1.67')
+    expect(html).toContain('$200.00')
+    expect(html.match(/<img/g)).toHaveLength(1)
+    expect(html.indexOf('<img')).toBeLessThan(html.indexOf('$1.67'))
+    expect(html).not.toContain('1.00M')
+  })
 })
 
 describe('AuthFileCredentialsSection quota error display', () => {

@@ -205,6 +205,30 @@ describe('credentialViewModels', () => {
     ])
   })
 
+  it('formats xai billing quota cents as dollar spend without token window usage', () => {
+    const quotas = new Map<string, UsageQuotaRow[]>([
+      ['xai-auth', [
+        { key: 'billing.monthly', label: 'Monthly Spend', scope: 'billing', metric: 'usd_cents', used: 167, limit: 20000, remaining: 19833, usedPercent: 0.835, window: { seconds: 2592000 }, resetAt: '2026-07-01T00:00:00+00:00' },
+      ]],
+    ])
+
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'xai-auth', type: 'xai', provider: 'xAI' })], quotas)
+
+    expect(rows[0].displayQuotas[0]).toMatchObject({
+      label: 'Monthly Spend',
+      percent: 0.835,
+      percentKind: 'used',
+      barPercent: 99.165,
+      billingUsage: {
+        used: '$1.67',
+        limit: '$200.00',
+        remaining: '$198.33',
+      },
+      windowUsage: undefined,
+      windowUsageEstimate: undefined,
+    })
+  })
+
   it('estimates quota window usage only from positive current usage and a partial used percent', () => {
     const quotas = new Map<string, UsageQuotaRow[]>([
       ['auth-1', [

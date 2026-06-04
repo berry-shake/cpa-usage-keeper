@@ -282,6 +282,36 @@ func TestNormalizeKimiQuotaRows(t *testing.T) {
 	assertIntField(t, limit.ResetAfterSeconds, 7200, "limit resetAfterSeconds")
 }
 
+func TestNormalizeXAIQuotaRows(t *testing.T) {
+	rows := quota.NormalizeQuotaRows(quota.ProviderOutput{Provider: "xai", Result: quota.XAIResult{Billing: &quota.XAIBillingPayload{
+		Config: &quota.XAIBillingConfig{
+			MonthlyLimit:       quota.XAIMoneyValue{Val: 20000},
+			Used:               quota.XAIMoneyValue{Val: 167},
+			OnDemandCap:        quota.XAIMoneyValue{Val: 0},
+			BillingPeriodStart: "2026-06-01T00:00:00+00:00",
+			BillingPeriodEnd:   "2026-07-01T00:00:00+00:00",
+			History: []quota.XAIBillingHistoryItem{{
+				BillingCycle: quota.XAIBillingCycle{Year: 2026, Month: 5},
+				TotalUsed:    quota.XAIMoneyValue{Val: 0},
+			}},
+		},
+	}}})
+
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 quota row, got %#v", rows)
+	}
+	monthly := findQuotaRow(t, rows, "billing.monthly")
+	assertQuotaText(t, monthly, "Monthly Spend", "billing", "usd_cents")
+	assertFloatField(t, monthly.Used, 167, "xai monthly used")
+	assertFloatField(t, monthly.Limit, 20000, "xai monthly limit")
+	assertFloatField(t, monthly.Remaining, 19833, "xai monthly remaining")
+	assertFloatField(t, monthly.UsedPercent, 0.835, "xai monthly usedPercent")
+	assertIntField(t, monthly.Window.Seconds, 2592000, "xai monthly window seconds")
+	if monthly.ResetAt != "2026-07-01T00:00:00+00:00" {
+		t.Fatalf("unexpected xai monthly resetAt: %#v", monthly)
+	}
+}
+
 func findQuotaRow(t *testing.T, rows []quota.QuotaRow, key string) quota.QuotaRow {
 	t.Helper()
 	for _, row := range rows {
