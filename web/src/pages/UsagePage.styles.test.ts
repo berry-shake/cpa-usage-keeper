@@ -20,6 +20,14 @@ const tokenBreakdownChartSource = readSource(new URL('../components/usage/TokenB
 const costTrendChartSource = readSource(new URL('../components/usage/CostTrendChart.tsx', import.meta.url))
 const statCardsSource = readSource(new URL('../components/usage/StatCards.tsx', import.meta.url))
 
+const requestEventColumnDefinitionBlock = (columnId: string) => {
+  const start = requestEventsSource.indexOf(`id: '${columnId}',`)
+  expect(start).toBeGreaterThanOrEqual(0)
+  const next = requestEventsSource.indexOf('\n      {', start + 1)
+  const end = next === -1 ? requestEventsSource.indexOf('\n    ];', start) : next
+  return requestEventsSource.slice(start, end)
+}
+
 describe('UsagePage toolbar styles', () => {
   it('keeps visible range controls content-sized in narrow layouts', () => {
     expect(usagePageStyles).toMatch(/\.timeRangeGroup\s*\{[\s\S]*?width:\s*fit-content;/)
@@ -364,7 +372,7 @@ describe('UsagePage toolbar styles', () => {
     )
     const tableWrapperBlock = usagePageStyles.slice(
       usagePageStyles.indexOf('.requestEventsTableWrapper {'),
-      usagePageStyles.indexOf('.requestEventsTimestamp')
+      usagePageStyles.indexOf('.requestEventsNoWrapCell')
     )
 
     expect(cardBlock).toMatch(/padding:\s*0;/)
@@ -376,21 +384,68 @@ describe('UsagePage toolbar styles', () => {
     expect(tableWrapperBlock).not.toMatch(/border:\s*1px solid/)
   })
 
-  it('keeps the Request Event Log timestamp column compact', () => {
-    expect(usagePageStyles).toMatch(/\.requestEventsTimestamp\s*\{[\s\S]*?width:\s*136px;/)
-    expect(usagePageStyles).toMatch(/\.requestEventsTimestamp\s*\{[\s\S]*?min-width:\s*136px;/)
-    expect(usagePageStyles).toMatch(/\.requestEventsTimestamp\s*\{[\s\S]*?font-variant-numeric:\s*tabular-nums;/)
+  it('keeps Request Event Log adaptive columns free of legacy column styles', () => {
+    expect(usagePageStyles).not.toContain('.requestEventsTimestamp')
+    expect(usagePageStyles).not.toContain('.requestEventsReasoningHeader')
+    expect(usagePageStyles).not.toContain('.requestEventsEndpointCell')
+    expect(usagePageStyles).not.toContain('.durationCell')
+    expect(requestEventsSource).not.toContain('styles.requestEventsTimestamp')
+    expect(requestEventsSource).not.toContain('styles.requestEventsReasoningHeader')
+    expect(requestEventsSource).not.toContain('styles.requestEventsEndpointCell')
+    expect(requestEventsSource).not.toContain('styles.durationCell')
   })
 
-  it('keeps the Request Event Log reasoning header on one line without fixing column width', () => {
-    expect(usagePageStyles).toMatch(/\.requestEventsReasoningHeader\s*\{[\s\S]*?white-space:\s*nowrap;/)
-    expect(usagePageStyles).not.toMatch(/\.requestEventsReasoningHeader\s*\{[^}]*width:/)
-    expect(requestEventsSource).toContain('<th className={styles.requestEventsReasoningHeader}>{t(\'usage_stats.reasoning_tokens\')}</th>')
+  it('uses the shared adaptive style for the Request Event Log reasoning column', () => {
+    expect(usagePageStyles).not.toContain('.requestEventsReasoningHeader')
+    expect(requestEventColumnDefinitionBlock('reasoning_tokens')).toContain('styles.requestEventsNoWrapCell')
   })
 
-  it('keeps Request Event Log model and endpoint columns compact', () => {
+  it('keeps Request Event Log long text columns controlled', () => {
+    expect(usagePageStyles).toMatch(/\.requestEventsAPIKeyCell\s*\{[\s\S]*?min-width:\s*135px;/)
+    expect(usagePageStyles).toMatch(/\.requestEventsAPIKeyCell\s*\{[\s\S]*?max-width:\s*240px;/)
+    expect(usagePageStyles).toMatch(/\.requestEventsSourceCell\s*\{[\s\S]*?min-width:\s*165px;/)
     expect(usagePageStyles).toMatch(/\.modelCell\s*\{[\s\S]*?min-width:\s*110px;/)
-    expect(usagePageStyles).toMatch(/\.requestEventsEndpointCell\s*\{[\s\S]*?min-width:\s*100px;/)
+    expect(usagePageStyles).toMatch(/\.modelCell\s*\{[\s\S]*?max-width:\s*240px;/)
+    expect(usagePageStyles).not.toContain('.requestEventsAuthIndex')
+    expect(usagePageStyles).not.toContain('.requestEventsEndpointCell')
+  })
+
+  it('keeps Request Event Log non-text columns adaptive and non-wrapping', () => {
+    const adaptiveColumnIds = [
+      'timestamp',
+      'reasoning_effort',
+      'result',
+      'request_type',
+      'endpoint',
+      'ttft',
+      'latency',
+      'speed',
+      'input_tokens',
+      'output_tokens',
+      'reasoning_tokens',
+      'cached_tokens',
+      'cache_rate',
+      'total_tokens',
+      'total_cost',
+    ]
+    const noWrapCellBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.requestEventsNoWrapCell {'),
+      usagePageStyles.indexOf('.requestEventsSourceCell')
+    )
+
+    expect(noWrapCellBlock).toMatch(/white-space:\s*nowrap;/)
+    expect(noWrapCellBlock).toMatch(/font-variant-numeric:\s*tabular-nums;/)
+    expect(usagePageStyles).not.toContain('.requestEventsSpeedCell')
+
+    adaptiveColumnIds.forEach((columnId) => {
+      const block = requestEventColumnDefinitionBlock(columnId)
+      expect(block).toMatch(/header:\s*<th[^>]*styles\.requestEventsNoWrapCell/)
+      expect(block).toMatch(/renderCell:[\s\S]*<td[^>]*styles\.requestEventsNoWrapCell/)
+    })
+
+    ;['api_key', 'source', 'model'].forEach((columnId) => {
+      expect(requestEventColumnDefinitionBlock(columnId)).not.toContain('styles.requestEventsNoWrapCell')
+    })
   })
 
   it('provides reusable pill controls for usage subpages', () => {

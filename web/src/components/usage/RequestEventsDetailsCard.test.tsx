@@ -81,23 +81,23 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('120 total events');
     expect(html).toContain('Effort');
     expect(html).not.toContain('Reasoning Level');
-    expect(html.indexOf('<th>Timestamp</th>')).toBeLessThan(html.indexOf('<th>Source</th>'));
-    expect(html.indexOf('<th>Timestamp</th>')).toBeLessThan(html.indexOf('<th>API Key</th>'));
-    expect(html.indexOf('<th>API Key</th>')).toBeLessThan(html.indexOf('<th>Source</th>'));
-    expect(html.indexOf('<th>Source</th>')).toBeLessThan(html.indexOf('<th>Model</th>'));
-    expect(html.indexOf('<th>Model</th>')).toBeLessThan(html.indexOf('<th title="Reasoning Effort">Effort</th>'));
-    expect(html.indexOf('<th>Result</th>')).toBeLessThan(html.indexOf('<th>Type</th>'));
-    expect(html.indexOf('<th>Type</th>')).toBeLessThan(html.indexOf('<th>Endpoint</th>'));
-    expect(html.indexOf('<th>Endpoint</th>')).toBeLessThan(html.indexOf('<th title="Time to First Token">TTFT</th>'));
-    expect(html.indexOf('<th title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('<th title="Using latency_ms in ms">Latency</th>'));
-    expect(html.indexOf('<th title="Using latency_ms in ms">Latency</th>')).toBeLessThan(html.indexOf('<th title="Average visible output tokens per second after TTFT">Speed</th>'));
-    expect(html.indexOf('<th title="Average visible output tokens per second after TTFT">Speed</th>')).toBeLessThan(html.indexOf('<th>Input</th>'));
+    expect(html.indexOf('>Timestamp</th>')).toBeLessThan(html.indexOf('>Source</th>'));
+    expect(html.indexOf('>Timestamp</th>')).toBeLessThan(html.indexOf('>API Key</th>'));
+    expect(html.indexOf('>API Key</th>')).toBeLessThan(html.indexOf('>Source</th>'));
+    expect(html.indexOf('>Source</th>')).toBeLessThan(html.indexOf('>Model</th>'));
+    expect(html.indexOf('>Model</th>')).toBeLessThan(html.indexOf('title="Reasoning Effort">Effort</th>'));
+    expect(html.indexOf('>Result</th>')).toBeLessThan(html.indexOf('>Type</th>'));
+    expect(html.indexOf('>Type</th>')).toBeLessThan(html.indexOf('>Endpoint</th>'));
+    expect(html.indexOf('>Endpoint</th>')).toBeLessThan(html.indexOf('title="Time to First Token">TTFT</th>'));
+    expect(html.indexOf('title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('title="Using latency_ms in ms">Latency</th>'));
+    expect(html.indexOf('title="Using latency_ms in ms">Latency</th>')).toBeLessThan(html.indexOf('title="Average visible output tokens per second after TTFT">Speed</th>'));
+    expect(html.indexOf('title="Average visible output tokens per second after TTFT">Speed</th>')).toBeLessThan(html.indexOf('>Input</th>'));
     expect(html).toContain('class="_requestEventsAPIKeyCell_');
     expect(html).toContain('title="Production Key">Production Key</td>');
-    expect(html).toContain('<td>medium</td>');
-    expect(html).toMatch(/<td>SSE<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/messages">\/messages<\/td>/);
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">medium<\/td>/);
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">SSE<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*" title="\/messages">\/messages<\/td>/);
     expect(html.indexOf('>45ms</td>')).toBeLessThan(html.indexOf('>120ms</td>'));
-    expect(html).toContain('<td>30.0 t/s</td>');
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">30\.0 t\/s<\/td>/);
     expect(html).toContain('1 / 6');
     expect(html).toContain('20');
     expect(html).toContain('50');
@@ -123,8 +123,8 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], ttft_ms: undefined, speed_tps: undefined }],
     });
 
-    expect(html.indexOf('<th title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('<th title="Using latency_ms in ms">Latency</th>'));
-    expect(html).toMatch(/Success<\/span><\/td><td>SSE<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/messages">\/messages<\/td><td class="[^"]*durationCell[^"]*">-<\/td><td class="[^"]*durationCell[^"]*">120ms<\/td><td>-<\/td>/);
+    expect(html.indexOf('title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('title="Using latency_ms in ms">Latency</th>'));
+    expect(html).toMatch(/Success<\/span><\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">SSE<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*" title="\/messages">\/messages<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">120ms<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td>/);
   });
 
   it('keeps the Latency column visible when latency is missing', () => {
@@ -132,9 +132,9 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], latency_ms: undefined, speed_tps: undefined }],
     });
 
-    expect(html.indexOf('<th title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('<th title="Using latency_ms in ms">Latency</th>'));
-    expect(html.indexOf('<th title="Using latency_ms in ms">Latency</th>')).toBeLessThan(html.indexOf('<th title="Average visible output tokens per second after TTFT">Speed</th>'));
-    expect(html).toMatch(/45ms<\/td><td class="[^"]*durationCell[^"]*">--<\/td><td>-<\/td>/);
+    expect(html.indexOf('title="Time to First Token">TTFT</th>')).toBeLessThan(html.indexOf('title="Using latency_ms in ms">Latency</th>'));
+    expect(html.indexOf('title="Using latency_ms in ms">Latency</th>')).toBeLessThan(html.indexOf('title="Average visible output tokens per second after TTFT">Speed</th>'));
+    expect(html).toMatch(/45ms<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">--<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td>/);
   });
 
   it('shows a dash for zero TTFT values', () => {
@@ -142,7 +142,7 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], ttft_ms: 0, speed_tps: undefined }],
     });
 
-    expect(html).toMatch(/Success<\/span><\/td><td>SSE<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/messages">\/messages<\/td><td class="[^"]*durationCell[^"]*">-<\/td><td class="[^"]*durationCell[^"]*">120ms<\/td><td>-<\/td>/);
+    expect(html).toMatch(/Success<\/span><\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">SSE<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*" title="\/messages">\/messages<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">120ms<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td>/);
   });
 
   it('maps GET endpoints to WS and strips the v1 prefix', () => {
@@ -150,7 +150,7 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], endpoint: 'GET /v1/responses' }],
     });
 
-    expect(html).toMatch(/<td>WS<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/responses">\/responses<\/td>/);
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">WS<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*" title="\/responses">\/responses<\/td>/);
   });
 
   it('strips the v1 prefix when endpoint has no request method', () => {
@@ -158,7 +158,7 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], endpoint: '/v1/chat/completions' }],
     });
 
-    expect(html).toMatch(/<td>-<\/td><td class="[^"]*requestEventsEndpointCell[^"]*" title="\/chat\/completions">\/chat\/completions<\/td>/);
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*" title="\/chat\/completions">\/chat\/completions<\/td>/);
   });
 
   it('renders cache rate after cached tokens with two decimal places', () => {
@@ -166,9 +166,9 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 100, cached_tokens: 25 } }],
     });
 
-    expect(html.indexOf('<th>Cached</th>')).toBeLessThan(html.indexOf('<th>Cache Rate</th>'));
-    expect(html.indexOf('<th>Cache Rate</th>')).toBeLessThan(html.indexOf('<th>Total Tokens</th>'));
-    expect(html).toContain('<td>25</td><td>25.00%</td><td>200</td>');
+    expect(html.indexOf('>Cached</th>')).toBeLessThan(html.indexOf('>Cache Rate</th>'));
+    expect(html.indexOf('>Cache Rate</th>')).toBeLessThan(html.indexOf('>Total Tokens</th>'));
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">25<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">25\.00%<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">200<\/td>/);
   });
 
   it('keeps cache rate based on normalized input for all providers', () => {
@@ -180,7 +180,7 @@ describe('RequestEventsDetailsCard pagination', () => {
       }],
     });
 
-    expect(html).toContain('<td>600</td><td>150.00%</td><td>500</td>');
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">600<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">150\.00%<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">500<\/td>/);
     expect(html).not.toContain('60.00%');
   });
 
@@ -189,7 +189,7 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 0, cached_tokens: 25 } }],
     });
 
-    expect(html).toContain('<td>0</td><td>60</td><td>20</td><td>25</td><td>-</td><td>200</td>');
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">0<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">60<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">20<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">25<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">200<\/td>/);
   });
 
   it('stacks source value above source tags', () => {
@@ -342,16 +342,16 @@ describe('RequestEventsDetailsCard pagination', () => {
       initialVisibleColumnIds: ['timestamp', 'model', 'total_cost'],
     });
 
-    expect(html).toContain('<th>Timestamp</th>');
-    expect(html).toContain('<th>Model</th>');
-    expect(html).toContain('<th>Total Cost</th>');
+    expect(html).toContain('>Timestamp</th>');
+    expect(html).toContain('>Model</th>');
+    expect(html).toContain('>Total Cost</th>');
     expect(html).toContain('2026/04/23 02:00:00');
     expect(html).toContain('<td class="_modelCell_');
     expect(html).toContain('$0.1234');
     expect(html).not.toContain('<th>API Key</th>');
     expect(html).not.toContain('<th>Source</th>');
-    expect(html).not.toContain('<th title="Time to First Token">TTFT</th>');
-    expect(html).not.toContain('<th title="Using latency_ms in ms">Latency</th>');
+    expect(html).not.toContain('title="Time to First Token">TTFT</th>');
+    expect(html).not.toContain('title="Using latency_ms in ms">Latency</th>');
     expect(html).not.toContain('title="Production Key">Production Key</td>');
   });
 
@@ -360,12 +360,12 @@ describe('RequestEventsDetailsCard pagination', () => {
       visibleColumnIds: ['timestamp', 'model'],
     });
 
-    expect(html).toContain('<th>Timestamp</th>');
-    expect(html).toContain('<th>Model</th>');
+    expect(html).toContain('>Timestamp</th>');
+    expect(html).toContain('>Model</th>');
     expect(html).toContain('2026/04/23 02:00:00');
     expect(html).toContain('<td class="_modelCell_');
     expect(html).not.toContain('<th>API Key</th>');
-    expect(html).not.toContain('<th>Total Cost</th>');
+    expect(html).not.toContain('>Total Cost</th>');
     expect(html).not.toContain('$0.1234');
   });
 

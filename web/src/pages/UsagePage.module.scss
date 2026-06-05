@@ -1912,11 +1912,6 @@
   white-space: nowrap;
 }
 
-.durationCell {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .credentialsSections,
 .settingsSections {
   display: flex;
@@ -2817,20 +2812,13 @@
   }
 }
 
-.requestEventsTimestamp {
+.requestEventsNoWrapCell {
   white-space: nowrap;
-  width: 136px;
-  min-width: 136px;
   font-variant-numeric: tabular-nums;
 }
 
-.requestEventsReasoningHeader {
-  white-space: nowrap;
-}
-
 .requestEventsSourceCell,
-.requestEventsAPIKeyCell,
-.requestEventsAuthIndex {
+.requestEventsAPIKeyCell {
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
     monospace;
@@ -2846,12 +2834,6 @@
 .requestEventsAPIKeyCell {
   min-width: 135px;
   max-width: 240px;
-}
-
-.requestEventsEndpointCell {
-  min-width: 100px;
-  max-width: 180px;
-  word-break: break-all;
 }
 
 .requestEventsSourceStack {

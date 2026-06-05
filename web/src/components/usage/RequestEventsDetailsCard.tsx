@@ -637,9 +637,9 @@ export function RequestEventsDetailsCard({
       {
         id: 'timestamp',
         label: t('usage_stats.request_events_timestamp'),
-        header: <th>{t('usage_stats.request_events_timestamp')}</th>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.request_events_timestamp')}</th>,
         renderCell: (row) => (
-          <td title={row.timestamp} className={styles.requestEventsTimestamp}>
+          <td title={row.timestamp} className={styles.requestEventsNoWrapCell}>
             {row.timestampLabel}
           </td>
         ),
@@ -681,15 +681,15 @@ export function RequestEventsDetailsCard({
       {
         id: 'reasoning_effort',
         label: t('usage_stats.reasoning_effort'),
-        header: <th title={t('usage_stats.reasoning_effort_hint')}>{t('usage_stats.reasoning_effort')}</th>,
-        renderCell: (row) => <td>{row.reasoningEffort}</td>,
+        header: <th className={styles.requestEventsNoWrapCell} title={t('usage_stats.reasoning_effort_hint')}>{t('usage_stats.reasoning_effort')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.reasoningEffort}</td>,
       },
       {
         id: 'result',
         label: t('usage_stats.request_events_result'),
-        header: <th>{t('usage_stats.request_events_result')}</th>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.request_events_result')}</th>,
         renderCell: (row) => (
-          <td>
+          <td className={styles.requestEventsNoWrapCell}>
             <span
               className={
                 row.failed
@@ -705,75 +705,75 @@ export function RequestEventsDetailsCard({
       {
         id: 'request_type',
         label: t('usage_stats.request_type'),
-        header: <th>{t('usage_stats.request_type')}</th>,
-        renderCell: (row) => <td>{row.requestType}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.request_type')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.requestType}</td>,
       },
       {
         id: 'endpoint',
         label: t('usage_stats.request_endpoint'),
-        header: <th>{t('usage_stats.request_endpoint')}</th>,
-        renderCell: (row) => <td className={styles.requestEventsEndpointCell} title={row.endpoint}>{row.endpoint}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.request_endpoint')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell} title={row.endpoint}>{row.endpoint}</td>,
       },
       {
         id: 'ttft',
         label: t('usage_stats.ttft'),
-        header: <th title={ttftHint}>{t('usage_stats.ttft')}</th>,
-        renderCell: (row) => <td className={styles.durationCell}>{formatTTFTMs(row.ttftMs)}</td>,
+        header: <th className={styles.requestEventsNoWrapCell} title={ttftHint}>{t('usage_stats.ttft')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{formatTTFTMs(row.ttftMs)}</td>,
       },
       {
         id: 'latency',
         label: t('usage_stats.latency'),
-        header: <th title={latencyHint}>{t('usage_stats.latency')}</th>,
-        renderCell: (row) => <td className={styles.durationCell}>{formatDurationMs(row.latencyMs)}</td>,
+        header: <th className={styles.requestEventsNoWrapCell} title={latencyHint}>{t('usage_stats.latency')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{formatDurationMs(row.latencyMs)}</td>,
       },
       {
         id: 'speed',
         label: t('usage_stats.speed'),
-        header: <th title={speedHint}>{t('usage_stats.speed')}</th>,
-        renderCell: (row) => <td>{formatSpeedTPS(row.speedTPS)}</td>,
+        header: <th className={styles.requestEventsNoWrapCell} title={speedHint}>{t('usage_stats.speed')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{formatSpeedTPS(row.speedTPS)}</td>,
       },
       {
         id: 'input_tokens',
         label: t('usage_stats.input_tokens'),
-        header: <th>{t('usage_stats.input_tokens')}</th>,
-        renderCell: (row) => <td>{row.inputTokens.toLocaleString()}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.input_tokens')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.inputTokens.toLocaleString()}</td>,
       },
       {
         id: 'output_tokens',
         label: t('usage_stats.output_tokens'),
-        header: <th>{t('usage_stats.output_tokens')}</th>,
-        renderCell: (row) => <td>{row.outputTokens.toLocaleString()}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.output_tokens')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.outputTokens.toLocaleString()}</td>,
       },
       {
         id: 'reasoning_tokens',
         label: t('usage_stats.reasoning_tokens'),
-        header: <th className={styles.requestEventsReasoningHeader}>{t('usage_stats.reasoning_tokens')}</th>,
-        renderCell: (row) => <td>{row.reasoningTokens.toLocaleString()}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.reasoning_tokens')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.reasoningTokens.toLocaleString()}</td>,
       },
       {
         id: 'cached_tokens',
         label: t('usage_stats.cached_tokens'),
-        header: <th>{t('usage_stats.cached_tokens')}</th>,
-        renderCell: (row) => <td>{row.cachedTokens.toLocaleString()}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.cached_tokens')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.cachedTokens.toLocaleString()}</td>,
       },
       {
         id: 'cache_rate',
         label: t('usage_stats.cache_rate'),
-        header: <th>{t('usage_stats.cache_rate')}</th>,
-        renderCell: (row) => <td>{row.cacheRate}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.cache_rate')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.cacheRate}</td>,
       },
       {
         id: 'total_tokens',
         label: t('usage_stats.total_tokens'),
-        header: <th>{t('usage_stats.total_tokens')}</th>,
-        renderCell: (row) => <td>{row.totalTokens.toLocaleString()}</td>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.total_tokens')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.totalTokens.toLocaleString()}</td>,
       },
       {
         id: 'total_cost',
         label: t('usage_stats.total_cost'),
-        header: <th>{t('usage_stats.total_cost')}</th>,
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.total_cost')}</th>,
         renderCell: (row) => (
-          <td title={row.costAvailable ? undefined : t('usage_stats.cost_need_price')}>
+          <td className={styles.requestEventsNoWrapCell} title={row.costAvailable ? undefined : t('usage_stats.cost_need_price')}>
             {row.costAvailable && row.cost !== null ? formatUsd(row.cost) : '-'}
           </td>
         ),
