@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, normalizeUsageTabValue, openDateInputPicker, refreshPageData, sanitizeRequestEventFilters, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
+import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
+import { REQUEST_EVENT_COLUMN_IDS } from '@/components/usage/RequestEventsDetailsCard';
 import type { StatusResponse, UsageFilterWindow } from '@/lib/types';
 
 const createAutoRefreshTestDocument = (visibilityState: DocumentVisibilityState = 'visible') => {
@@ -28,6 +29,17 @@ const createStatusResponse = (lastError = '', quotaAutoRefreshEnabled = true): S
 const flushPromises = async () => {
   await Promise.resolve();
   await Promise.resolve();
+};
+
+const createMemoryStorage = (seed: Record<string, string> = {}) => {
+  const values = new Map(Object.entries(seed));
+  return {
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+    value: (key: string) => values.get(key),
+  };
 };
 
 afterEach(() => {
@@ -350,6 +362,27 @@ describe('UsagePage active tab auto-refresh guard', () => {
 });
 
 describe('UsagePage request event filters', () => {
+  it('keeps restored model and source filters until backend filter options load', () => {
+    const next = sanitizeRequestEventFilters(
+      {
+        model: 'claude-opus',
+        source: 'authidx-source-b',
+        result: 'failed',
+      },
+      {
+        models: [],
+        sources: [],
+      },
+      false,
+    );
+
+    expect(next).toEqual({
+      model: 'claude-opus',
+      source: 'authidx-source-b',
+      result: 'failed',
+    });
+  });
+
   it('clears model and source filters that are no longer available', () => {
     const next = sanitizeRequestEventFilters(
       {
@@ -387,6 +420,126 @@ describe('UsagePage request event filters', () => {
       model: 'claude-sonnet',
       source: 'authidx-source-a',
       result: 'success',
+    });
+  });
+});
+
+describe('UsagePage request event preferences', () => {
+  it('normalizes persisted filters, page size, and visible columns', () => {
+    const preferences = normalizeRequestEventsPreferences({
+      version: 1,
+      pageSize: 500,
+      filters: {
+        model: 'claude-opus',
+        source: 'authidx-source-b',
+        result: 'failed',
+      },
+      visibleColumnIds: ['model', 'timestamp', 'model', 'not-a-column', 'total_cost'],
+    });
+
+    expect(preferences).toEqual({
+      version: 1,
+      pageSize: 500,
+      filters: {
+        model: 'claude-opus',
+        source: 'authidx-source-b',
+        result: 'failed',
+      },
+      visibleColumnIds: ['model', 'timestamp', 'total_cost'],
+    });
+  });
+
+  it('falls back safely for damaged persisted request event preferences', () => {
+    const preferences = normalizeRequestEventsPreferences({
+      version: 1,
+      pageSize: 999,
+      filters: {
+        model: 42,
+        source: '',
+        result: 'maybe',
+      },
+      visibleColumnIds: ['not-a-column'],
+    });
+
+    expect(preferences.pageSize).toBe(100);
+    expect(preferences.filters).toEqual({
+      model: '__all__',
+      source: '__all__',
+      result: '__all__',
+    });
+    expect(preferences.visibleColumnIds[0]).toBe('timestamp');
+    expect(preferences.visibleColumnIds.length).toBeGreaterThan(1);
+  });
+
+  it('keeps persisted request event columns unchanged when Speed is absent', () => {
+    const columnIdsWithoutSpeed = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'speed');
+    const preferences = normalizeRequestEventsPreferences({
+      version: 1,
+      pageSize: 100,
+      visibleColumnIds: columnIdsWithoutSpeed,
+    });
+
+    expect(preferences.visibleColumnIds).toEqual(columnIdsWithoutSpeed);
+    expect(preferences.visibleColumnIds).not.toContain('speed');
+  });
+
+  it('preserves a saved preference that intentionally hides Speed', () => {
+    const storage = createMemoryStorage();
+    const hiddenSpeedColumnIds = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'speed');
+
+    saveRequestEventsPreferences({
+      version: 1,
+      pageSize: 100,
+      filters: {
+        model: '__all__',
+        source: '__all__',
+        result: '__all__',
+      },
+      visibleColumnIds: hiddenSpeedColumnIds,
+    }, storage);
+
+    const stored = JSON.parse(storage.value(REQUEST_EVENTS_PREFERENCES_STORAGE_KEY) ?? '');
+    expect(stored).toEqual({
+      version: 1,
+      pageSize: 100,
+      filters: {
+        model: '__all__',
+        source: '__all__',
+        result: '__all__',
+      },
+      visibleColumnIds: hiddenSpeedColumnIds,
+    });
+    expect(loadRequestEventsPreferences(storage).visibleColumnIds).toEqual(hiddenSpeedColumnIds);
+  });
+
+  it('loads defaults from invalid JSON and persists normalized request event preferences', () => {
+    const storage = createMemoryStorage({
+      [REQUEST_EVENTS_PREFERENCES_STORAGE_KEY]: '{bad json',
+    });
+
+    expect(loadRequestEventsPreferences(storage).pageSize).toBe(100);
+
+    saveRequestEventsPreferences({
+      version: 1,
+      pageSize: 50,
+      filters: {
+        model: 'gpt-4.1',
+        source: 'source-a',
+        result: 'success',
+      },
+      visibleColumnIds: ['timestamp', 'timestamp', 'model'],
+    }, storage);
+
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(storage.value(REQUEST_EVENTS_PREFERENCES_STORAGE_KEY) ?? '')).toEqual({
+      version: 1,
+      pageSize: 50,
+      filters: {
+        model: 'gpt-4.1',
+        source: 'source-a',
+        result: 'success',
+      },
+      visibleColumnIds: ['timestamp', 'model'],
     });
   });
 });

@@ -415,9 +415,11 @@ describe('fetchUsageEvents', () => {
         running: true,
         completed: false,
         normal: 1,
+        limit_reached: 0,
         unauthorized_401: 0,
         payment_required_402: 0,
         other_failed: 0,
+        unknown: 1,
         results: [{ auth_index: 'auth-1', name: 'Claude Main', type: 'claude', file_name: 'claude-user.json', provider: 'claude', status: 'normal', refreshed_at: '2026-06-03T10:30:00Z' }],
       }),
     } as Response);
@@ -446,9 +448,11 @@ describe('fetchUsageEvents', () => {
         running: true,
         completed: false,
         normal: 0,
+        limit_reached: 0,
         unauthorized_401: 0,
         payment_required_402: 0,
         other_failed: 0,
+        unknown: 2,
         results: [],
       }),
     } as Response);

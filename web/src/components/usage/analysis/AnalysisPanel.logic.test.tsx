@@ -120,6 +120,7 @@ const emptyAnalysis: AnalysisResponse = {
   model_efficiency: [],
   heatmap: {
     api_keys: [],
+    api_key_labels: {},
     models: [],
     cells: [],
   },
@@ -239,6 +240,7 @@ describe('AnalysisPanel token chart data', () => {
   it('renders cost breakdown with total beside blended rate, segment percentages and sparkline', () => {
     const analysis: AnalysisResponse = {
       ...emptyAnalysis,
+      timezone: 'Asia/Shanghai',
       token_usage: [{
         bucket: '2026-05-28T01:00:00Z',
         input_tokens: 1_000_000,
@@ -274,8 +276,18 @@ describe('AnalysisPanel token chart data', () => {
     expect(markup).toContain('background-color:#d97706');
     expect(markup).not.toContain('filter:saturate');
     expect(markup).toContain('usage_stats.analysis_cost_share: 16.67%');
+    expect(markup).toContain('usage_stats.input_tokens · usage_stats.analysis_cost_share');
+    expect(markup).not.toContain('title="usage_stats.input_tokens · usage_stats.analysis_cost_share');
     expect(markup).toContain('usage_stats.analysis_cost_per_million_tokens: $4.00');
     expect(markup).toContain('usage_stats.total_tokens: 500.00K');
+    expect(markup).toContain('usage_stats.analysis_cost_rate_sparkline_hint');
+    expect(markup).toContain('usage_stats.analysis_cost_per_million_tokens: $2.00');
+    expect(markup).toContain('usage_stats.total_cost: $6.00');
+    expect(markup).toContain('usage_stats.total_tokens: 3.00M');
+    expect(chartCapture.barData?.labels).toEqual(['09:00']);
+    expect(markup).toContain('aria-label="09:00, usage_stats.analysis_cost_per_million_tokens: $2.00, usage_stats.total_cost: $6.00, usage_stats.total_tokens: 3.00M"');
+    expect(markup).toContain('class="_costRateSparkBar_');
+    expect(markup).toContain('tabindex="0"');
     expect(markup).toContain('$6.00');
     expect(markup).toContain('$2.00');
     expect(markup).toContain('16.67%');
@@ -458,7 +470,92 @@ describe('AnalysisPanel token chart data', () => {
     ]);
   });
 
-  it('does not plot unavailable cost as zero in token and model efficiency charts', () => {
+  it('keeps partial cost values visible and shows pricing hints near analysis charts', () => {
+    const analysis: AnalysisResponse = {
+      ...emptyAnalysis,
+      token_usage: [{
+        bucket: '2026-05-28T01:00:00Z',
+        input_tokens: 1000,
+        output_tokens: 100,
+        cached_tokens: 0,
+        reasoning_tokens: 0,
+        total_tokens: 1100,
+        requests: 3,
+        cost_usd: 0,
+        cost_available: false,
+      }],
+      api_key_composition: [{
+        key: 'unpriced-key',
+        label: 'Unpriced Key',
+        requests: 3,
+        input_tokens: 1000,
+        output_tokens: 100,
+        cached_tokens: 0,
+        reasoning_tokens: 0,
+        total_tokens: 1100,
+        percent: 100,
+        cost_usd: 0,
+        cost_available: false,
+      }],
+      model_efficiency: [{
+        model: 'unpriced-model',
+        requests: 3,
+        input_tokens: 1000,
+        output_tokens: 100,
+        cached_tokens: 0,
+        reasoning_tokens: 0,
+        total_tokens: 1_000_000,
+        cost_usd: 0,
+        cost_available: false,
+        cost_per_request_usd: 0,
+        output_tokens_per_request: 33.33,
+        cache_rate: 0,
+      }],
+      cost_breakdown: {
+        input_cost_usd: 0,
+        output_cost_usd: 0,
+        cached_cost_usd: 0,
+        total_cost_usd: 0,
+        cost_available: false,
+      },
+      heatmap: {
+        api_keys: ['unpriced-key'],
+        api_key_labels: { 'unpriced-key': 'Unpriced Key' },
+        models: ['unpriced-model'],
+        cells: [{
+          api_key: 'unpriced-key',
+          model: 'unpriced-model',
+          input_tokens: 1000,
+          output_tokens: 100,
+          cached_tokens: 0,
+          reasoning_tokens: 0,
+          total_tokens: 1100,
+          requests: 3,
+          cost_usd: 0,
+          cost_available: false,
+          intensity: 1,
+        }],
+      },
+    };
+
+    const markup = renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
+
+    const costDataset = chartCapture.barData?.datasets.find((dataset) => dataset.label === 'usage_stats.total_cost');
+    expect(costDataset?.data).toEqual([0]);
+    expect(chartCapture.scatterData).toBeNull();
+    expect(markup).toMatch(/Unpriced Key[\s\S]*\$0\.0000/);
+    expect(markup).toContain('usage_stats.cost_need_price');
+    expect(markup).toContain('<div class="_cardTitleLine_');
+    expect(markup).toContain('<h2>usage_stats.analysis_token_usage_title</h2><small class="_costHeaderHint_');
+    expect(markup).toContain('</small></div><p>usage_stats.analysis_token_usage_subtitle</p>');
+    expect(markup).not.toContain('usage_stats.analysis_token_usage_subtitle (usage_stats.cost_need_price)');
+    expect(markup.match(/costHeaderHint/g)?.length).toBe(5);
+    expect(markup).not.toContain('costWarning');
+    expect(markup).toContain('usage_stats.analysis_cost_per_million_tokens</span><strong>$0.0000</strong>');
+    expect(markup).toContain('usage_stats.total_cost: $0.0000');
+  });
+
+  it('keeps partially priced cost breakdown rates visible under the card-level pricing hint', () => {
     const analysis: AnalysisResponse = {
       ...emptyAnalysis,
       token_usage: [{
@@ -472,20 +569,6 @@ describe('AnalysisPanel token chart data', () => {
         cost_usd: 9,
         cost_available: false,
       }],
-      model_efficiency: [{
-        model: 'unpriced-model',
-        requests: 3,
-        input_tokens: 1000,
-        output_tokens: 100,
-        cached_tokens: 0,
-        reasoning_tokens: 0,
-        total_tokens: 1100,
-        cost_usd: 0,
-        cost_available: false,
-        cost_per_request_usd: 0,
-        output_tokens_per_request: 33.33,
-        cache_rate: 0,
-      }],
       cost_breakdown: {
         input_cost_usd: 9,
         output_cost_usd: 0,
@@ -498,21 +581,27 @@ describe('AnalysisPanel token chart data', () => {
     const markup = renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
 
     const costDataset = chartCapture.barData?.datasets.find((dataset) => dataset.label === 'usage_stats.total_cost');
-    expect(costDataset?.data).toEqual([null]);
-    expect(chartCapture.scatterData).toBeNull();
+    expect(costDataset?.data).toEqual([9]);
+    expect(markup).toContain('<h2>usage_stats.analysis_cost_breakdown_title</h2><small class="_costHeaderHint_');
     expect(markup).toContain('usage_stats.cost_need_price');
-    expect(markup).toContain('usage_stats.analysis_cost_per_million_tokens</span><strong>usage_stats.cost_need_price</strong>');
-    expect(markup).not.toContain('$8,181.82');
+    expect(markup).toContain('usage_stats.total_cost</span><strong>$9.00</strong>');
+    expect(markup).toContain('usage_stats.analysis_cost_per_million_tokens</span><strong>$8,181.82</strong>');
+    expect(markup).not.toContain('usage_stats.analysis_cost_per_million_tokens</span><strong>usage_stats.cost_need_price</strong>');
+    expect(markup).not.toContain('costWarning');
   });
 
-  it('shows compact heatmap cells with detailed tooltip data', () => {
+  it('shows compact heatmap cells with id keys and display labels', () => {
+    const responseKey = '9007199254740993';
     const analysis: AnalysisResponse = {
       ...emptyAnalysis,
       heatmap: {
-        api_keys: ['Primary Key'],
+        api_keys: [responseKey],
+        api_key_labels: {
+          [responseKey]: 'Primary Key',
+        },
         models: ['claude-3-7-sonnet-20250219-long-context'],
         cells: [{
-          api_key: 'Primary Key',
+          api_key: responseKey,
           model: 'claude-3-7-sonnet-20250219-long-context',
           input_tokens: 1000,
           output_tokens: 200,
@@ -530,7 +619,11 @@ describe('AnalysisPanel token chart data', () => {
     const markup = renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
 
     expect(markup).toContain('1.33K');
-    expect(markup).toContain('title="claude-3-7-sonnet-20250219-long-context"');
+    expect(markup).toContain('Primary Key');
+    expect(markup).not.toContain(responseKey);
+    expect(markup).toContain('data-full-name="claude-3-7-sonnet-20250219-long-context"');
+    expect(markup).toContain('aria-label="claude-3-7-sonnet-20250219-long-context"');
+    expect(markup).not.toContain('title="claude-3-7-sonnet-20250219-long-context"');
     expect(markup).toContain('usage_stats.requests_count');
     expect(markup).toContain('usage_stats.input_tokens');
     expect(markup).toContain('usage_stats.reasoning_tokens');

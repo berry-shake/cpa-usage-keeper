@@ -99,7 +99,7 @@ type analysisModelEfficiency struct {
 }
 
 type analysisAPIKeyInfo struct {
-	ID    int64
+	ID    string
 	Label string
 }
 
@@ -156,7 +156,10 @@ func loadCPAAPIKeyInfos(c *gin.Context, provider service.CPAAPIKeyProvider) (map
 	}
 	infos := make(map[string]analysisAPIKeyInfo, len(rows))
 	for _, row := range rows {
-		infos[row.APIKey] = analysisAPIKeyInfo{ID: row.ID, Label: helper.CPAAPIKeyDisplayName(row)}
+		infos[row.APIKey] = analysisAPIKeyInfo{
+			ID:    strconv.FormatInt(row.ID, 10),
+			Label: helper.CPAAPIKeyDisplayName(row),
+		}
 	}
 	return infos, nil
 }
@@ -242,8 +245,9 @@ func buildAnalysisCompositionPayload(items []servicedto.AnalysisCompositionItem,
 }
 
 func analysisAPIKeyResponseKey(apiKey string, apiKeyInfos map[string]analysisAPIKeyInfo) string {
-	if info, ok := apiKeyInfos[apiKey]; ok && info.ID > 0 {
-		return strconv.FormatInt(info.ID, 10)
+	// Analysis 的结构标识使用 CPA API Key id，展示文案独立走别名/脱敏 key，避免脱敏值碰撞。
+	if info, ok := apiKeyInfos[apiKey]; ok && info.ID != "" {
+		return info.ID
 	}
 	return helper.RedactSensitiveValue(apiKey)
 }

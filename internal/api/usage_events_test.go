@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -76,10 +77,10 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		Source:              "sk-provider-key",
 		AuthIndex:           "2",
 		Failed:              false,
-		LatencyMS:           321,
+		LatencyMS:           2045,
 		TTFTMS:              usageEventInt64Ptr(45),
 		InputTokens:         10,
-		OutputTokens:        5,
+		OutputTokens:        61,
 		ReasoningTokens:     2,
 		CachedTokens:        1,
 		CacheReadTokens:     3,
@@ -131,6 +132,9 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	}
 	if !contains(body, `"ttft_ms":45`) {
 		t.Fatalf("expected ttft_ms in response body: %s", body)
+	}
+	if !contains(body, `"speed_tps":29`) {
+		t.Fatalf("expected speed_tps in response body: %s", body)
 	}
 	if !contains(body, `"executor_type":"responses"`) {
 		t.Fatalf("expected executor_type in response body: %s", body)
@@ -526,6 +530,81 @@ func TestUsageEventModelFilterOptionsReturnsStableModels(t *testing.T) {
 	}
 }
 
+func TestUsageEventSpeedTPS(t *testing.T) {
+	tests := []struct {
+		name string
+		row  servicedto.UsageEventRecord
+		want *float64
+	}{
+		{
+			name: "uses output tokens after first token over generation duration",
+			row: servicedto.UsageEventRecord{
+				LatencyMS:    2045,
+				TTFTMS:       usageEventInt64Ptr(45),
+				OutputTokens: 61,
+			},
+			want: usageEventFloat64Ptr(30),
+		},
+		{
+			name: "uses visible output tokens after first token over generation duration",
+			row: servicedto.UsageEventRecord{
+				LatencyMS:       2045,
+				TTFTMS:          usageEventInt64Ptr(45),
+				OutputTokens:    61,
+				ReasoningTokens: 2,
+			},
+			want: usageEventFloat64Ptr(29),
+		},
+		{
+			name: "omits speed without ttft",
+			row: servicedto.UsageEventRecord{
+				LatencyMS:    2045,
+				OutputTokens: 61,
+			},
+		},
+		{
+			name: "omits speed when latency does not exceed ttft",
+			row: servicedto.UsageEventRecord{
+				LatencyMS:    45,
+				TTFTMS:       usageEventInt64Ptr(45),
+				OutputTokens: 61,
+			},
+		},
+		{
+			name: "omits speed when only first token is present",
+			row: servicedto.UsageEventRecord{
+				LatencyMS:    2045,
+				TTFTMS:       usageEventInt64Ptr(45),
+				OutputTokens: 1,
+			},
+		},
+		{
+			name: "omits speed when only first visible token is present",
+			row: servicedto.UsageEventRecord{
+				LatencyMS:       2045,
+				TTFTMS:          usageEventInt64Ptr(45),
+				OutputTokens:    4,
+				ReasoningTokens: 3,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := usageEventSpeedTPS(tc.row)
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("expected nil speed, got %v", *got)
+				}
+				return
+			}
+			if got == nil || math.Abs(*got-*tc.want) > 0.000001 {
+				t.Fatalf("expected speed %.6f, got %v", *tc.want, got)
+			}
+		})
+	}
+}
+
 func TestUsageEventSourceFilterOptionsReturnsIdentitySources(t *testing.T) {
 	provider := &usageEventsStub{}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{ID: 1, Name: "Claude Main", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-a", Type: "openai", Provider: "Provider A", TotalRequests: 3}, {ID: 2, Name: "Provider A", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-b", Type: "openai", Provider: "Provider A"}, {ID: 3, Name: "Auth User", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "auth-1", Type: "claude", Provider: "Claude", TotalRequests: 2}, {ID: 4, Name: "Zero Request User", AuthType: entities.UsageIdentityAuthTypeAuthFile, AuthTypeName: "oauth", Identity: "auth-zero", Type: "claude", Provider: "Claude"}, {ID: 5, Name: "Zero Provider", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-source-zero", Type: "openai", Provider: "Zero Provider"}, {ID: 6, Name: "Deleted Source", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "authidx-deleted", Type: "openai", Provider: "Deleted Provider", TotalRequests: 5, IsDeleted: true}}}})
@@ -900,5 +979,9 @@ func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 }
 
 func usageEventInt64Ptr(value int64) *int64 {
+	return &value
+}
+
+func usageEventFloat64Ptr(value float64) *float64 {
 	return &value
 }

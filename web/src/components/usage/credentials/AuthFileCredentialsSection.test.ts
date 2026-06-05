@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { AuthFileQuotaPanel, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, isInspectionStartDisabled } from './AuthFileCredentialsSection'
+import { AuthFileCredentialsSection, AuthFileQuotaPanel, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, isInspectionStartDisabled } from './AuthFileCredentialsSection'
 import type { AuthFileCredentialRow, DisplayQuota } from './credentialViewModels'
 
 vi.mock('react-i18next', () => ({
@@ -41,6 +41,39 @@ describe('AuthFileCredentialsSection quota reset formatting', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('AuthFileCredentialsSection title', () => {
+  it('renders the Auth Files title without the Credentials eyebrow', () => {
+    const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, {
+      rows: [],
+      total: 0,
+      page: 1,
+      totalPages: 1,
+      pageSize: 10,
+      activeOnly: false,
+      sort: 'priority',
+      loading: false,
+      quotaRefreshing: false,
+      quotaRefreshError: '',
+      quotaAutoRefreshEnabled: false,
+      quotaInspectionStatus: null,
+      quotaInspectionLoading: false,
+      quotaInspectionStarting: false,
+      quotaInspectionError: '',
+      onPageChange: () => undefined,
+      onPageSizeChange: () => undefined,
+      onActiveOnlyChange: () => undefined,
+      onSortChange: () => undefined,
+      onRefreshQuota: async () => undefined,
+      onRefreshQuotaForAuthIndex: async () => undefined,
+      onRefreshInspectionStatus: async () => undefined,
+      onStartInspection: async () => undefined,
+    }))
+
+    expect(html).toContain('usage_stats.credentials_auth_files_title')
+    expect(html).not.toContain('usage_stats.credentials_auth_files_eyebrow')
   })
 })
 
@@ -192,10 +225,11 @@ describe('AuthFileCredentialsSection quota error display', () => {
 })
 
 describe('AuthFileCredentialsSection inspection controls', () => {
-  it('calculates progress from cached quota results and total active auth files', () => {
-    expect(formatInspectionProgressPercent({ total: 5, cached: 2 })).toBe(40)
-    expect(formatInspectionProgressPercent({ total: 0, cached: 2 })).toBe(0)
-    expect(formatInspectionProgressPercent({ total: 5, cached: 9 })).toBe(100)
+  it('calculates progress from cached quota results and inspectable auth files', () => {
+    expect(formatInspectionProgressPercent({ total: 5, cached: 2, unknown: 1 })).toBe(50)
+    expect(formatInspectionProgressPercent({ total: 5, cached: 2, unknown: 3 })).toBe(100)
+    expect(formatInspectionProgressPercent({ total: 0, cached: 2, unknown: 0 })).toBe(0)
+    expect(formatInspectionProgressPercent({ total: 5, cached: 9, unknown: 1 })).toBe(100)
   })
 
   it('disables manual inspection while auto refresh or an inspection round is active', () => {
@@ -208,7 +242,8 @@ describe('AuthFileCredentialsSection inspection controls', () => {
 
   it('uses running and completed status dots for the Auth Files inspection button', () => {
     expect(inspectionIndicatorTone({ running: true, completed: false })).toBe('running')
-    expect(inspectionIndicatorTone({ running: false, completed: true })).toBe('completed')
+    expect(inspectionIndicatorTone({ running: false, completed: true, completed_at: '2026-06-03T10:30:00Z' })).toBe('completed')
+    expect(inspectionIndicatorTone({ running: false, completed: true })).toBe('idle')
     expect(inspectionIndicatorTone(null)).toBe('idle')
   })
 

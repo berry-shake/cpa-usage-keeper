@@ -329,7 +329,12 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 }
 
 type usageEventTypeResolver struct {
-	byAuthIndex map[string]string
+	byIdentity map[usageEventIdentityKey]string
+}
+
+type usageEventIdentityKey struct {
+	authType entities.UsageIdentityAuthType
+	identity string
 }
 
 func normalizeRedisUsageEvents(ctx context.Context, db *gorm.DB, events []entities.UsageEvent) ([]entities.UsageEvent, error) {
@@ -354,21 +359,21 @@ func normalizeRedisUsageEvents(ctx context.Context, db *gorm.DB, events []entiti
 }
 
 func buildUsageEventTypeResolver(ctx context.Context, db *gorm.DB, events []entities.UsageEvent) (usageEventTypeResolver, error) {
-	resolver := usageEventTypeResolver{byAuthIndex: map[string]string{}}
-	authIndexes := redisUsageAPIKeyAuthIndexes(events)
-	if len(authIndexes) == 0 {
+	resolver := usageEventTypeResolver{byIdentity: map[usageEventIdentityKey]string{}}
+	keys := redisUsageIdentityKeys(events)
+	if len(keys) == 0 {
 		return resolver, nil
 	}
 	if db == nil {
 		return resolver, fmt.Errorf("database is nil")
 	}
-	activeRows, err := loadRedisUsageIdentityTypeRows(ctx, db, authIndexes, false)
+	activeRows, err := loadRedisUsageIdentityTypeRows(ctx, db, keys, false)
 	if err != nil {
 		return resolver, fmt.Errorf("load active usage identity types for redis usage: %w", err)
 	}
-	addRedisUsageIdentityTypes(resolver.byAuthIndex, activeRows)
+	addRedisUsageIdentityTypes(resolver.byIdentity, activeRows)
 
-	missing := missingRedisUsageAuthIndexes(authIndexes, resolver.byAuthIndex)
+	missing := missingRedisUsageIdentityKeys(keys, resolver.byIdentity)
 	if len(missing) == 0 {
 		return resolver, nil
 	}
@@ -376,77 +381,110 @@ func buildUsageEventTypeResolver(ctx context.Context, db *gorm.DB, events []enti
 	if err != nil {
 		return resolver, fmt.Errorf("load deleted usage identity types for redis usage: %w", err)
 	}
-	addRedisUsageIdentityTypes(resolver.byAuthIndex, deletedRows)
+	addRedisUsageIdentityTypes(resolver.byIdentity, deletedRows)
 	return resolver, nil
 }
 
-func loadRedisUsageIdentityTypeRows(ctx context.Context, db *gorm.DB, authIndexes []string, isDeleted bool) ([]entities.UsageIdentity, error) {
+// Redis usage payload 只有 auth_type/auth_index，这里按 keeper identity 类型批量查出真实 provider type。
+func loadRedisUsageIdentityTypeRows(ctx context.Context, db *gorm.DB, keys []usageEventIdentityKey, isDeleted bool) ([]entities.UsageIdentity, error) {
 	rows := make([]entities.UsageIdentity, 0)
-	for start := 0; start < len(authIndexes); start += redisUsageIdentityTypeLookupBatchSize {
-		end := start + redisUsageIdentityTypeLookupBatchSize
-		if end > len(authIndexes) {
-			end = len(authIndexes)
+	keysByAuthType := groupRedisUsageIdentityKeysByAuthType(keys)
+	for authType, identities := range keysByAuthType {
+		for start := 0; start < len(identities); start += redisUsageIdentityTypeLookupBatchSize {
+			end := start + redisUsageIdentityTypeLookupBatchSize
+			if end > len(identities) {
+				end = len(identities)
+			}
+			var batchRows []entities.UsageIdentity
+			// Redis inbox 单批最多可达 1000+ 条，SELECT IN 必须单独限批，避免 SQLite 变量上限导致整批反复 process_failed。
+			if err := db.WithContext(ctx).
+				Select("auth_type, identity, type, is_deleted").
+				Where("auth_type = ? AND identity IN ? AND is_deleted = ?", authType, identities[start:end], isDeleted).
+				Find(&batchRows).Error; err != nil {
+				return nil, err
+			}
+			rows = append(rows, batchRows...)
 		}
-		var batchRows []entities.UsageIdentity
-		// Redis inbox 单批最多可达 1000+ 条，SELECT IN 必须单独限批，避免 SQLite 变量上限导致整批反复 process_failed。
-		if err := db.WithContext(ctx).
-			Select("identity, type, is_deleted").
-			Where("auth_type = ? AND identity IN ? AND is_deleted = ?", entities.UsageIdentityAuthTypeAIProvider, authIndexes[start:end], isDeleted).
-			Find(&batchRows).Error; err != nil {
-			return nil, err
-		}
-		rows = append(rows, batchRows...)
 	}
 	return rows, nil
 }
 
-func addRedisUsageIdentityTypes(byAuthIndex map[string]string, rows []entities.UsageIdentity) {
+func addRedisUsageIdentityTypes(byIdentity map[usageEventIdentityKey]string, rows []entities.UsageIdentity) {
 	for _, row := range rows {
 		identity := strings.TrimSpace(row.Identity)
 		usageType := strings.TrimSpace(row.Type)
 		if identity != "" && usageType != "" {
-			byAuthIndex[identity] = usageType
+			byIdentity[usageEventIdentityKey{authType: row.AuthType, identity: identity}] = usageType
 		}
 	}
 }
 
-func redisUsageAPIKeyAuthIndexes(events []entities.UsageEvent) []string {
-	seen := make(map[string]struct{}, len(events))
-	authIndexes := make([]string, 0, len(events))
+func redisUsageIdentityKeys(events []entities.UsageEvent) []usageEventIdentityKey {
+	seen := make(map[usageEventIdentityKey]struct{}, len(events))
+	keys := make([]usageEventIdentityKey, 0, len(events))
 	for _, event := range events {
-		if normalizeRedisAuthType(event.AuthType) != "apikey" {
-			continue
-		}
 		authIndex := strings.TrimSpace(event.AuthIndex)
 		if authIndex == "" {
 			continue
 		}
-		if _, ok := seen[authIndex]; ok {
+		authType, ok := redisUsageIdentityAuthType(event.AuthType)
+		if !ok {
 			continue
 		}
-		seen[authIndex] = struct{}{}
-		authIndexes = append(authIndexes, authIndex)
+		key := usageEventIdentityKey{authType: authType, identity: authIndex}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
 	}
-	return authIndexes
+	return keys
 }
 
-func missingRedisUsageAuthIndexes(authIndexes []string, byAuthIndex map[string]string) []string {
-	missing := make([]string, 0)
-	for _, authIndex := range authIndexes {
-		if _, ok := byAuthIndex[authIndex]; ok {
+func redisUsageIdentityAuthType(authType string) (entities.UsageIdentityAuthType, bool) {
+	switch normalizeRedisAuthType(authType) {
+	case "oauth":
+		return entities.UsageIdentityAuthTypeAuthFile, true
+	case "apikey":
+		return entities.UsageIdentityAuthTypeAIProvider, true
+	default:
+		return 0, false
+	}
+}
+
+func groupRedisUsageIdentityKeysByAuthType(keys []usageEventIdentityKey) map[entities.UsageIdentityAuthType][]string {
+	grouped := make(map[entities.UsageIdentityAuthType][]string)
+	for _, key := range keys {
+		grouped[key.authType] = append(grouped[key.authType], key.identity)
+	}
+	return grouped
+}
+
+func missingRedisUsageIdentityKeys(keys []usageEventIdentityKey, byIdentity map[usageEventIdentityKey]string) []usageEventIdentityKey {
+	missing := make([]usageEventIdentityKey, 0)
+	for _, key := range keys {
+		if _, ok := byIdentity[key]; ok {
 			continue
 		}
-		missing = append(missing, authIndex)
+		missing = append(missing, key)
 	}
 	return missing
 }
 
+// OAuth 优先信任已同步的 auth file type；查不到时再沿用历史 provider 兜底。
 func resolveUsageEventType(event entities.UsageEvent, resolver usageEventTypeResolver) string {
 	switch normalizeRedisAuthType(event.AuthType) {
 	case "oauth":
+		if authIndex := strings.TrimSpace(event.AuthIndex); authIndex != "" {
+			key := usageEventIdentityKey{authType: entities.UsageIdentityAuthTypeAuthFile, identity: authIndex}
+			if usageType := strings.TrimSpace(resolver.byIdentity[key]); usageType != "" {
+				return usageType
+			}
+		}
 		return strings.TrimSpace(event.Provider)
 	case "apikey":
-		return strings.TrimSpace(resolver.byAuthIndex[strings.TrimSpace(event.AuthIndex)])
+		key := usageEventIdentityKey{authType: entities.UsageIdentityAuthTypeAIProvider, identity: strings.TrimSpace(event.AuthIndex)}
+		return strings.TrimSpace(resolver.byIdentity[key])
 	default:
 		return "openai"
 	}

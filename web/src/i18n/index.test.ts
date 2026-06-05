@@ -61,10 +61,13 @@ describe('i18n resources', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_per_million_tokens')).toBe('Cost / 1M Tokens');
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_blended_rate')).toBe('Blended Rate');
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_share')).toBe('Cost Share');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_rate_sparkline_hint')).toBe('Recent Cost / 1M Tokens by time bucket');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_blended_rate')).toBe('混合费率');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_cost_share')).toBe('成本占比');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_cost_rate_sparkline_hint')).toBe('按时间桶展示最近的每 1M Token 成本');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_blended_rate')).toBe('混合費率');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_cost_share')).toBe('成本占比');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_cost_rate_sparkline_hint')).toBe('按時間桶顯示最近的每 1M Token 成本');
   });
 
   it('removes obsolete Analysis API and model stats labels', () => {
@@ -102,6 +105,18 @@ describe('i18n resources', () => {
       expect(i18n.getResource(language, 'translation', 'usage_stats.credentials_inspection_401')).toBe('401');
       expect(i18n.getResource(language, 'translation', 'usage_stats.credentials_inspection_402')).toBe('402');
     }
+  });
+
+  it('labels unknown Auth Files inspection results in every language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_inspection_unknown')).toBe('Unknown');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_inspection_unknown')).toBe('未知');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_inspection_unknown')).toBe('未知');
+  });
+
+  it('labels reached-limit Auth Files inspection results in every language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_inspection_limit_reached')).toBe('Limit reached');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_inspection_limit_reached')).toBe('达到限额');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_inspection_limit_reached')).toBe('達到限額');
   });
 
   it('keeps the login product title aligned across languages', () => {

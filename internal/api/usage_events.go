@@ -50,6 +50,7 @@ type usageEventPayload struct {
 	Failed          bool                   `json:"failed"`
 	LatencyMS       int64                  `json:"latency_ms"`
 	TTFTMS          *int64                 `json:"ttft_ms,omitempty"`
+	SpeedTPS        *float64               `json:"speed_tps,omitempty"`
 	Tokens          usageEventTokenPayload `json:"tokens"`
 	CostUSD         float64                `json:"cost_usd"`
 	CostAvailable   bool                   `json:"cost_available"`
@@ -174,6 +175,7 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 			Failed:          row.Failed,
 			LatencyMS:       row.LatencyMS,
 			TTFTMS:          row.TTFTMS,
+			SpeedTPS:        usageEventSpeedTPS(row),
 			CostUSD:         row.CostUSD,
 			CostAvailable:   row.CostAvailable,
 			PricingStyle:    strings.TrimSpace(row.PricingStyle),
@@ -189,6 +191,19 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 		})
 	}
 	return payload
+}
+
+func usageEventSpeedTPS(row servicedto.UsageEventRecord) *float64 {
+	visibleOutputTokens := row.OutputTokens - row.ReasoningTokens
+	if visibleOutputTokens < 0 {
+		visibleOutputTokens = 0
+	}
+	if row.TTFTMS == nil || *row.TTFTMS <= 0 || row.LatencyMS <= *row.TTFTMS || visibleOutputTokens <= 1 {
+		return nil
+	}
+	// Speed 只衡量首字后可见输出 token 的平均生成速度，避免把等待首字的时间重复计入。
+	speed := float64(visibleOutputTokens-1) / (float64(row.LatencyMS-*row.TTFTMS) / 1000)
+	return &speed
 }
 
 func usageEventAPIKeyLabel(apiGroupKey string, apiKeyInfos map[string]analysisAPIKeyInfo) string {

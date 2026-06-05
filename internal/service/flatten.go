@@ -8,7 +8,10 @@ import (
 )
 
 // NormalizeUsageEventTokens 是 Redis usage 入库前的唯一 token 口径归一化入口。
-// Decode 阶段只保留 CPA queue 原始字段，这里根据已解析出的 usage type 决定是否需要合并 cache read/write。
+// Keeper 统一按 Codex/OpenAI Responses 格式存储 token：input_tokens 包含 cached_tokens，
+// output_tokens 包含 reasoning_tokens；cached_tokens 和 reasoning_tokens 只是各自的明细子项。
+// 后续统计、成本和前端可见 token 展示都依赖这个统一口径：visible input = input - cached，
+// visible output = output - reasoning。
 func NormalizeUsageEventTokens(event entities.UsageEvent, usageType string) entities.UsageEvent {
 	tokens := normalizeUsageTokensByType(usageEventTokenStats(event), usageType)
 	event.InputTokens = tokens.InputTokens
@@ -37,12 +40,14 @@ func normalizeUsageTokensByType(tokens dto.TokenStats, usageType string) dto.Tok
 	switch strings.ToLower(strings.TrimSpace(usageType)) {
 	case "claude", "anthropic":
 		return normalizeClaudeTokens(tokens)
-	case "gemini", "vertex":
+	case "gemini", "vertex", "gemini-cli", "gemini-cli-code-assist", "aistudio", "ai-studio":
 		return normalizeGeminiTokens(tokens)
 	case "antigravity":
 		return normalizeAntigravityTokens(tokens)
 	case "kimi", "moonshot":
 		return normalizeKimiTokens(tokens)
+	case "xai":
+		return normalizeXAIStyleTokens(tokens)
 	case "openai", "openai-compatible", "openai_compatibility", "codex":
 		return normalizeOpenAIStyleTokens(tokens)
 	default:
@@ -52,40 +57,68 @@ func normalizeUsageTokensByType(tokens dto.TokenStats, usageType string) dto.Tok
 
 func normalizeClaudeTokens(tokens dto.TokenStats) dto.TokenStats {
 	tokens = clampTokenStats(tokens)
-	// Claude 的 input_tokens 不含 cache read/write；Keeper 的 input 统一表示总输入，所以在入库前合并。
+	// Claude 官方 input_tokens 不含 cache read/write；按 Codex 格式入库前合并为总 input。
 	tokens.InputTokens = tokens.InputTokens + tokens.CacheReadTokens + tokens.CacheCreationTokens
 	tokens.CachedTokens = tokens.CacheReadTokens
-	if tokens.TotalTokens == 0 {
-		tokens.TotalTokens = tokens.InputTokens + tokens.OutputTokens + tokens.ReasoningTokens
-	}
-	return tokens
+	return fillCodexStyleTotalTokens(tokens)
 }
 
 func normalizeOpenAIStyleTokens(tokens dto.TokenStats) dto.TokenStats {
 	tokens = clampTokenStats(tokens)
-	if tokens.TotalTokens == 0 {
-		tokens.TotalTokens = tokens.InputTokens + tokens.OutputTokens + tokens.ReasoningTokens
-	}
-	if tokens.TotalTokens == 0 {
-		tokens.TotalTokens = tokens.InputTokens + tokens.OutputTokens + tokens.ReasoningTokens + tokens.CachedTokens
-	}
-	return tokens
+	return fillCodexStyleTotalTokens(tokens)
 }
 
 func normalizeGeminiTokens(tokens dto.TokenStats) dto.TokenStats {
-	return normalizeOpenAIStyleTokens(tokens)
+	tokens = clampTokenStats(tokens)
+	// Gemini 家族的 CPA 原始映射是 output=candidatesTokenCount、reasoning=thoughtsTokenCount；
+	// Keeper 入库统一成 Codex 格式，因此 output 需要包含 thinking/reasoning。
+	if shouldFoldReasoningIntoOutput(tokens) {
+		tokens.OutputTokens += tokens.ReasoningTokens
+	}
+	return fillCodexStyleTotalTokens(tokens)
 }
 
 func normalizeAntigravityTokens(tokens dto.TokenStats) dto.TokenStats {
-	return normalizeOpenAIStyleTokens(tokens)
+	return normalizeGeminiTokens(tokens)
 }
 
 func normalizeKimiTokens(tokens dto.TokenStats) dto.TokenStats {
 	return normalizeOpenAIStyleTokens(tokens)
 }
 
+func normalizeXAIStyleTokens(tokens dto.TokenStats) dto.TokenStats {
+	tokens = clampTokenStats(tokens)
+	// xAI 当前由 CPA XAIExecutor 调用 /v1/responses，usage 是 OpenAI Responses 风格：
+	// input_tokens 已包含 input_tokens_details.cached_tokens，output_tokens 已包含 reasoning_tokens。
+	// 后续如果 xAI 切到其他 usage 口径，只需要收敛修改这个分支。
+	return fillCodexStyleTotalTokens(tokens)
+}
+
 func normalizeDefaultTokens(tokens dto.TokenStats) dto.TokenStats {
 	return normalizeOpenAIStyleTokens(tokens)
+}
+
+func shouldFoldReasoningIntoOutput(tokens dto.TokenStats) bool {
+	if tokens.ReasoningTokens <= 0 {
+		return false
+	}
+	if tokens.TotalTokens == 0 {
+		return true
+	}
+	if tokens.InputTokens+tokens.OutputTokens == tokens.TotalTokens {
+		return false
+	}
+	return tokens.InputTokens+tokens.OutputTokens+tokens.ReasoningTokens == tokens.TotalTokens
+}
+
+func fillCodexStyleTotalTokens(tokens dto.TokenStats) dto.TokenStats {
+	if tokens.TotalTokens == 0 {
+		tokens.TotalTokens = tokens.InputTokens + tokens.OutputTokens
+	}
+	if tokens.TotalTokens == 0 {
+		tokens.TotalTokens = tokens.CachedTokens
+	}
+	return tokens
 }
 
 func clampTokenStats(tokens dto.TokenStats) dto.TokenStats {

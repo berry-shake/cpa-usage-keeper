@@ -38,8 +38,8 @@
 
 .cardHeader {
   display: flex;
-  justify-content: space-between;
-  gap: 14px;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 16px;
 
   h2 {
@@ -50,10 +50,45 @@
   }
 
   p {
-    margin: 6px 0 0;
+    margin: 0;
     color: var(--text-secondary);
     font-size: 13px;
     line-height: 1.45;
+  }
+}
+
+.cardTitleLine {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+
+  h2 {
+    min-width: 0;
+  }
+
+  @include mobile {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+}
+
+.costHeaderHint {
+  flex: 0 1 180px;
+  align-self: flex-start;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: right;
+
+  @include mobile {
+    flex-basis: 100%;
+    max-width: 100%;
+    margin-top: 0;
+    text-align: left;
   }
 }
 
@@ -630,7 +665,9 @@
 }
 
 .heatmapRowLabel {
-  height: 24px;
+  height: 30px;
+  min-height: 30px;
+  align-self: center;
   display: flex;
   align-items: center;
   border: 0;

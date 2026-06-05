@@ -23,6 +23,7 @@ type authFileRefreshRoundSummary struct {
 	skippedRunning     int
 	skippedUnsupported int
 	queuedAuthIndexes  []string
+	roundAuthIndexes   []string
 }
 
 func (s *Service) RunAutoRefresh(ctx context.Context) error {
@@ -95,6 +96,7 @@ func (s *Service) queueAuthFileRefreshRound(ctx context.Context, now time.Time, 
 	summary := authFileRefreshRoundSummary{
 		scanned:           len(identities),
 		queuedAuthIndexes: make([]string, 0, len(identities)),
+		roundAuthIndexes:  make([]string, 0, len(identities)),
 	}
 	for _, identity := range identities {
 		authIndex := strings.TrimSpace(identity.Identity)
@@ -114,9 +116,14 @@ func (s *Service) queueAuthFileRefreshRound(ctx context.Context, now time.Time, 
 		if task, created := s.ensureRefreshTaskWithIdentity(authIndex, options.source, identity); created {
 			summary.queued++
 			summary.queuedAuthIndexes = append(summary.queuedAuthIndexes, task.AuthIndex)
+			summary.roundAuthIndexes = append(summary.roundAuthIndexes, task.AuthIndex)
 		} else if task != nil && task.isActive() {
 			// queued/running 已经代表这个 auth_index 在队列里，同一轮不能重复入队。
 			summary.skippedRunning++
+			if task.Source == options.source {
+				// 只有同来源的 active task 才能被当前轮次收养；巡检不能把手动/自动刷新算成巡检 running。
+				summary.roundAuthIndexes = append(summary.roundAuthIndexes, task.AuthIndex)
+			}
 		}
 	}
 	return summary, nil

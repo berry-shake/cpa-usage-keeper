@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -225,14 +226,67 @@ func TestUsageAnalysisUsesCPAAPIKeyOptionLabels(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	body := resp.Body.String()
+	maskedKey := helper.RedactSensitiveValue("sk-alpha123456")
 	if !contains(body, `"key":"1"`) || !contains(body, `"label":"Primary Key"`) || !contains(body, `"api_key":"1"`) || !contains(body, `"api_key_labels":{"1":"Primary Key"}`) {
 		t.Fatalf("expected analysis payload to use CPA API key id and display label, got %s", body)
 	}
-	if contains(body, "sk-alpha123456") {
-		t.Fatalf("expected raw key value to stay hidden when a CPA key label exists, got %s", body)
+	if contains(body, "sk-alpha123456") || contains(body, maskedKey) {
+		t.Fatalf("expected raw key and fallback redacted label to stay hidden when a CPA key alias exists, got %s", body)
 	}
 	if provider.lastFilter.APIKeyID != "1" {
 		t.Fatalf("expected API key id to pass into usage filter, got %+v", provider.lastFilter)
+	}
+}
+
+func TestUsageAnalysisUsesCPAAPIKeyIDsForCollidingDisplayKeys(t *testing.T) {
+	bucket := time.Date(2026, 4, 22, 10, 0, 0, 0, time.Local)
+	provider := &usageAnalysisStub{analysis: &servicedto.AnalysisSnapshot{
+		Granularity: servicedto.AnalysisGranularityHourly,
+		TokenUsage:  []servicedto.AnalysisTokenUsageBucket{{Bucket: bucket, TotalTokens: 300, Requests: 3}},
+		APIKeyComposition: []servicedto.AnalysisCompositionItem{
+			{Key: "sk-alpha123456", TotalTokens: 100, Requests: 1},
+			{Key: "sk-bravo123456", TotalTokens: 200, Requests: 2},
+		},
+		ModelComposition: []servicedto.AnalysisCompositionItem{{Key: "claude-sonnet", TotalTokens: 300, Requests: 3}},
+		Heatmap: []servicedto.AnalysisHeatmapCell{
+			{APIKey: "sk-alpha123456", Model: "claude-sonnet", TotalTokens: 100, Requests: 1},
+			{APIKey: "sk-bravo123456", Model: "claude-sonnet", TotalTokens: 200, Requests: 2},
+		},
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{CPAAPIKeys: usageAnalysisAPIKeyStub{rows: []entities.CPAAPIKey{
+		{ID: 1, APIKey: "sk-alpha123456", DisplayKey: "sk-*********123456", KeyAlias: "Primary Key"},
+		{ID: 2, APIKey: "sk-bravo123456", DisplayKey: "sk-*********123456"},
+	}}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/analysis?range=24h", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	var payload analysisResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode analysis response: %v", err)
+	}
+	if len(payload.APIKeyComposition) != 2 || payload.APIKeyComposition[0].Key != "1" || payload.APIKeyComposition[1].Key != "2" {
+		t.Fatalf("expected API key composition to use ids, got %+v", payload.APIKeyComposition)
+	}
+	if payload.APIKeyComposition[0].Label != "Primary Key" || payload.APIKeyComposition[1].Label != "sk-*********123456" {
+		t.Fatalf("expected API key composition labels to use alias first then redacted key, got %+v", payload.APIKeyComposition)
+	}
+	if len(payload.Heatmap.APIKeys) != 2 || payload.Heatmap.APIKeys[0] != "2" || payload.Heatmap.APIKeys[1] != "1" {
+		t.Fatalf("expected heatmap API keys to use ids sorted by requests, got %+v", payload.Heatmap.APIKeys)
+	}
+	if payload.Heatmap.APIKeyLabels["1"] != "Primary Key" || payload.Heatmap.APIKeyLabels["2"] != "sk-*********123456" {
+		t.Fatalf("expected heatmap labels to be keyed by id, got %+v", payload.Heatmap.APIKeyLabels)
+	}
+	if len(payload.Heatmap.Cells) != 2 || payload.Heatmap.Cells[0].APIKey != "1" || payload.Heatmap.Cells[1].APIKey != "2" {
+		t.Fatalf("expected heatmap cells to keep separate id keys, got %+v", payload.Heatmap.Cells)
+	}
+	body := resp.Body.String()
+	if contains(body, "sk-alpha123456") || contains(body, "sk-bravo123456") {
+		t.Fatalf("expected raw keys to stay hidden, got %s", body)
 	}
 }
 
@@ -256,18 +310,20 @@ func TestBuildAnalysisHeatmapPayloadKeepsDuplicateAPIKeyLabelsSeparate(t *testin
 		{APIKey: "sk-alpha123456", Model: "model", Requests: 1, TotalTokens: 100},
 		{APIKey: "sk-beta654321", Model: "model", Requests: 2, TotalTokens: 200},
 	}, map[string]analysisAPIKeyInfo{
-		"sk-alpha123456": {ID: 1, Label: "Shared"},
-		"sk-beta654321":  {ID: 2, Label: "Shared"},
+		"sk-alpha123456": {Label: "Shared"},
+		"sk-beta654321":  {Label: "Shared"},
 	})
 
-	if got := payload.APIKeys; len(got) != 2 || got[0] != "2" || got[1] != "1" {
-		t.Fatalf("expected heatmap API keys to use stable response keys sorted by requests, got %+v", got)
+	alphaKey := helper.RedactSensitiveValue("sk-alpha123456")
+	betaKey := helper.RedactSensitiveValue("sk-beta654321")
+	if got := payload.APIKeys; len(got) != 2 || got[0] != betaKey || got[1] != alphaKey {
+		t.Fatalf("expected heatmap API keys to use redacted response keys sorted by requests, got %+v", got)
 	}
-	if payload.APIKeyLabels["1"] != "Shared" || payload.APIKeyLabels["2"] != "Shared" {
+	if payload.APIKeyLabels[alphaKey] != "Shared" || payload.APIKeyLabels[betaKey] != "Shared" {
 		t.Fatalf("expected duplicate labels to be stored separately by response key, got %+v", payload.APIKeyLabels)
 	}
-	if len(payload.Cells) != 2 || payload.Cells[0].APIKey != "1" || payload.Cells[1].APIKey != "2" {
-		t.Fatalf("expected heatmap cells to use stable response keys, got %+v", payload.Cells)
+	if len(payload.Cells) != 2 || payload.Cells[0].APIKey != alphaKey || payload.Cells[1].APIKey != betaKey {
+		t.Fatalf("expected heatmap cells to use redacted response keys, got %+v", payload.Cells)
 	}
 }
 

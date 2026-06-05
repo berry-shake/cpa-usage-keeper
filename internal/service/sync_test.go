@@ -460,6 +460,51 @@ func TestProcessRedisUsageInboxNormalizesAPIKeyTokensByUsageIdentityType(t *test
 	}
 }
 
+func TestProcessRedisUsageInboxNormalizesGeminiFamilyToCodexTokenFormat(t *testing.T) {
+	db := openSyncTestDatabase(t)
+	if err := db.Create(&entities.UsageIdentity{
+		Name:         "Gemini CLI",
+		AuthType:     entities.UsageIdentityAuthTypeAuthFile,
+		AuthTypeName: "oauth",
+		Identity:     "gemini-auth-index",
+		Type:         "gemini-cli",
+		Provider:     "Gemini",
+	}).Error; err != nil {
+		t.Fatalf("seed usage identity: %v", err)
+	}
+	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
+		QueueKey: cpa.ManagementUsageQueueKey,
+		RawMessage: `{
+			"timestamp":"2026-04-27T08:00:00Z",
+			"provider":"Google Account",
+			"auth_type":"oauth",
+			"auth_index":"gemini-auth-index",
+			"model":"gemini-2.5-pro",
+			"request_id":"gemini-thinking",
+			"tokens":{
+				"input_tokens":11,
+				"output_tokens":7,
+				"reasoning_tokens":3,
+				"cached_tokens":5,
+				"total_tokens":21
+			}
+		}`,
+		PoppedAt: time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	if _, err := service.ProcessRedisUsageInbox(context.Background()); err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	event := loadUsageEventByKey(t, db, "gemini-thinking")
+	if event.InputTokens != 11 || event.OutputTokens != 10 || event.ReasoningTokens != 3 || event.CachedTokens != 5 || event.TotalTokens != 21 {
+		t.Fatalf("expected Gemini family tokens to be normalized to Codex format, got %+v", event)
+	}
+}
+
 func TestNormalizeRedisUsageEventsResolvesAPIKeyAuthTypeAlias(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if err := db.Create(&entities.UsageIdentity{
@@ -566,8 +611,8 @@ func TestBuildUsageEventTypeResolverBatchesAPIKeyIdentityLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildUsageEventTypeResolver returned error: %v", err)
 	}
-	if len(resolver.byAuthIndex) != len(events) {
-		t.Fatalf("expected resolver to load %d types, got %d", len(events), len(resolver.byAuthIndex))
+	if len(resolver.byIdentity) != len(events) {
+		t.Fatalf("expected resolver to load %d types, got %d", len(events), len(resolver.byIdentity))
 	}
 	if usageIdentityQueries != 2 {
 		t.Fatalf("expected 901 auth indexes to be loaded in two SELECT batches, got %d queries", usageIdentityQueries)
@@ -594,7 +639,8 @@ func TestBuildUsageEventTypeResolverIgnoresBlankActiveType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildUsageEventTypeResolver returned error: %v", err)
 	}
-	if got := resolver.byAuthIndex["blank-active-auth-index"]; got != "" {
+	key := usageEventIdentityKey{authType: entities.UsageIdentityAuthTypeAIProvider, identity: "blank-active-auth-index"}
+	if got := resolver.byIdentity[key]; got != "" {
 		t.Fatalf("expected blank active type to remain unresolved for OpenAI-style fallback, got %q", got)
 	}
 }
