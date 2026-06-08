@@ -160,6 +160,57 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 	}
 }
 
+func TestUsageCredentialStatsAppliesClaudeCachePricing(t *testing.T) {
+	db := openUsageTestDatabase(t)
+	if _, err := UpsertModelPriceSetting(db, repodto.ModelPriceSettingInput{
+		Model:                   "claude-opus",
+		PricingStyle:            string(entities.ModelPricingStyleClaude),
+		PromptPricePer1M:        15,
+		CompletionPricePer1M:    75,
+		CachePricePer1M:         1.5,
+		CacheCreationPricePer1M: 18.75,
+	}); err != nil {
+		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
+	}
+	// Claude 入库后 InputTokens 包含 cache read/write,CachedTokens 镜像 CacheReadTokens。
+	events := []entities.UsageEvent{
+		{
+			EventKey:            "credential-cache-1",
+			APIGroupKey:         "provider-a",
+			Model:               "claude-opus",
+			Timestamp:           time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+			Source:              "source-a",
+			AuthIndex:           "1",
+			InputTokens:         1_100_000,
+			OutputTokens:        200_000,
+			CachedTokens:        900_000,
+			CacheReadTokens:     900_000,
+			CacheCreationTokens: 100_000,
+			TotalTokens:         1_300_000,
+		},
+	}
+	if _, _, err := InsertUsageEvents(db, events); err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+
+	rows, err := ListUsageCredentialStatsWithFilter(db, repodto.UsageQueryFilter{})
+	if err != nil {
+		t.Fatalf("ListUsageCredentialStatsWithFilter returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected single credential row, got %d", len(rows))
+	}
+	got := rows[0]
+	if got.CacheReadTokens != 900_000 || got.CacheCreationTokens != 100_000 {
+		t.Fatalf("expected cache tokens to flow into aggregation, got %+v", got)
+	}
+	// normalInput=0.1M*15=1.5, output=0.2M*75=15, cacheRead=0.9M*1.5=1.35, cacheWrite=0.1M*18.75=1.875
+	wantCost := 1.5 + 15.0 + 1.35 + 1.875
+	if !got.CostAvailable || math.Abs(got.TotalCost-wantCost) > 0.000001 {
+		t.Fatalf("expected Claude pricing %.4f, got %.4f", wantCost, got.TotalCost)
+	}
+}
+
 func TestBuildUsageOverviewWithFilterFiltersByAPIGroupKey(t *testing.T) {
 	db := openUsageTestDatabase(t)
 	insertAPIKeyFilterEvents(t, db)

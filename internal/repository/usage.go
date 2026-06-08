@@ -282,6 +282,8 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 		"output_tokens",
 		"reasoning_tokens",
 		"cached_tokens",
+		"cache_read_tokens",
+		"cache_creation_tokens",
 		"total_tokens",
 	}, ", "))
 
@@ -292,6 +294,8 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 		"SUM(output_tokens) AS output_token_sum",
 		"SUM(reasoning_tokens) AS reasoning_token_sum",
 		"SUM(cached_tokens) AS cached_token_sum",
+		"SUM(cache_read_tokens) AS cache_read_token_sum",
+		"SUM(cache_creation_tokens) AS cache_creation_token_sum",
 		"SUM(total_tokens) AS total_token_sum",
 		"failed AS failed_value",
 		"source",
@@ -317,6 +321,8 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 			&row.OutputTokens,
 			&row.ReasoningTokens,
 			&row.CachedTokens,
+			&row.CacheReadTokens,
+			&row.CacheCreationTokens,
 			&row.TotalTokens,
 			&failedValue,
 			&row.Source,
@@ -340,7 +346,13 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 		modelName := normalizeUsageOverviewDimension(rows[index].Model)
 		rows[index].Model = modelName
 		if pricing, ok := pricingByModel[modelName]; ok {
-			rows[index].TotalCost = helper.CalculateUsageTokenCost(helper.UsageTokenCostInput{InputTokens: rows[index].InputTokens, OutputTokens: rows[index].OutputTokens, CachedTokens: rows[index].CachedTokens}, pricing)
+			rows[index].TotalCost = helper.CalculateUsageTokenCost(helper.UsageTokenCostInput{
+				InputTokens:         rows[index].InputTokens,
+				OutputTokens:        rows[index].OutputTokens,
+				CachedTokens:        rows[index].CachedTokens,
+				CacheReadTokens:     rows[index].CacheReadTokens,
+				CacheCreationTokens: rows[index].CacheCreationTokens,
+			}, pricing)
 			rows[index].CostAvailable = true
 		}
 	}
