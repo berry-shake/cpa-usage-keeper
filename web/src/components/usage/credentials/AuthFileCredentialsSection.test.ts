@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { AuthFileCredentialsSection, AuthFileQuotaPanel, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, isInspectionStartDisabled } from './AuthFileCredentialsSection'
+import { AuthFileCredentialsSection, AuthFileQuotaPanel, INSPECTION_RESULT_PAGE_SIZE_OPTIONS, buildInspectionResultsPage, buildInvalidInspectionAccountFileNames, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, invertInvalidInspectionAccountFileNames, isInspectionStartDisabled, isSelectableInspectionStatusFilter, nextInspectionResultStatusFilter, selectAllInvalidInspectionAccountFileNames } from './AuthFileCredentialsSection'
 import type { AuthFileCredentialRow, DisplayQuota } from './credentialViewModels'
+import type { UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus } from '@/lib/types'
+
+const authFileSectionSource = readFileSync(new URL('./AuthFileCredentialsSection.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => undefined },
@@ -251,5 +255,136 @@ describe('AuthFileCredentialsSection inspection controls', () => {
     expect(formatInspectionCompletedAt(undefined)).toBe('')
     expect(formatInspectionCompletedAt('invalid')).toBe('')
     expect(formatInspectionCompletedAt('2026-06-03T10:30:00Z')).toContain('2026')
+  })
+})
+
+describe('AuthFileCredentialsSection inspection results', () => {
+  const makeInspectionResult = (index: number, status: UsageQuotaInspectionResultStatus = 'normal'): UsageQuotaInspectionResult => ({
+    auth_index: `auth-${String(index).padStart(2, '0')}`,
+    name: `Account ${index}`,
+    type: 'codex',
+    status,
+    refreshed_at: `2026-06-03T10:${String(index).padStart(2, '0')}:00Z`,
+  })
+
+  it('paginates inspection results with the selectable page sizes instead of a fixed eight rows', () => {
+    const results = Array.from({ length: 12 }, (_, index) => makeInspectionResult(index + 1))
+
+    expect(INSPECTION_RESULT_PAGE_SIZE_OPTIONS).toEqual([10, 20, 50])
+
+    const firstPage = buildInspectionResultsPage(results, null, 1, 10)
+    expect(firstPage.total).toBe(12)
+    expect(firstPage.totalPages).toBe(2)
+    expect(firstPage.page).toBe(1)
+    expect(firstPage.results.map((result) => result.auth_index)).toEqual([
+      'auth-01',
+      'auth-02',
+      'auth-03',
+      'auth-04',
+      'auth-05',
+      'auth-06',
+      'auth-07',
+      'auth-08',
+      'auth-09',
+      'auth-10',
+    ])
+
+    const secondPage = buildInspectionResultsPage(results, null, 2, 10)
+    expect(secondPage.results.map((result) => result.auth_index)).toEqual(['auth-11', 'auth-12'])
+
+    const expandedPage = buildInspectionResultsPage(results, null, 1, 20)
+    expect(expandedPage.totalPages).toBe(1)
+    expect(expandedPage.results).toHaveLength(12)
+  })
+
+  it('filters inspection results by one selected result card at a time', () => {
+    const results = [
+      makeInspectionResult(1, 'normal'),
+      makeInspectionResult(2, 'limit_reached'),
+      makeInspectionResult(3, 'unauthorized_401'),
+      makeInspectionResult(4, 'payment_required_402'),
+      makeInspectionResult(5, 'other_failed'),
+      makeInspectionResult(6, 'unauthorized_401'),
+    ]
+
+    expect(nextInspectionResultStatusFilter(null, 'unauthorized_401_402')).toBe('unauthorized_401_402')
+    expect(nextInspectionResultStatusFilter('unauthorized_401_402', 'unauthorized_401_402')).toBeNull()
+    expect(nextInspectionResultStatusFilter('unauthorized_401_402', 'normal')).toBe('normal')
+
+    const filteredPage = buildInspectionResultsPage(results, 'unauthorized_401_402', 1, 10)
+    expect(filteredPage.total).toBe(3)
+    expect(filteredPage.results.map((result) => result.auth_index)).toEqual(['auth-03', 'auth-04', 'auth-06'])
+  })
+
+  it('keeps unknown out of selectable inspection result filters', () => {
+    expect(isSelectableInspectionStatusFilter('normal')).toBe(true)
+    expect(isSelectableInspectionStatusFilter('limit_reached')).toBe(true)
+    expect(isSelectableInspectionStatusFilter('unauthorized_401_402')).toBe(true)
+    expect(isSelectableInspectionStatusFilter('unauthorized_401')).toBe(false)
+    expect(isSelectableInspectionStatusFilter('payment_required_402')).toBe(false)
+    expect(isSelectableInspectionStatusFilter('other_failed')).toBe(true)
+    expect(isSelectableInspectionStatusFilter('unknown')).toBe(false)
+    expect(isSelectableInspectionStatusFilter(undefined)).toBe(false)
+  })
+
+  it('keeps invalid action buttons in the results header and pagination in a bottom-right footer', () => {
+    const headerIndex = authFileSectionSource.indexOf('credentialInspectionResultsHeader')
+    const footerIndex = authFileSectionSource.indexOf('credentialInspectionResultsFooter')
+
+    expect(headerIndex).toBeGreaterThanOrEqual(0)
+    expect(footerIndex).toBeGreaterThan(headerIndex)
+
+    const headerSlice = authFileSectionSource.slice(headerIndex, footerIndex)
+    const footerSlice = authFileSectionSource.slice(footerIndex)
+
+    expect(headerSlice).toContain('credentialInspectionInvalidActions')
+    expect(headerSlice).not.toContain('credentialInspectionPageSizeControl')
+    expect(headerSlice).not.toContain('credentialInspectionPagination')
+    expect(footerSlice).toContain('credentialInspectionPageSizeControl')
+    expect(footerSlice).toContain('credentialInspectionPagination')
+  })
+
+  it('builds invalid account actions only from cached 401 and 402 file names', () => {
+    const results: UsageQuotaInspectionResult[] = [
+      { ...makeInspectionResult(1, 'unauthorized_401'), file_name: 'a.json' },
+      { ...makeInspectionResult(2, 'payment_required_402'), file_name: 'b.json' },
+      { ...makeInspectionResult(3, 'unauthorized_401'), file_name: ' a.json ' },
+      { ...makeInspectionResult(4, 'other_failed'), file_name: 'c.json' },
+      { ...makeInspectionResult(5, 'normal'), file_name: 'd.json' },
+      { ...makeInspectionResult(6, 'payment_required_402'), file_name: ' ' },
+    ]
+
+    expect(buildInvalidInspectionAccountFileNames(results)).toEqual(['a.json', 'b.json'])
+  })
+
+  it('supports selecting all and inverting invalid account selections', () => {
+    const fileNames = ['a.json', 'b.json', 'c.json']
+
+    expect(selectAllInvalidInspectionAccountFileNames(fileNames)).toEqual(fileNames)
+    expect(invertInvalidInspectionAccountFileNames(fileNames, ['a.json', 'c.json'])).toEqual(['b.json'])
+    expect(invertInvalidInspectionAccountFileNames(fileNames, [])).toEqual(fileNames)
+  })
+
+  it('renders invalid account bulk selection controls and async sync tip', () => {
+    expect(authFileSectionSource).toContain('credentials_inspection_invalid_accounts_select_all')
+    expect(authFileSectionSource).toContain('credentials_inspection_invalid_accounts_invert_selection')
+    expect(authFileSectionSource).toContain('credentials_inspection_invalid_accounts_sync_tip')
+  })
+
+  it('keeps the invalid account modal open until post-action refresh completes', () => {
+    const handlerIndex = authFileSectionSource.indexOf('const handleConfirmInvalidAccountAction = async () => {')
+    const catchIndex = authFileSectionSource.indexOf('} catch (nextError)', handlerIndex)
+
+    expect(handlerIndex).toBeGreaterThanOrEqual(0)
+    expect(catchIndex).toBeGreaterThan(handlerIndex)
+
+    const successPath = authFileSectionSource.slice(handlerIndex, catchIndex)
+    const refreshIndex = successPath.indexOf('await Promise.all([onRefreshStatus(), onAfterInvalidAccountAction?.()])')
+    const closeIndex = successPath.indexOf('setInvalidAccountAction(null)')
+    const clearSelectionIndex = successPath.indexOf('setSelectedInvalidFileNames([])')
+
+    expect(refreshIndex).toBeGreaterThanOrEqual(0)
+    expect(closeIndex).toBeGreaterThan(refreshIndex)
+    expect(clearSelectionIndex).toBeGreaterThan(refreshIndex)
   })
 })

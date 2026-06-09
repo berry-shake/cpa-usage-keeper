@@ -15,6 +15,19 @@ import (
 	"cpa-usage-keeper/internal/cpa/dto/response"
 )
 
+func TestBlankJSONResponseBodyCheckDoesNotAllocate(t *testing.T) {
+	body := []byte(" \n\t ")
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		if !isBlankJSONResponseBody(body) {
+			t.Fatalf("expected whitespace-only response body to be blank")
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("expected blank response check to allocate 0 times, got %f", allocs)
+	}
+}
+
 func TestFetchManagementAPIKeysSendsBearerTokenAndParsesKeys(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != cpaManagementAPIKeysEndpoint {
@@ -154,6 +167,74 @@ func TestFetchAuthFilesParsesCodexIDTokenFields(t *testing.T) {
 	}
 	if file.IDToken.PlanType == nil || *file.IDToken.PlanType != "team" {
 		t.Fatalf("expected plan type to decode, got %+v", file.IDToken.PlanType)
+	}
+}
+
+func TestUpdateAuthFileStatusPatchesManagementEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("expected PATCH method, got %s", r.Method)
+		}
+		if r.URL.Path != cpaManagementAuthFilesStatusEndpoint {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
+			t.Fatalf("expected management Authorization header, got %q", got)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("expected JSON content type, got %q", got)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body["name"] != "codex-user.json" || body["disabled"] != true {
+			t.Fatalf("unexpected status request body: %#v", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	if err := client.UpdateAuthFileStatus(context.Background(), "codex-user.json", true); err != nil {
+		t.Fatalf("UpdateAuthFileStatus returned error: %v", err)
+	}
+}
+
+func TestDeleteAuthFilesSendsNamesToManagementEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("expected DELETE method, got %s", r.Method)
+		}
+		if r.URL.Path != cpaManagementAuthFilesEndpoint {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
+			t.Fatalf("expected management Authorization header, got %q", got)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("expected JSON content type, got %q", got)
+		}
+
+		var body map[string][]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if strings.Join(body["names"], ",") != "codex-a.json,codex-b.json" {
+			t.Fatalf("unexpected delete request body: %#v", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	if err := client.DeleteAuthFiles(context.Background(), []string{"codex-a.json", "codex-b.json"}); err != nil {
+		t.Fatalf("DeleteAuthFiles returned error: %v", err)
 	}
 }
 

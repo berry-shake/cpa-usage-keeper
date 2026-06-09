@@ -124,7 +124,7 @@ func TestQuotaInspectionStatusReturnsSummary(t *testing.T) {
 	refreshedAt := time.Date(2026, 6, 3, 10, 30, 0, 0, time.UTC)
 	completedAt := time.Date(2026, 6, 3, 10, 31, 0, 0, time.UTC)
 	provider := &quotaProviderStub{inspectionStatusResponse: quota.InspectionStatus{
-		Total: 3, Cached: 2, Running: true, Normal: 1, Unauthorized401: 1, CompletedAt: &completedAt,
+		Total: 3, Cached: 2, Running: true, Normal: 1, Unauthorized401: 1, PaymentRequired402: 1, Unauthorized401402: 2, CompletedAt: &completedAt,
 		Results: []quota.InspectionResult{{AuthIndex: "auth-1", Name: "Claude Main", Type: "claude", FileName: apiStringPtr("claude-user.json"), Status: quota.InspectionResultStatusNormal, RefreshedAt: &refreshedAt}},
 	}}
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", OptionalProviders{Quota: provider})
@@ -140,7 +140,7 @@ func TestQuotaInspectionStatusReturnsSummary(t *testing.T) {
 		t.Fatalf("expected status lookup only, got status=%d start=%d", provider.inspectionStatusCalls, provider.inspectionStartCalls)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"total":3`) || !contains(body, `"cached":2`) || !contains(body, `"unauthorized_401":1`) || !contains(body, `"completed_at":"2026-06-03T10:31:00Z"`) || !contains(body, `"auth_index":"auth-1"`) || !contains(body, `"file_name":"claude-user.json"`) || !contains(body, `"refreshed_at":"2026-06-03T10:30:00Z"`) {
+	if !contains(body, `"total":3`) || !contains(body, `"cached":2`) || !contains(body, `"unauthorized_401_402":2`) || !contains(body, `"completed_at":"2026-06-03T10:31:00Z"`) || !contains(body, `"auth_index":"auth-1"`) || !contains(body, `"file_name":"claude-user.json"`) || !contains(body, `"refreshed_at":"2026-06-03T10:30:00Z"`) {
 		t.Fatalf("unexpected response body: %s", body)
 	}
 	if contains(body, `"provider"`) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appPath, fetchAnalysis, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchKeyOverview, fetchUsageOverview, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, loginWithCPAAPIKey, logout, markStatusActive, refreshUsageQuotas, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias } from './api';
+import { appPath, deleteAuthFiles, fetchAnalysis, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchUsageOverview, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, loginWithCPAAPIKey, logout, markStatusActive, refreshUsageQuotas, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias } from './api';
 
 describe('fetchUsageEvents', () => {
   afterEach(() => {
@@ -304,6 +304,25 @@ describe('fetchUsageEvents', () => {
     expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
   });
 
+  it('loads CPA API key settings from the admin-only raw key endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [{ id: '9007199254740993', apiKey: 'sk-alpha123456', keyAlias: '', displayKey: 'sk-*********123456', label: 'sk-*********123456', lastSyncedAt: null }] }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    const response = await fetchCpaApiKeySettings(signal);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(response.items[0].apiKey).toBe('sk-alpha123456');
+    expect(response.items[0].id).toBe('9007199254740993');
+    expect(parsed.pathname).toBe('/api/v1/usage/api-keys/settings');
+    expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
+  });
+
   it('loads CPA API key options and updates aliases', async () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch')
@@ -418,6 +437,7 @@ describe('fetchUsageEvents', () => {
         limit_reached: 0,
         unauthorized_401: 0,
         payment_required_402: 0,
+        unauthorized_401_402: 0,
         other_failed: 0,
         unknown: 1,
         results: [{ auth_index: 'auth-1', name: 'Claude Main', type: 'claude', file_name: 'claude-user.json', provider: 'claude', status: 'normal', refreshed_at: '2026-06-03T10:30:00Z' }],
@@ -451,6 +471,7 @@ describe('fetchUsageEvents', () => {
         limit_reached: 0,
         unauthorized_401: 0,
         payment_required_402: 0,
+        unauthorized_401_402: 0,
         other_failed: 0,
         unknown: 2,
         results: [],
@@ -466,6 +487,44 @@ describe('fetchUsageEvents', () => {
     expect(response.running).toBe(true);
     expect(parsed.pathname).toBe('/api/v1/quota/inspection');
     expect(init).toMatchObject({ credentials: 'include', method: 'POST', signal });
+  });
+
+  it('disables selected auth files through the protected management endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ names: ['a.json'], affected: 1 }),
+    } as Response);
+
+    const response = await setAuthFilesDisabled(['a.json'], true);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(response.affected).toBe(1);
+    expect(parsed.pathname).toBe('/api/v1/auth-files/status');
+    expect(init).toMatchObject({ credentials: 'include', method: 'PATCH' });
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(init?.body).toBe(JSON.stringify({ names: ['a.json'], disabled: true }));
+  });
+
+  it('deletes selected auth files through the protected management endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ names: ['a.json', 'b.json'], affected: 2 }),
+    } as Response);
+
+    const response = await deleteAuthFiles(['a.json', 'b.json']);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(response.names).toEqual(['a.json', 'b.json']);
+    expect(parsed.pathname).toBe('/api/v1/auth-files');
+    expect(init).toMatchObject({ credentials: 'include', method: 'DELETE' });
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(init?.body).toBe(JSON.stringify({ names: ['a.json', 'b.json'] }));
   });
 
   it('loads quota refresh task status', async () => {

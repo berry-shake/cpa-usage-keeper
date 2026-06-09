@@ -104,6 +104,7 @@ describe('i18n resources', () => {
     for (const language of SUPPORTED_LANGUAGES) {
       expect(i18n.getResource(language, 'translation', 'usage_stats.credentials_inspection_401')).toBe('401');
       expect(i18n.getResource(language, 'translation', 'usage_stats.credentials_inspection_402')).toBe('402');
+      expect(i18n.getResource(language, 'translation', 'usage_stats.credentials_inspection_401_402')).toBe('401/402');
     }
   });
 
@@ -111,6 +112,14 @@ describe('i18n resources', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_inspection_unknown')).toBe('Unknown');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_inspection_unknown')).toBe('未知');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_inspection_unknown')).toBe('未知');
+  });
+
+  it('uses concise invalid-account selection copy in every language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_inspection_invalid_accounts_select_all')).toBe('Select all');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_inspection_invalid_accounts_select_all')).toBe('全选');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_inspection_invalid_accounts_select_all')).toBe('全選');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_inspection_invalid_accounts_invert_selection')).toBe('反选');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_inspection_invalid_accounts_sync_tip')).toBe('账号状态从 CPA 同步到 Keeper 可能存在短暂延迟。操作后如果列表暂未更新，请稍候再手动刷新。');
   });
 
   it('labels reached-limit Auth Files inspection results in every language', () => {

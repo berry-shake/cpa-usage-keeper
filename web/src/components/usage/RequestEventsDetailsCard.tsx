@@ -985,12 +985,14 @@ export function RequestEventsDetailsCard({
                     <dt>{t('usage_stats.total_tokens')}</dt>
                     <dd>{row.totalTokens.toLocaleString()}</dd>
                   </div>
-                  <div>
-                    <dt>{t('usage_stats.total_cost')}</dt>
-                    <dd title={row.costAvailable ? undefined : t('usage_stats.cost_need_price')}>
-                      {row.costAvailable && row.cost !== null ? formatUsd(row.cost) : '-'}
-                    </dd>
-                  </div>
+                  {effectiveVisibleColumnIdSet.has('total_cost') && (
+                    <div>
+                      <dt>{t('usage_stats.total_cost')}</dt>
+                      <dd title={row.costAvailable ? undefined : t('usage_stats.cost_need_price')}>
+                        {row.costAvailable && row.cost !== null ? formatUsd(row.cost) : '-'}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               </article>
             ))}

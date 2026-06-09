@@ -39,15 +39,16 @@ type QuotaProvider interface {
 }
 
 type StatusRouteConfig struct {
-	CPAPublicURL             string
-	ActiveRecorder           ActiveStatusRecorder
-	QuotaAutoRefreshEnabled  bool
+	CPAPublicURL            string
+	ActiveRecorder          ActiveStatusRecorder
+	QuotaAutoRefreshEnabled bool
 }
 
 type OptionalProviders struct {
 	UsageIdentity service.UsageIdentityProvider
 	Quota         QuotaProvider
 	CPAAPIKeys    service.CPAAPIKeyProvider
+	AuthFiles     service.AuthFilesManagementProvider
 	Status        StatusRouteConfig
 }
 
@@ -82,11 +83,13 @@ func NewRouter(
 	var usageIdentityProvider service.UsageIdentityProvider
 	var quotaProvider QuotaProvider
 	var cpaAPIKeyProvider service.CPAAPIKeyProvider
+	var authFilesProvider service.AuthFilesManagementProvider
 	var statusConfig StatusRouteConfig
 	if len(optionalProviders) > 0 {
 		usageIdentityProvider = optionalProviders[0].UsageIdentity
 		quotaProvider = optionalProviders[0].Quota
 		cpaAPIKeyProvider = optionalProviders[0].CPAAPIKeys
+		authFilesProvider = optionalProviders[0].AuthFiles
 		statusConfig = optionalProviders[0].Status
 	}
 	authHandler.setCPAAPIKeyProvider(cpaAPIKeyProvider)
@@ -100,6 +103,7 @@ func NewRouter(
 	registerUsageEventsRoute(adminProtected, usageProvider, usageIdentityProvider, cpaAPIKeyProvider)
 	registerUsageCredentialsRoute(adminProtected, usageProvider, usageIdentityProvider)
 	registerUsageIdentityRoutes(adminProtected, usageIdentityProvider)
+	registerAuthFileManagementRoutes(adminProtected, authFilesProvider)
 	registerCPAAPIKeyRoutes(adminProtected, cpaAPIKeyProvider)
 	registerPricingRoutes(adminProtected, pricingProvider)
 	registerQuotaRoutes(adminProtected, quotaProvider)
@@ -233,17 +237,17 @@ func stripBasePath(basePath, requestPath string) (string, bool) {
 }
 
 type statusResponse struct {
-	Running                   bool       `json:"running"`
-	SyncRunning               bool       `json:"sync_running"`
-	Timezone                  string     `json:"timezone"`
-	Version                   string     `json:"version"`
-	UpdateCheckEnabled        bool       `json:"updateCheckEnabled"`
-	QuotaAutoRefreshEnabled   bool       `json:"quotaAutoRefreshEnabled"`
-	CPAPublicURL              string     `json:"cpa_public_url,omitempty"`
-	LastRunAt                 *time.Time `json:"last_run_at,omitempty"`
-	LastError                 string     `json:"last_error,omitempty"`
-	LastWarning               string     `json:"last_warning,omitempty"`
-	LastStatus                string     `json:"last_status,omitempty"`
+	Running                 bool       `json:"running"`
+	SyncRunning             bool       `json:"sync_running"`
+	Timezone                string     `json:"timezone"`
+	Version                 string     `json:"version"`
+	UpdateCheckEnabled      bool       `json:"updateCheckEnabled"`
+	QuotaAutoRefreshEnabled bool       `json:"quotaAutoRefreshEnabled"`
+	CPAPublicURL            string     `json:"cpa_public_url,omitempty"`
+	LastRunAt               *time.Time `json:"last_run_at,omitempty"`
+	LastError               string     `json:"last_error,omitempty"`
+	LastWarning             string     `json:"last_warning,omitempty"`
+	LastStatus              string     `json:"last_status,omitempty"`
 }
 
 func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider, config StatusRouteConfig) {

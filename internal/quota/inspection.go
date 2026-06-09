@@ -35,6 +35,7 @@ type InspectionStatus struct {
 	LimitReached       int        `json:"limit_reached"`
 	Unauthorized401    int        `json:"unauthorized_401"`
 	PaymentRequired402 int        `json:"payment_required_402"`
+	Unauthorized401402 int        `json:"unauthorized_401_402"`
 	OtherFailed        int        `json:"other_failed"`
 	// Unknown 是 active Auth Files 中“没有可展示结果、也没有参与当前巡检刷新”的剩余数量。
 	Unknown int                `json:"unknown"`
@@ -151,8 +152,11 @@ func (s *Service) GetInspectionStatus(ctx context.Context) (InspectionStatus, er
 			status.LimitReached++
 		case InspectionResultStatusUnauthorized401:
 			status.Unauthorized401++
+			// 摘要口径把 401/402 合并，行级结果仍保留原始状态。
+			status.Unauthorized401402++
 		case InspectionResultStatusPaymentRequired402:
 			status.PaymentRequired402++
+			status.Unauthorized401402++
 		case InspectionResultStatusOtherFailed:
 			status.OtherFailed++
 		}

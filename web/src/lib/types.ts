@@ -293,6 +293,11 @@ export interface UsageQuotaCacheResponse {
   items: UsageQuotaCacheItem[]
 }
 
+export interface AuthFilesManagementResponse {
+  names: string[]
+  affected: number
+}
+
 export interface UsageQuotaRefreshTaskResponse {
   authIndex: string
   file_name?: string
@@ -327,6 +332,7 @@ export interface UsageQuotaInspectionStatusResponse {
   limit_reached: number
   unauthorized_401: number
   payment_required_402: number
+  unauthorized_401_402: number
   other_failed: number
   unknown: number
   results: UsageQuotaInspectionResult[]
@@ -434,12 +440,16 @@ export interface AnalysisResponse {
   model_efficiency: AnalysisModelEfficiencyItem[]
 }
 
-export interface CpaApiKeySettingsItem {
+export interface CpaApiKeyDisplayItem {
   id: string
   keyAlias: string
   displayKey: string
   label: string
   lastSyncedAt: string | null
+}
+
+export interface CpaApiKeySettingsItem extends CpaApiKeyDisplayItem {
+  apiKey: string
 }
 
 export interface CpaApiKeyOption {
@@ -448,6 +458,10 @@ export interface CpaApiKeyOption {
 }
 
 export interface CpaApiKeysResponse {
+  items: CpaApiKeyDisplayItem[]
+}
+
+export interface CpaApiKeySettingsResponse {
   items: CpaApiKeySettingsItem[]
 }
 

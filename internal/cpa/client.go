@@ -24,6 +24,15 @@ type Client struct {
 	httpClient    *http.Client
 }
 
+type authFileStatusRequest struct {
+	Name     string `json:"name"`
+	Disabled bool   `json:"disabled"`
+}
+
+type authFilesDeleteRequest struct {
+	Names []string `json:"names"`
+}
+
 func (c *Client) doJSONRequest(ctx context.Context, path string, target any, kind string, configure func(*http.Request)) (int, []byte, error) {
 	return c.doJSONRequestWithBody(ctx, http.MethodGet, path, nil, target, kind, configure)
 }
@@ -58,10 +67,17 @@ func (c *Client) doJSONRequestWithBody(ctx context.Context, method string, path 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return resp.StatusCode, responseBody, fmt.Errorf("%s request returned status %d", kind, resp.StatusCode)
 	}
+	if target == nil || isBlankJSONResponseBody(responseBody) {
+		return resp.StatusCode, responseBody, nil
+	}
 	if err := json.Unmarshal(responseBody, target); err != nil {
 		return resp.StatusCode, responseBody, fmt.Errorf("decode %s json: %w", kind, err)
 	}
 	return resp.StatusCode, responseBody, nil
+}
+
+func isBlankJSONResponseBody(body []byte) bool {
+	return len(bytes.TrimSpace(body)) == 0
 }
 
 func (c *Client) doManagementJSONRequest(ctx context.Context, path string, target any, kind string) (int, []byte, error) {
@@ -77,6 +93,10 @@ func (c *Client) doManagementJSONRequest(ctx context.Context, path string, targe
 }
 
 func (c *Client) doManagementJSONPostRequest(ctx context.Context, path string, requestBody any, target any, kind string) (int, []byte, error) {
+	return c.doManagementJSONRequestWithBody(ctx, http.MethodPost, path, requestBody, target, kind)
+}
+
+func (c *Client) doManagementJSONRequestWithBody(ctx context.Context, method string, path string, requestBody any, target any, kind string) (int, []byte, error) {
 	if c == nil {
 		return 0, nil, fmt.Errorf("cpa client is nil")
 	}
@@ -87,7 +107,7 @@ func (c *Client) doManagementJSONPostRequest(ctx context.Context, path string, r
 	if err != nil {
 		return 0, nil, fmt.Errorf("encode management %s json: %w", kind, err)
 	}
-	return c.doJSONRequestWithBody(ctx, http.MethodPost, path, body, target, "management "+kind, func(req *http.Request) {
+	return c.doJSONRequestWithBody(ctx, method, path, body, target, "management "+kind, func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+c.managementKey)
 		req.Header.Set("Content-Type", "application/json")
 	})
@@ -166,6 +186,19 @@ func (c *Client) FetchAuthFiles(ctx context.Context) (*response.AuthFilesResult,
 		return result, err
 	}
 	return result, nil
+}
+
+func (c *Client) UpdateAuthFileStatus(ctx context.Context, name string, disabled bool) error {
+	_, _, err := c.doManagementJSONRequestWithBody(ctx, http.MethodPatch, cpaManagementAuthFilesStatusEndpoint, authFileStatusRequest{
+		Name:     name,
+		Disabled: disabled,
+	}, nil, "auth file status")
+	return err
+}
+
+func (c *Client) DeleteAuthFiles(ctx context.Context, names []string) error {
+	_, _, err := c.doManagementJSONRequestWithBody(ctx, http.MethodDelete, cpaManagementAuthFilesEndpoint, authFilesDeleteRequest{Names: names}, nil, "auth files delete")
+	return err
 }
 
 func (c *Client) CallManagementAPI(ctx context.Context, request apicall.Request) (*apicall.Response, error) {

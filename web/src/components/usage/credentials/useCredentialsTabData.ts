@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import {
   buildAiProviderCredentialRows,
   buildAuthFileCredentialRows,
@@ -105,6 +105,11 @@ export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, qu
     () => buildAiProviderCredentialRows(credentialPages.aiProviderIdentities),
     [credentialPages.aiProviderIdentities],
   )
+  const refreshCredentialPages = credentialPages.refresh
+  const refresh = useCallback(async () => {
+    // 右上角手动刷新需要同时更新身份分页和当前页 quota cache，避免用户看到列表已刷新但限额仍是旧缓存。
+    await Promise.all([refreshCredentialPages(), refreshQuotaCache()])
+  }, [refreshCredentialPages, refreshQuotaCache])
 
   return {
     authFileRows,
@@ -141,7 +146,7 @@ export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, qu
     quotaInspectionLoading: quotaInspection.quotaInspectionLoading,
     quotaInspectionStarting: quotaInspection.quotaInspectionStarting,
     quotaInspectionError: quotaInspection.quotaInspectionError,
-    refresh: credentialPages.refresh,
+    refresh: refresh,
     refreshQuotaForCurrentAuthFilePage: quotaRefreshTasks.refreshQuotaForCurrentAuthFilePage,
     refreshQuotaForAuthIndex: quotaRefreshTasks.refreshQuotaForAuthIndex,
     refreshQuotaInspectionStatus: quotaInspection.refreshQuotaInspectionStatus,

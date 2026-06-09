@@ -472,7 +472,7 @@ func TestInspectionStatusSummarizesActiveAuthFileCache(t *testing.T) {
 	if status.Total != 7 || status.Cached != 4 || status.Unknown != 3 || status.Running != false || status.Completed != false {
 		t.Fatalf("unexpected inspection progress: %+v", status)
 	}
-	if status.Normal != 1 || status.Unauthorized401 != 1 || status.PaymentRequired402 != 1 || status.OtherFailed != 1 {
+	if status.Normal != 1 || status.Unauthorized401 != 1 || status.PaymentRequired402 != 1 || status.Unauthorized401402 != 2 || status.OtherFailed != 1 {
 		t.Fatalf("unexpected inspection summary: %+v", status)
 	}
 	if len(status.Results) != 4 {
