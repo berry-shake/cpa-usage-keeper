@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewChartEndMs, getOverviewDisplayLoading, getOverviewHourWindowHours, getPreferredOverviewChartPeriod, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
+import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewDisplayLoading, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
 import { REQUEST_EVENT_COLUMN_IDS } from '@/components/usage/RequestEventsDetailsCard';
 import type { StatusResponse, UsageFilterWindow } from '@/lib/types';
 
@@ -159,6 +159,25 @@ describe('UsagePage Overview auto-refresh', () => {
     testDocument.dispatchEvent(new Event('visibilitychange'));
 
     expect(refreshOverview).toHaveBeenCalledTimes(1);
+
+    cleanup();
+  });
+
+  it('routes auto-refresh failures to the refresh error handler', async () => {
+    vi.useFakeTimers();
+    const testDocument = createAutoRefreshTestDocument();
+    const failure = new Error('refresh failed');
+    const refreshOverview = vi.fn(async () => {
+      throw failure;
+    });
+    const onRefreshError = vi.fn();
+
+    const cleanup = scheduleOverviewAutoRefresh({ enabled: true, refreshOverview, onRefreshError, documentRef: testDocument });
+
+    vi.advanceTimersByTime(10_000);
+    await flushPromises();
+
+    expect(onRefreshError).toHaveBeenCalledWith(failure);
 
     cleanup();
   });
@@ -582,18 +601,6 @@ describe('UsagePage time range options', () => {
   });
 });
 
-describe('UsagePage Overview chart period preference', () => {
-  it('keeps sub-day windows on By Hour', () => {
-    expect(getPreferredOverviewChartPeriod({ windowMinutes: 12 * 60 })).toBe('hour');
-  });
-
-  it('uses By Day only for windows longer than one day without inspecting chart data', () => {
-    expect(getPreferredOverviewChartPeriod({ windowMinutes: 24 * 60 })).toBe('hour');
-    expect(getPreferredOverviewChartPeriod({ windowMinutes: (24 * 60) + 1 })).toBe('day');
-    expect(getPreferredOverviewChartPeriod({ windowMinutes: 30 * 24 * 60 })).toBe('day');
-  });
-});
-
 describe('UsagePage custom date input bounds', () => {
   it('limits selectable Custom dates to today through the first day of the previous month', () => {
     expect(getCustomDateRangeBounds(Date.parse('2026-05-13T12:00:00.000Z'), 'UTC')).toEqual({
@@ -648,42 +655,6 @@ describe('UsagePage custom date query', () => {
       start: undefined,
       end: undefined,
     });
-  });
-});
-
-describe('UsagePage Overview chart window', () => {
-  it('uses backend Today range start instead of browser-local midnight for chart buckets', () => {
-    const filterWindow: UsageFilterWindow = {
-      startMs: Date.parse('2026-04-23T00:00:00.000Z'),
-      endMs: Date.parse('2026-04-23T12:34:56.000Z'),
-      windowMinutes: (12 * 60) + 34 + (56 / 60),
-    };
-
-    expect(getOverviewHourWindowHours({ timeRange: 'today', filterWindow })).toBe(24);
-    expect(getOverviewChartEndMs({
-      timeRange: 'today',
-      filterWindow,
-      fallbackEndMs: filterWindow.endMs ?? 0,
-      resolvedRangeStartMs: Date.parse('2026-04-22T16:00:00.000Z'),
-      resolvedRangeEndMs: Date.parse('2026-04-23T15:59:59.999Z'),
-    })).toBe(Date.parse('2026-04-23T16:00:00.000Z'));
-  });
-
-  it('uses Yesterday hourly chart buckets through the next day boundary', () => {
-    const filterWindow: UsageFilterWindow = {
-      startMs: Date.parse('2026-04-23T00:00:00.000Z'),
-      endMs: Date.parse('2026-04-23T23:59:59.999Z'),
-      windowMinutes: 24 * 60,
-    };
-    const resolvedRangeEndMs = Date.parse('2026-04-23T23:59:59.999Z');
-
-    expect(getOverviewHourWindowHours({ timeRange: 'yesterday', filterWindow })).toBe(24);
-    expect(getOverviewChartEndMs({
-      timeRange: 'yesterday',
-      filterWindow,
-      fallbackEndMs: Date.parse('2026-04-24T12:34:56.000Z'),
-      resolvedRangeEndMs,
-    })).toBe(Date.parse('2026-04-24T00:00:00.000Z'));
   });
 });
 

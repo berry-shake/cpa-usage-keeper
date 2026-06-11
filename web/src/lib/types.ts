@@ -38,10 +38,6 @@ export interface UsageOverviewUsageSnapshot {
   success_count: number
   failure_count: number
   total_tokens: number
-  requests_by_day: Record<string, number>
-  requests_by_hour: Record<string, number>
-  tokens_by_day: Record<string, number>
-  tokens_by_hour: Record<string, number>
 }
 
 export interface UsageOverviewSummary {
@@ -52,6 +48,7 @@ export interface UsageOverviewSummary {
   tpm: number
   total_cost: number
   cost_available: boolean
+  input_tokens: number
   cached_tokens: number
   reasoning_tokens: number
 }
@@ -62,11 +59,7 @@ export interface UsageOverviewSeries {
   rpm: Record<string, number>
   tpm: Record<string, number>
   cost: Record<string, number>
-  input_tokens: Record<string, number>
-  output_tokens: Record<string, number>
-  cached_tokens: Record<string, number>
-  reasoning_tokens: Record<string, number>
-  models?: Record<string, UsageOverviewSeries>
+  cache_rate: Record<string, number | null>
 }
 
 export interface UsageOverviewServiceHealthBlock {
@@ -89,12 +82,89 @@ export interface UsageOverviewServiceHealth {
   block_details: UsageOverviewServiceHealthBlock[]
 }
 
+export type OverviewRealtimeWindow = '15m' | '30m' | '60m'
+
+export interface RealtimeTokenVelocityPoint {
+  bucket: string
+  tokens_per_minute: number
+  tokens: number
+  cost?: number
+}
+
+export interface RealtimeResponseLevelPoint {
+  bucket: string
+  ttft_p50_ms?: number
+  ttft_p95_ms?: number
+  latency_p50_ms?: number
+  latency_p95_ms?: number
+}
+
+export interface RealtimeResponseAveragePoint {
+  bucket: string
+  avg_ms?: number | null
+}
+
+export interface RealtimeResponseParticle {
+  bucket: string
+  ms: number
+  count: number
+}
+
+export interface RealtimeResponseDistributionSeries {
+  average_line: RealtimeResponseAveragePoint[]
+  particles: RealtimeResponseParticle[]
+}
+
+export interface RealtimeResponseDistribution {
+  ttft: RealtimeResponseDistributionSeries
+  latency: RealtimeResponseDistributionSeries
+}
+
+export interface RealtimeUsageTopItem {
+  key: string
+  label: string
+  tokens: number
+  requests: number
+  cost?: number
+  share: number
+}
+
+export interface RealtimeCurrentUsage {
+  models: RealtimeUsageTopItem[]
+  api_keys: RealtimeUsageTopItem[]
+  auth_files: RealtimeUsageTopItem[]
+  ai_providers: RealtimeUsageTopItem[]
+}
+
+export interface RealtimeRequestLevelPoint {
+  bucket: string
+  requests_per_minute: number
+  requests: number
+}
+
+export interface RealtimeCacheLevelPoint {
+  bucket: string
+  cache_rate?: number | null
+  cached_tokens: number
+  input_tokens: number
+}
+
+export interface OverviewRealtimeBlock {
+  window: OverviewRealtimeWindow
+  timezone?: string
+  bucket_seconds: number
+  token_velocity: RealtimeTokenVelocityPoint[]
+  response_level: RealtimeResponseLevelPoint[]
+  response_distribution: RealtimeResponseDistribution
+  current_usage: RealtimeCurrentUsage
+  request_level: RealtimeRequestLevelPoint[]
+  cache_level: RealtimeCacheLevelPoint[]
+}
+
 export interface UsageOverviewResponse {
   usage: UsageOverviewUsageSnapshot
   summary?: UsageOverviewSummary
   series?: UsageOverviewSeries
-  hourly_series?: UsageOverviewSeries
-  daily_series?: UsageOverviewSeries
   service_health?: UsageOverviewServiceHealth
   timezone?: string
   range_start?: string

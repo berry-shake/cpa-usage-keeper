@@ -412,16 +412,6 @@
   font-weight: 700;
 }
 
-.chartsGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-
-  @include mobile {
-    grid-template-columns: 1fr;
-  }
-}
-
 @include mobile {
   .tabPill {
     white-space: nowrap;

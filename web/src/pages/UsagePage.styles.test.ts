@@ -6,18 +6,16 @@ const readSource = (url: URL) => readFileSync(url, 'utf8').replace(/\r\n/g, '\n'
 const globalStyles = readSource(new URL('../styles/global.scss', import.meta.url))
 const usagePageStyles = readSource(new URL('./UsagePage.module.scss', import.meta.url))
 const usagePageSource = readSource(new URL('./UsagePage.tsx', import.meta.url))
+const keyOverviewPageSource = readSource(new URL('./KeyOverviewPage.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
 const priceSettingsSource = readSource(new URL('../components/usage/PriceSettingsCard.tsx', import.meta.url))
-const chartLineSelectorSource = readSource(new URL('../components/usage/ChartLineSelector.tsx', import.meta.url))
 const selectSource = readSource(new URL('../components/ui/Select.tsx', import.meta.url))
 const apiIndexSource = readSource(new URL('../components/usage/index.ts', import.meta.url))
 const apiClientSource = readSource(new URL('../lib/api.ts', import.meta.url))
 const i18nSource = readSource(new URL('../i18n/index.ts', import.meta.url))
 const analysisPanelSource = readSource(new URL('../components/usage/analysis/AnalysisPanel.tsx', import.meta.url))
 const analysisPanelStyles = readSource(new URL('../components/usage/analysis/AnalysisPanel.module.scss', import.meta.url))
-const usageChartSource = readSource(new URL('../components/usage/UsageChart.tsx', import.meta.url))
-const tokenBreakdownChartSource = readSource(new URL('../components/usage/TokenBreakdownChart.tsx', import.meta.url))
-const costTrendChartSource = readSource(new URL('../components/usage/CostTrendChart.tsx', import.meta.url))
+const overviewRealtimePanelSource = readSource(new URL('../components/usage/OverviewRealtimePanel.tsx', import.meta.url))
 const statCardsSource = readSource(new URL('../components/usage/StatCards.tsx', import.meta.url))
 
 const requestEventColumnDefinitionBlock = (columnId: string) => {
@@ -45,11 +43,49 @@ describe('UsagePage toolbar styles', () => {
     expect(statCardsSource.match(/accent:\s*'#[0-9a-f]{6}'/g)).toHaveLength(new Set(statCardsSource.match(/accent:\s*'#[0-9a-f]{6}'/g)).size)
   })
 
+  it('renders the realtime overview panel below Request Health Timeline with the planned responsive grid', () => {
+    expect(usagePageSource).toContain('<OverviewRealtimePanel')
+    expect(keyOverviewPageSource).toContain('<OverviewRealtimePanel')
+    expect(usagePageSource.indexOf('<ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />')).toBeLessThan(usagePageSource.indexOf('<OverviewRealtimePanel'))
+    expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/)
+    expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
+    expect(usagePageStyles).toMatch(/\.overviewRealtimeCardFull\s*\{[\s\S]*?grid-column:\s*1 \/ -1;/)
+    expect(usagePageStyles).toMatch(/\.overviewRealtimeWindowSwitcher\s*\{[\s\S]*?border-radius:\s*999px;/)
+    expect(usagePageStyles).toMatch(/\.overviewRealtimeSection\s*\{[\s\S]*?margin-top:\s*12px;/)
+    expect(usagePageStyles).not.toMatch(/\.overviewRealtimeSection\s*\{[\s\S]*?border-top:/)
+    expect(usagePageStyles).not.toMatch(/\.overviewRealtimeSection\s*\{[\s\S]*?padding-top:/)
+    expect(usagePageSource).toContain("value === '15m' || value === '30m' || value === '60m'")
+    expect(keyOverviewPageSource).toContain("value === '15m' || value === '30m' || value === '60m'")
+    expect(usagePageSource).not.toContain("value === '5m'")
+    expect(keyOverviewPageSource).not.toContain("value === '5m'")
+  })
+
+  it('keeps realtime overview empty and metadata states explicit without stale legend styles', () => {
+    expect(overviewRealtimePanelSource).toContain('overview_realtime_rolling_metric_hint')
+    expect(overviewRealtimePanelSource).toContain('overview_realtime_ttft_empty')
+    expect(overviewRealtimePanelSource).toContain('overview_realtime_latency_empty')
+    expect(overviewRealtimePanelSource).toContain('overview_realtime_cache_empty')
+    expect(overviewRealtimePanelSource).toContain('overviewRealtimeUsageMetaPill')
+    expect(usagePageStyles).toContain('.overviewRealtimeEmptyOverlay')
+    expect(usagePageStyles).toContain('.overviewRealtimeUsageMetaPill')
+    expect(usagePageStyles).not.toContain('.overviewRealtimeLegend')
+    expect(i18nSource).not.toContain('overview_realtime_response_level')
+    expect(i18nSource).not.toContain('overview_realtime_ttft_p95')
+    expect(i18nSource).not.toContain('overview_realtime_latency_p95')
+  })
+
   it('keeps refresh controls outside the query filter layout', () => {
     expect(usagePageSource).toContain('{showRangeControls && (\n                  <div className={styles.usageFilterBar}>')
     expect(usagePageSource).toContain('className={styles.usageRefreshSlot}')
     expect(usagePageSource).not.toContain('styles.usageFilterBarCollapsed')
     expect(usagePageStyles).toMatch(/\.usageRefreshSlot\s*\{[\s\S]*?flex:\s*0 0 auto;/)
+  })
+
+  it('removes stale header control styles after the Overview chart cleanup', () => {
+    expect(usagePageStyles).not.toContain('.syncSwitcher')
+    expect(usagePageStyles).not.toContain('.syncPill')
+    expect(usagePageStyles).not.toContain('.refreshButton')
+    expect(usagePageStyles).not.toContain('.pageTitle')
   })
 
   it('hides the API Key filter on credential tabs while keeping it on overview/analysis/events', () => {
@@ -162,10 +198,11 @@ describe('UsagePage toolbar styles', () => {
     expect(analysisPanelSource).toContain("t('usage_stats.analysis_heatmap_title')")
     expect(analysisPanelSource).toContain("t('usage_stats.analysis_heatmap_subtitle')")
     expect(analysisPanelSource).toContain("t('usage_stats.total_cost')")
+    expect(analysisPanelSource).toContain("import '@/lib/chartjs'")
+    expect(overviewRealtimePanelSource).toContain("import '@/lib/chartjs'")
     expect(analysisPanelSource).toContain("import { Bar, Doughnut, Scatter } from 'react-chartjs-2'")
-    expect(usagePageSource).toContain('LineController')
-    expect(usagePageSource).toContain('LogarithmicScale')
-    expect(usagePageSource).toContain('ChartJS.register(')
+    expect(usagePageSource).not.toContain('ChartJS.register(')
+    expect(usagePageSource).not.toContain("from 'chart.js'")
     expect(analysisPanelSource).toContain('<Bar data={chartData} options={chartOptions} plugins={[drawRequestsLineOnTopPlugin]} />')
     expect(analysisPanelSource).toContain("const activeContentKey = `${activeTab?.id ?? 'empty'}:${items.map((item) => item.key).join('|')}`")
     expect(analysisPanelSource).toContain('<Doughnut key={`chart-${activeContentKey}`} data={chartData} options={chartOptions} />')
@@ -312,34 +349,16 @@ describe('UsagePage toolbar styles', () => {
     expect(mobileToolbarBlock).toMatch(/\.customRangeInput\s*\{[\s\S]*?opacity:\s*0;/)
   })
 
-  it('keeps Overview chart period controls hidden because period selection is automatic', () => {
-    expect(usageChartSource).not.toContain('className={styles.periodButtons}')
-    expect(tokenBreakdownChartSource).not.toContain('className={styles.periodButtons}')
-    expect(costTrendChartSource).not.toContain('className={styles.periodButtons}')
-  })
-
-  it('places Chart Line Selection and trend cards below Cost Trend on Overview', () => {
-    const serviceHealthIndex = usagePageSource.indexOf('<ServiceHealthCard')
-    const tokenBreakdownIndex = usagePageSource.indexOf('<TokenBreakdownChart')
-    const costTrendIndex = usagePageSource.indexOf('<CostTrendChart')
-    const chartLineSelectorIndex = usagePageSource.indexOf('<ChartLineSelector')
-    const chartsGridIndex = usagePageSource.indexOf('<div className={styles.chartsGrid}>')
-
-    expect(serviceHealthIndex).toBeGreaterThan(-1)
-    expect(tokenBreakdownIndex).toBeGreaterThan(serviceHealthIndex)
-    expect(costTrendIndex).toBeGreaterThan(tokenBreakdownIndex)
-    expect(chartLineSelectorIndex).toBeGreaterThan(costTrendIndex)
-    expect(chartsGridIndex).toBeGreaterThan(chartLineSelectorIndex)
+  it('passes realtime error state and current data guard to the realtime panel', () => {
+    expect(usagePageSource).toContain('error: realtimeError')
+    expect(usagePageSource).toContain('const displayRealtimeError = realtimeError')
+    expect(usagePageSource).toContain('realtime={currentRealtime ?? undefined}')
+    expect(usagePageSource).toContain('error={displayRealtimeError}')
   })
 
   it('removes the Overview Request Health Timeline label instead of toggling it off', () => {
     expect(usagePageSource).toContain('<ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />')
     expect(usagePageSource).not.toContain('showEyebrow')
-  })
-
-  it('keeps chart line controls aligned with reusable pill controls', () => {
-    expect(chartLineSelectorSource).toContain('className={styles.usagePillControl}')
-    expect(chartLineSelectorSource).toContain('className={styles.usagePillAction}')
   })
 
   it('aligns Request Event Log pagination with credential pagination height', () => {

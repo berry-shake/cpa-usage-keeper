@@ -45,6 +45,8 @@ const (
 	migrationAddUsageEventExecutorType              = "20260602_add_usage_event_executor_type"
 	migrationAddUsageIdentityFileFields             = "20260603_add_usage_identity_file_fields"
 	migrationBackfillGeminiCodexTokenFormat         = "20260605_backfill_gemini_codex_token_format"
+	migrationRemoveUsageEventWriteHeavyIndexes      = "20260610_remove_usage_event_write_heavy_indexes"
+	migrationRemoveUsageEventLowValueIndexes        = "20260611_remove_usage_event_low_value_indexes"
 )
 
 type schemaMigration struct {
@@ -134,6 +136,8 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationAddUsageEventExecutorType, run: addUsageEventExecutorTypeMigration},
 		{version: migrationAddUsageIdentityFileFields, run: addUsageIdentityFileFieldsMigration},
 		{version: migrationBackfillGeminiCodexTokenFormat, run: backfillGeminiCodexTokenFormatMigration},
+		{version: migrationRemoveUsageEventWriteHeavyIndexes, run: removeUsageEventWriteHeavyIndexesMigration},
+		{version: migrationRemoveUsageEventLowValueIndexes, run: removeUsageEventLowValueIndexesMigration},
 	}
 }
 

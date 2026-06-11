@@ -1,24 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  LogarithmicScale,
-  PointElement,
-  LineElement,
-  LineController,
-  ScatterController,
-  BarElement,
-  BarController,
-  ArcElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js';
 import { ApiError, fetchAnalysis, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, logout, markStatusActive, updateCpaApiKeyAlias } from '@/lib/api';
-import type { AnalysisResponse, CpaApiKeyOption, CpaApiKeySettingsItem, StatusResponse, UsageCredentialsResponse, UsageEvent, UsageSourceFilterOption } from '@/lib/types';
+import type { AnalysisResponse, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageEvent, UsageSourceFilterOption } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
@@ -28,8 +11,7 @@ import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useThemeStore } from '@/stores';
 import {
   StatCards,
-  UsageChart,
-  ChartLineSelector,
+  OverviewRealtimePanel,
   AnalysisPanel,
   ApiKeySettingsCard,
   PriceSettingsCard,
@@ -37,13 +19,11 @@ import {
   AiProviderCredentialsSection,
   CredentialStatsCard,
   CredentialProviderFilterBar,
-  TokenBreakdownChart,
-  CostTrendChart,
   ServiceHealthCard,
   useUsageData,
+  useOverviewRealtimeData,
   usePricingData,
   useSparklines,
-  useChartData,
   useCredentialsTabData
 } from '@/components/usage';
 import {
@@ -54,41 +34,19 @@ import {
 } from '@/components/usage/RequestEventsDetailsCard';
 import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
 import {
-  getOverviewModelNames,
-  resolveUsageFilterWindow,
-  sanitizeChartLines,
-  type UsageFilterWindow,
   type UsageTimeRange
 } from '@/utils/usage';
 import type { Theme } from '@/types';
 import { BrandLink } from '@/components/BrandLink';
 import styles from './UsagePage.module.scss';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  LogarithmicScale,
-  PointElement,
-  LineElement,
-  LineController,
-  ScatterController,
-  BarElement,
-  BarController,
-  ArcElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-);
-
-const CHART_LINES_STORAGE_KEY = 'cli-proxy-usage-chart-lines-v1';
 const TIME_RANGE_STORAGE_KEY = 'cli-proxy-usage-time-range-v1';
 const CUSTOM_TIME_RANGE_STORAGE_KEY = 'cli-proxy-usage-custom-range-v1';
+const OVERVIEW_REALTIME_WINDOW_STORAGE_KEY = 'cli-proxy-usage-overview-realtime-window-v1';
 export const REQUEST_EVENTS_PREFERENCES_STORAGE_KEY = 'cli-proxy-usage-request-events-preferences-v1';
-const DEFAULT_CHART_LINES = ['all'];
 const DEFAULT_TIME_RANGE: UsageTimeRange = '8h';
+const DEFAULT_REALTIME_WINDOW: OverviewRealtimeWindow = '15m';
 const DEFAULT_CUSTOM_WINDOW_HOURS = 8;
-const MAX_CHART_LINES = 9;
 const TIME_RANGE_OPTIONS: ReadonlyArray<{ value: UsageTimeRange; labelKey: string }> = [
   { value: '4h', labelKey: 'usage_stats.range_4h' },
   { value: '8h', labelKey: 'usage_stats.range_8h' },
@@ -100,14 +58,6 @@ const TIME_RANGE_OPTIONS: ReadonlyArray<{ value: UsageTimeRange; labelKey: strin
   { value: '30d', labelKey: 'usage_stats.range_30d' },
   { value: 'custom', labelKey: 'usage_stats.range_custom' },
 ];
-const HOUR_WINDOW_BY_TIME_RANGE: Record<Extract<UsageTimeRange, '4h' | '8h' | '12h' | '24h' | '7d' | '30d'>, number> = {
-  '4h': 4,
-  '8h': 8,
-  '12h': 12,
-  '24h': 24,
-  '7d': 7 * 24,
-  '30d': 30 * 24
-};
 const THEME_OPTIONS: ReadonlyArray<{ value: Theme; labelKey: string }> = [
   { value: 'white', labelKey: 'usage_stats.theme_light' },
   { value: 'dark', labelKey: 'usage_stats.theme_dark' },
@@ -336,6 +286,7 @@ type OverviewAutoRefreshDocument = Pick<Document, 'visibilityState' | 'addEventL
 type OverviewAutoRefreshOptions = {
   enabled: boolean;
   refreshOverview: () => void | Promise<void>;
+  onRefreshError?: (error: unknown) => void;
   documentRef?: OverviewAutoRefreshDocument;
   intervalMs?: number;
 };
@@ -367,6 +318,7 @@ export const getOverviewDisplayLoading = ({ loading, hasUsage }: { loading: bool
 export const scheduleOverviewAutoRefresh = ({
   enabled,
   refreshOverview,
+  onRefreshError,
   documentRef,
   intervalMs = OVERVIEW_AUTO_REFRESH_INTERVAL_MS,
 }: OverviewAutoRefreshOptions) => {
@@ -385,12 +337,17 @@ export const scheduleOverviewAutoRefresh = ({
     clearInterval(timer);
     timer = undefined;
   };
+  const runRefresh = () => {
+    Promise.resolve(refreshOverview()).catch((error: unknown) => {
+      onRefreshError?.(error);
+    });
+  };
   const refreshIfVisible = () => {
     if (targetDocument.visibilityState === 'hidden') {
       stopTimer();
       return;
     }
-    void refreshOverview();
+    runRefresh();
   };
   const startTimer = () => {
     if (timer !== undefined) return;
@@ -401,7 +358,7 @@ export const scheduleOverviewAutoRefresh = ({
       stopTimer();
       return;
     }
-    void refreshOverview();
+    runRefresh();
     stopTimer();
     startTimer();
   };
@@ -648,35 +605,6 @@ const loadCustomTimeRange = () => {
   }
 };
 
-const normalizeChartLines = (value: unknown, maxLines = MAX_CHART_LINES): string[] => {
-  if (!Array.isArray(value)) {
-    return DEFAULT_CHART_LINES;
-  }
-
-  const filtered = value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, maxLines);
-
-  return filtered.length ? filtered : DEFAULT_CHART_LINES;
-};
-
-const loadChartLines = (): string[] => {
-  try {
-    if (typeof localStorage === 'undefined') {
-      return DEFAULT_CHART_LINES;
-    }
-    const raw = localStorage.getItem(CHART_LINES_STORAGE_KEY);
-    if (!raw) {
-      return DEFAULT_CHART_LINES;
-    }
-    return normalizeChartLines(JSON.parse(raw));
-  } catch {
-    return DEFAULT_CHART_LINES;
-  }
-};
-
 const loadTimeRange = (): UsageTimeRange => {
   try {
     if (typeof localStorage === 'undefined') {
@@ -714,40 +642,6 @@ export const getTimeRangeOptions = (translate: Translate) =>
     label: translate(option.labelKey),
   }));
 
-const isTodayTimeRange = (value: UsageTimeRange): value is 'today' => value === 'today';
-const isYesterdayTimeRange = (value: UsageTimeRange): value is 'yesterday' => value === 'yesterday';
-
-export const getOverviewHourWindowHours = ({ timeRange, filterWindow }: { timeRange: UsageTimeRange; filterWindow: UsageFilterWindow }) => {
-  if (isTodayTimeRange(timeRange) || isYesterdayTimeRange(timeRange)) return 24;
-  if (timeRange !== 'custom') return Math.min(HOUR_WINDOW_BY_TIME_RANGE[timeRange], 24);
-  if (filterWindow.windowMinutes === undefined) return 24;
-  return Math.min(Math.max(Math.ceil(filterWindow.windowMinutes / 60), 1), 24);
-};
-
-export const getPreferredOverviewChartPeriod = ({ windowMinutes }: { windowMinutes?: number }): 'hour' | 'day' => (
-  windowMinutes !== undefined && windowMinutes > 24 * 60 ? 'day' : 'hour'
-);
-
-const toTimestampMs = (value: string | undefined): number | undefined => {
-  if (!value) return undefined;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
-};
-
-export const getOverviewChartEndMs = ({ timeRange, filterWindow, fallbackEndMs, resolvedRangeStartMs, resolvedRangeEndMs }: { timeRange: UsageTimeRange; filterWindow: UsageFilterWindow; fallbackEndMs: number; resolvedRangeStartMs?: number; resolvedRangeEndMs?: number }) => {
-  if (isTodayTimeRange(timeRange)) {
-    const startMs = resolvedRangeStartMs ?? filterWindow.startMs;
-    if (startMs !== undefined) {
-      return startMs + 24 * 60 * 60 * 1000;
-    }
-  }
-  if (isYesterdayTimeRange(timeRange) && resolvedRangeEndMs !== undefined) {
-    return Math.ceil((resolvedRangeEndMs + 1) / (60 * 60 * 1000)) * 60 * 60 * 1000;
-  }
-  if (resolvedRangeEndMs !== undefined) return resolvedRangeEndMs;
-  return filterWindow.endMs ?? fallbackEndMs;
-};
-
 const loadUsageTab = (): UsageTab => {
   try {
     if (typeof localStorage === 'undefined') {
@@ -760,6 +654,22 @@ const loadUsageTab = (): UsageTab => {
   }
 };
 
+const isOverviewRealtimeWindow = (value: unknown): value is OverviewRealtimeWindow => (
+  value === '15m' || value === '30m' || value === '60m'
+);
+
+const loadRealtimeWindow = (): OverviewRealtimeWindow => {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return DEFAULT_REALTIME_WINDOW;
+    }
+    const raw = localStorage.getItem(OVERVIEW_REALTIME_WINDOW_STORAGE_KEY);
+    return isOverviewRealtimeWindow(raw) ? raw : DEFAULT_REALTIME_WINDOW;
+  } catch {
+    return DEFAULT_REALTIME_WINDOW;
+  }
+};
+
 export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -768,13 +678,12 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const setTheme = useThemeStore((state) => state.setTheme);
   const isDark = resolvedTheme === 'dark';
   const [activeTab, setActiveTab] = useState<UsageTab>(loadUsageTab);
-  const [chartLines, setChartLines] = useState<string[]>(loadChartLines);
   const [timeRange, setTimeRange] = useState<UsageTimeRange>(loadTimeRange);
+  const [realtimeWindow, setRealtimeWindow] = useState<OverviewRealtimeWindow>(loadRealtimeWindow);
   const [customTimeRange, setCustomTimeRange] = useState<{ start: string; end: string }>(loadCustomTimeRange);
   const [selectedApiKeyId, setSelectedApiKeyId] = useState('');
   const [apiKeyOptions, setApiKeyOptions] = useState<CpaApiKeyOption[]>([]);
   const apiKeyOptionsRequestControllerRef = useRef<AbortController | null>(null);
-  const isOverviewTab = activeTab === 'overview';
   const credentialSectionVisibility = getCredentialSectionVisibility(activeTab);
 
   const {
@@ -790,6 +699,17 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     customEnd: customTimeRange.end,
     enabled: activeTab === 'overview',
     apiKeyId: selectedApiKeyId,
+  });
+  const {
+    realtime: currentRealtime,
+    loading: realtimeLoading,
+    error: realtimeError,
+    loadRealtime
+  } = useOverviewRealtimeData({
+    onAuthRequired,
+    enabled: activeTab === 'overview',
+    apiKeyId: selectedApiKeyId,
+    realtimeWindow,
   });
   const {
     modelNames,
@@ -909,19 +829,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       topNoticeTimerRef.current = null;
     }, getUpdateCheckToastDuration(kind));
   }, []);
-
-  const resolvedRangeStartMs = toTimestampMs(usage?.range_start);
-  const resolvedRangeEndMs = toTimestampMs(usage?.range_end);
-  const filterWindow = useMemo<UsageFilterWindow>(() => {
-    if (!usage) return {};
-    return resolveUsageFilterWindow(usage.usage, timeRange, {
-      nowMs: resolvedRangeEndMs ?? lastRefreshedAt?.getTime() ?? Date.now(),
-      customStart:
-        timeRange === 'custom' ? (resolvedRangeStartMs ?? parseCustomDateStart(customTimeRange.start)) : customTimeRange.start,
-      customEnd:
-        timeRange === 'custom' ? (resolvedRangeEndMs ?? parseCustomDateEnd(customTimeRange.end)) : customTimeRange.end
-    });
-  }, [customTimeRange.end, customTimeRange.start, lastRefreshedAt, resolvedRangeEndMs, resolvedRangeStartMs, timeRange, usage]);
 
   useEffect(() => {
     if (timeRange !== 'custom') {
@@ -1124,21 +1031,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       }
     }
   }, [customTimeRange.end, customTimeRange.start, onAuthRequired, timeRange]);
-  const hourWindowHours = useMemo(
-    () => getOverviewHourWindowHours({ timeRange, filterWindow }),
-    [filterWindow, timeRange]
-  );
-  const filterWindowEndMs = getOverviewChartEndMs({
-    timeRange,
-    filterWindow,
-    fallbackEndMs: lastRefreshedAt?.getTime() ?? Date.now(),
-    resolvedRangeStartMs,
-    resolvedRangeEndMs,
-  });
-  const includeFinalHourBucket = isTodayTimeRange(timeRange) || isYesterdayTimeRange(timeRange);
-  const preferredOverviewChartPeriod = getPreferredOverviewChartPeriod({
-    windowMinutes: filterWindow.windowMinutes,
-  });
   const isCustomRange = timeRange === 'custom';
   const customDateRangeBounds = useMemo(() => getCustomDateRangeBounds(Date.now(), status?.timezone), [status?.timezone]);
   const handleCustomDateInputKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
@@ -1150,21 +1042,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     openDateInputPicker(event.currentTarget);
   }, []);
 
-  const handleChartLinesChange = useCallback((lines: string[]) => {
-    setChartLines(normalizeChartLines(lines));
-  }, []);
-
-  useEffect(() => {
-    try {
-      if (typeof localStorage === 'undefined') {
-        return;
-      }
-      localStorage.setItem(CHART_LINES_STORAGE_KEY, JSON.stringify(chartLines));
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [chartLines]);
-
   useEffect(() => {
     try {
       if (typeof localStorage === 'undefined') {
@@ -1175,6 +1052,17 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       // Ignore storage errors.
     }
   }, [timeRange]);
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return;
+      }
+      localStorage.setItem(OVERVIEW_REALTIME_WINDOW_STORAGE_KEY, realtimeWindow);
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [realtimeWindow]);
 
   useEffect(() => {
     try {
@@ -1415,8 +1303,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await Promise.all([loadApiKeySettings(), loadPricing()]);
       return;
     }
-    await loadUsage();
-  }, [activeTab, credentialSectionVisibility.enabled, loadAnalysis, loadApiKeySettings, loadCredentialStats, loadEventFilterOptions, loadEvents, loadPricing, loadUsage, refreshCredentials]);
+    await Promise.all([loadUsage(), loadRealtime()]);
+  }, [activeTab, credentialSectionVisibility.enabled, loadAnalysis, loadApiKeySettings, loadCredentialStats, loadEventFilterOptions, loadEvents, loadPricing, loadRealtime, loadUsage, refreshCredentials]);
 
   const refreshAutoRefreshTab = useCallback(async () => {
     if (activeTab === 'events') {
@@ -1427,8 +1315,16 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await Promise.all([refreshCredentials(), loadCredentialStats()]);
       return;
     }
-    await loadUsage();
-  }, [activeTab, credentialSectionVisibility.enabled, loadCredentialStats, loadEvents, loadUsage, refreshCredentials]);
+    await Promise.all([loadUsage(), loadRealtime()]);
+  }, [activeTab, credentialSectionVisibility.enabled, loadCredentialStats, loadEvents, loadRealtime, loadUsage, refreshCredentials]);
+
+  const handleAutoRefreshError = useCallback((error: unknown) => {
+    if (error instanceof ApiError && error.status === 401) {
+      onAuthRequired?.();
+      return;
+    }
+    setStatusError(error instanceof Error ? error.message : 'REFRESH_FAILED');
+  }, [onAuthRequired]);
 
   const autoRefreshEnabled = shouldAutoRefreshUsageTab({
     activeTab,
@@ -1491,7 +1387,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   useEffect(() => scheduleOverviewAutoRefresh({
     enabled: autoRefreshEnabled,
     refreshOverview: refreshAutoRefreshTab,
-  }), [autoRefreshEnabled, refreshAutoRefreshTab]);
+    onRefreshError: handleAutoRefreshError,
+  }), [autoRefreshEnabled, handleAutoRefreshError, refreshAutoRefreshTab]);
 
   useHeaderRefresh(refreshActiveTab);
 
@@ -1590,6 +1487,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }, [status?.last_run_at]);
   const displayStatusError = statusError === 'REFRESH_FAILED' ? t('notification.refresh_failed') : statusError;
+  const displayRealtimeError = realtimeError
+    ? realtimeError === 'AUTH_REQUIRED'
+      ? t('auth.session_expired')
+      : t('usage_stats.overview_realtime_load_failed')
+    : '';
   // 只有需要时间范围的 tab 才渲染 Range 控件，避免 Credentials/Pricing 产生空白占位。
   const showRangeControls = shouldShowRangeControls(activeTab);
   const {
@@ -1601,39 +1503,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     costSparkline
   } = useSparklines({ usage, loading });
 
-  const {
-    requestsPeriod,
-    tokensPeriod,
-    requestsChartData,
-    tokensChartData,
-    requestsChartOptions,
-    tokensChartOptions
-  } = useChartData({
-    usage,
-    chartLines,
-    isDark,
-    isMobile,
-    hourWindowHours,
-    endMs: filterWindowEndMs,
-    includeFinalHourBucket,
-    preferredPeriod: preferredOverviewChartPeriod,
-  });
-
-  const overviewModelNames = useMemo(
-    () => getOverviewModelNames(usage),
-    [usage]
-  );
-
-  useEffect(() => {
-    if (!isOverviewTab) return;
-    setChartLines((current) => {
-      const next = sanitizeChartLines(current, overviewModelNames);
-      if (next.length === current.length && next.every((line, index) => line === current[index])) {
-        return current;
-      }
-      return next;
-    });
-  }, [isOverviewTab, overviewModelNames]);
   const overviewDisplayLoading = getOverviewDisplayLoading({ loading, hasUsage: Boolean(usage) });
 
   return (
@@ -1932,55 +1801,16 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
                 <ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />
 
-                <TokenBreakdownChart
-                  usage={usage}
-                  loading={overviewDisplayLoading}
+                <OverviewRealtimePanel
+                  realtime={currentRealtime ?? undefined}
+                  loading={realtimeLoading}
+                  error={displayRealtimeError}
+                  window={realtimeWindow}
+                  onWindowChange={setRealtimeWindow}
                   isDark={isDark}
                   isMobile={isMobile}
-                  hourWindowHours={hourWindowHours}
-                  endMs={filterWindowEndMs}
-                  includeFinalHourBucket={includeFinalHourBucket}
-                  preferredPeriod={preferredOverviewChartPeriod}
+                  timezone={currentRealtime?.timezone ?? usage?.timezone}
                 />
-
-                <CostTrendChart
-                  usage={usage}
-                  loading={overviewDisplayLoading}
-                  isDark={isDark}
-                  isMobile={isMobile}
-                  hourWindowHours={hourWindowHours}
-                  endMs={filterWindowEndMs}
-                  includeFinalHourBucket={includeFinalHourBucket}
-                  preferredPeriod={preferredOverviewChartPeriod}
-                />
-
-                <ChartLineSelector
-                  chartLines={chartLines}
-                  modelNames={overviewModelNames}
-                  maxLines={MAX_CHART_LINES}
-                  onChange={handleChartLinesChange}
-                />
-
-                <div className={styles.chartsGrid}>
-                  <UsageChart
-                    title={t('usage_stats.requests_trend')}
-                    period={requestsPeriod}
-                    chartData={requestsChartData}
-                    chartOptions={requestsChartOptions}
-                    loading={overviewDisplayLoading}
-                    isMobile={isMobile}
-                    emptyText={t('usage_stats.no_data')}
-                  />
-                  <UsageChart
-                    title={t('usage_stats.tokens_trend')}
-                    period={tokensPeriod}
-                    chartData={tokensChartData}
-                    chartOptions={tokensChartOptions}
-                    loading={overviewDisplayLoading}
-                    isMobile={isMobile}
-                    emptyText={t('usage_stats.no_data')}
-                  />
-                </div>
               </>
             )}
 

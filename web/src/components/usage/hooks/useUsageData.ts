@@ -4,14 +4,7 @@ import type { UsageOverviewResponse, UsageOverviewUsageSnapshot, UsageTimeRange 
 import { USAGE_STATS_STALE_TIME_MS, useUsageStatsStore } from '@/stores';
 import { buildUsageRangeQuery, normalizeUsageRange } from '@/utils/usage/rangeQuery';
 
-export type UsagePayload = Partial<UsageOverviewUsageSnapshot> & {
-  model_series?: Record<string, {
-    requests_by_hour?: Record<string, number>;
-    requests_by_day?: Record<string, number>;
-    tokens_by_hour?: Record<string, number>;
-    tokens_by_day?: Record<string, number>;
-  }>;
-};
+export type UsagePayload = Partial<UsageOverviewUsageSnapshot>;
 
 export type UsageOverviewPayload = Omit<UsageOverviewResponse, 'usage'> & {
   usage: UsagePayload;

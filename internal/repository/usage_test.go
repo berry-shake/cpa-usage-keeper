@@ -66,7 +66,7 @@ func TestUsageOverviewDailyBucketUsesLocalTime(t *testing.T) {
 	}
 }
 
-func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
+func TestUsageAggregatesApplyModelAuthAndResultFilters(t *testing.T) {
 	db := openUsageTestDatabase(t)
 	events := []entities.UsageEvent{
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "1", Failed: false, TotalTokens: 35},
@@ -76,7 +76,7 @@ func TestUsageAggregatesApplyModelSourceAuthAndResultFilters(t *testing.T) {
 	if _, _, err := InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	filter := repodto.UsageQueryFilter{Model: "claude-sonnet", Source: "source-a", AuthIndex: "1", Result: "success"}
+	filter := repodto.UsageQueryFilter{Model: "claude-sonnet", AuthIndex: "1", Result: "success"}
 
 	page, err := ListUsageEventsWithFilter(db, filter)
 	if err != nil {

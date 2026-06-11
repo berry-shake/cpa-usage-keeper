@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appPath, deleteAuthFiles, fetchAnalysis, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchUsageOverview, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, loginWithCPAAPIKey, logout, markStatusActive, refreshUsageQuotas, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias } from './api';
+import { appPath, deleteAuthFiles, fetchAnalysis, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchKeyOverviewRealtime, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, loginWithCPAAPIKey, logout, markStatusActive, refreshUsageQuotas, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias } from './api';
 
 describe('fetchUsageEvents', () => {
   afterEach(() => {
@@ -34,7 +34,7 @@ describe('fetchUsageEvents', () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0, requests_by_day: {}, requests_by_hour: {}, tokens_by_day: {}, tokens_by_hour: {} } }),
+      json: async () => ({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0 } }),
     } as Response);
     const signal = new AbortController().signal;
 
@@ -48,6 +48,80 @@ describe('fetchUsageEvents', () => {
     expect(parsed.searchParams.get('start')).toBeNull();
     expect(parsed.searchParams.get('end')).toBeNull();
     expect(init).toMatchObject({ credentials: 'include', signal });
+  });
+
+  it('loads realtime overview from dedicated endpoints', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0 } }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    await fetchUsageOverview('24h', undefined, undefined, signal, '9007199254740993');
+    await fetchUsageOverviewRealtime({ signal, apiKeyId: '9007199254740993', window: '60m' });
+    await fetchKeyOverview('8h', signal);
+    await fetchKeyOverviewRealtime({ window: '30m', signal });
+
+    const overviewUrl = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost');
+    const overviewRealtimeUrl = new URL(String(fetchMock.mock.calls[1][0]), 'http://localhost');
+    const keyOverviewUrl = new URL(String(fetchMock.mock.calls[2][0]), 'http://localhost');
+    const keyOverviewRealtimeUrl = new URL(String(fetchMock.mock.calls[3][0]), 'http://localhost');
+    expect(overviewUrl.pathname).toBe('/api/v1/usage/overview');
+    expect(overviewUrl.searchParams.get('realtime_window')).toBeNull();
+    expect(overviewRealtimeUrl.pathname).toBe('/api/v1/usage/overview/realtime');
+    expect(overviewRealtimeUrl.searchParams.get('window')).toBe('60m');
+    expect(overviewRealtimeUrl.searchParams.get('api_key_id')).toBe('9007199254740993');
+    expect(keyOverviewUrl.pathname).toBe('/api/v1/key-overview');
+    expect(keyOverviewUrl.searchParams.get('realtime_window')).toBeNull();
+    expect(keyOverviewRealtimeUrl.pathname).toBe('/api/v1/key-overview/realtime');
+    expect(keyOverviewRealtimeUrl.searchParams.get('window')).toBe('30m');
+    expect(keyOverviewRealtimeUrl.searchParams.get('api_key_id')).toBeNull();
+  });
+
+  it('normalizes key overview realtime responses that omit internal usage dimensions', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        window: '30m',
+        bucket_seconds: 60,
+        token_velocity: [],
+        response_level: [],
+        current_usage: { models: [{ key: 'gpt-5', label: 'gpt-5', tokens: 20, requests: 1, share: 100 }] },
+        request_level: [],
+        cache_level: [],
+      }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    const response = await fetchKeyOverviewRealtime({ window: '30m', signal });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.current_usage.models).toEqual([{ key: 'gpt-5', label: 'gpt-5', tokens: 20, requests: 1, share: 100 }]);
+    expect(response.current_usage.api_keys).toEqual([]);
+    expect(response.current_usage.auth_files).toEqual([]);
+    expect(response.current_usage.ai_providers).toEqual([]);
+  });
+
+  it('derives realtime bucket seconds from the response window when omitted', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        window: '60m',
+        token_velocity: [],
+        response_level: [],
+        current_usage: { models: [] },
+        request_level: [],
+        cache_level: [],
+      }),
+    } as Response);
+
+    const response = await fetchUsageOverviewRealtime();
+
+    expect(response.window).toBe('60m');
+    expect(response.bucket_seconds).toBe(120);
   });
 
   it('posts logout to the auth endpoint', async () => {
@@ -159,7 +233,7 @@ describe('fetchUsageEvents', () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0, requests_by_day: {}, requests_by_hour: {}, tokens_by_day: {}, tokens_by_hour: {} }, events: [], total_count: 0, page: 1, page_size: 100, total_pages: 0 }),
+      json: async () => ({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0 }, events: [], total_count: 0, page: 1, page_size: 100, total_pages: 0 }),
     } as Response);
     const signal = new AbortController().signal;
 
@@ -179,7 +253,7 @@ describe('fetchUsageEvents', () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0, requests_by_day: {}, requests_by_hour: {}, tokens_by_day: {}, tokens_by_hour: {} }, events: [], total_count: 0, page: 1, page_size: 100, total_pages: 0 }),
+      json: async () => ({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0 }, events: [], total_count: 0, page: 1, page_size: 100, total_pages: 0 }),
     } as Response);
     const signal = new AbortController().signal;
 

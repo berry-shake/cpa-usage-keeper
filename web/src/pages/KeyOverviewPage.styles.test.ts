@@ -18,11 +18,44 @@ describe('KeyOverviewPage layout', () => {
 
   it('does not reload overview data just because language changes', () => {
     expect(source).not.toContain('}, [onAuthRequired, t, timeRange]);')
+    expect(source).not.toContain('}, [onAuthRequired, realtimeWindow, t, timeRange]);')
     expect(source).toContain('}, [onAuthRequired, timeRange]);')
+    expect(source).toContain('}, [onAuthRequired, realtimeWindow]);')
+  })
+
+  it('loads overview and realtime data through separate parallel requests', () => {
+    expect(source).toContain('fetchKeyOverviewRealtime')
+    expect(source).toContain('overviewRequestControllerRef')
+    expect(source).toContain('realtimeRequestControllerRef')
+    expect(source).toContain('const overview = await fetchKeyOverview(')
+    expect(source).toContain('const nextRealtime = await fetchKeyOverviewRealtime({')
+    expect(source).toContain('await Promise.all([loadOverview(options), loadRealtime(options)])')
+  })
+
+  it('auto-refreshes the viewer overview and realtime data together', () => {
+    expect(source).toContain('KEY_OVERVIEW_AUTO_REFRESH_INTERVAL_MS')
+    expect(source).toContain('scheduleKeyOverviewAutoRefresh')
+    expect(source).toContain('refreshKeyOverview')
+    expect(source).toContain('refreshOverview: () => refreshKeyOverview({ skipIfInFlight: true })')
+    expect(source).toContain('onRefreshError: handleAutoRefreshError')
+    expect(source).toContain('intervalMs: KEY_OVERVIEW_AUTO_REFRESH_INTERVAL_MS')
+  })
+
+  it('keeps manual refresh available while background loads are in flight', () => {
+    expect(source).toContain('const refreshDisabled = manualRefreshLoading || refreshThrottled')
+    expect(source).not.toContain('manualRefreshLoading || loading || realtimeLoading || refreshThrottled')
+  })
+
+  it('keeps existing realtime data visible during background refreshes', () => {
+    expect(source).not.toContain('setRealtime(null)')
+    expect(source).toContain('realtime?.window === realtimeWindow ? realtime : undefined')
   })
 
   it('removes the Request Health Timeline label instead of toggling it off', () => {
     expect(source).toContain('<ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />')
+    expect(source).toContain('<OverviewRealtimePanel')
+    expect(source).toContain('KEY_OVERVIEW_REALTIME_VISIBLE_DIMENSIONS')
+    expect(source).toContain("visibleDimensions={KEY_OVERVIEW_REALTIME_VISIBLE_DIMENSIONS}")
     expect(source).not.toContain('showEyebrow')
   })
 

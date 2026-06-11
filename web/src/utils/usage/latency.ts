@@ -14,6 +14,7 @@ export interface DurationFormatOptions {
   invalidText?: string;
   secondDecimals?: number | 'auto';
   locale?: string;
+  unitLabels?: Partial<Record<'d' | 'h' | 'm' | 's' | 'ms', string>>;
 }
 
 export interface LatencyAccumulator {
@@ -65,15 +66,19 @@ const formatDurationNumber = (
   }
 };
 
-const getDurationUnitLabel = (unit: 'd' | 'h' | 'm' | 's' | 'ms'): string =>
-  i18n.t(`usage_stats.duration_unit_${unit}`, { defaultValue: unit });
+const getDurationUnitLabel = (
+  unit: 'd' | 'h' | 'm' | 's' | 'ms',
+  unitLabels?: DurationFormatOptions['unitLabels']
+): string =>
+  unitLabels?.[unit] ?? i18n.t(`usage_stats.duration_unit_${unit}`, { defaultValue: unit });
 
 const formatDurationPart = (
   value: number,
   unit: 'd' | 'h' | 'm' | 's' | 'ms',
   locale: string | undefined,
-  options: Intl.NumberFormatOptions = {}
-): string => `${formatDurationNumber(value, locale, options)}${getDurationUnitLabel(unit)}`;
+  options: Intl.NumberFormatOptions = {},
+  unitLabels?: DurationFormatOptions['unitLabels']
+): string => `${formatDurationNumber(value, locale, options)}${getDurationUnitLabel(unit, unitLabels)}`;
 
 /**
  * 从后端字段 latency_ms 提取耗时，并按毫秒解释。
@@ -153,9 +158,10 @@ export function formatDurationMs(
   }
 
   const locale = resolveDurationLocale(options.locale);
+  const unitLabels = options.unitLabels;
 
   if (parsed < 1000) {
-    return formatDurationPart(Math.round(parsed), 'ms', locale);
+    return formatDurationPart(Math.round(parsed), 'ms', locale, {}, unitLabels);
   }
 
   const seconds = parsed / 1000;
@@ -164,7 +170,7 @@ export function formatDurationMs(
     return formatDurationPart(seconds, 's', locale, {
       minimumFractionDigits: 0,
       maximumFractionDigits: secondDecimalPlaces,
-    });
+    }, unitLabels);
   }
 
   const totalSeconds = Math.floor(seconds);
@@ -184,7 +190,7 @@ export function formatDurationMs(
   ].filter((part) => part.value > 0);
 
   if (!parts.length) {
-    return formatDurationPart(0, 's', locale);
+    return formatDurationPart(0, 's', locale, {}, unitLabels);
   }
 
   return parts
@@ -193,7 +199,7 @@ export function formatDurationMs(
       formatDurationPart(part.value, part.unit, locale, {
         minimumIntegerDigits: index > 0 && (part.unit === 'm' || part.unit === 's') ? 2 : 1,
         maximumFractionDigits: 0,
-      })
+      }, unitLabels)
     )
     .join(' ');
 }

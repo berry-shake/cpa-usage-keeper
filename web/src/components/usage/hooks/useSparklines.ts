@@ -1,12 +1,11 @@
 import { useCallback, useMemo } from 'react';
-import { calculateCacheRate } from '@/utils/usage';
 import type { UsageOverviewPayload } from './useUsageData';
 
 export interface SparklineData {
   labels: string[];
   datasets: [
     {
-      data: number[];
+      data: Array<number | null>;
       borderColor: string;
       backgroundColor: string;
       fill: boolean;
@@ -41,7 +40,7 @@ export interface UsageSparklineSeries {
   tokens: number[];
   rpm: number[];
   tpm: number[];
-  cachedRate: number[];
+  cachedRate: Array<number | null>;
   cost: number[];
 }
 
@@ -57,6 +56,13 @@ export const SPARKLINE_COLORS = {
 const normalizeSparklineNumber = (value: unknown): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+};
+
+const normalizeNullableSparklineNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return normalizeSparklineNumber(value);
 };
 
 export function buildUsageSparklineSeries({ usage }: Omit<UseSparklinesOptions, 'loading'>): UsageSparklineSeries {
@@ -75,11 +81,7 @@ export function buildUsageSparklineSeries({ usage }: Omit<UseSparklinesOptions, 
     tokens: labels.map((label) => normalizeSparklineNumber(usage.series?.tokens?.[label])),
     rpm: labels.map((label) => normalizeSparklineNumber(usage.series?.rpm?.[label])),
     tpm: labels.map((label) => normalizeSparklineNumber(usage.series?.tpm?.[label])),
-    cachedRate: labels.map((label) => {
-      const inputTokens = normalizeSparklineNumber(usage.series?.input_tokens?.[label]);
-      const cachedTokens = normalizeSparklineNumber(usage.series?.cached_tokens?.[label]);
-      return calculateCacheRate({ inputTokens, cachedTokens }) ?? 0;
-    }),
+    cachedRate: labels.map((label) => normalizeNullableSparklineNumber(usage.series?.cache_rate?.[label])),
     cost: labels.map((label) => normalizeSparklineNumber(usage.series?.cost?.[label])),
   };
 }
@@ -92,7 +94,7 @@ export function useSparklines({ usage, loading }: UseSparklinesOptions): UseSpar
 
   const buildSparkline = useCallback(
     (
-      input: { labels: string[]; data: number[] },
+      input: { labels: string[]; data: Array<number | null> },
       color: string,
       backgroundColor: string
     ): SparklineBundle | null => {

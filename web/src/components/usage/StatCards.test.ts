@@ -1,16 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { buildStatCardMetrics } from './StatCards';
-import type { UsagePayload } from './hooks/useUsageData';
+import type { UsageOverviewPayload } from './hooks/useUsageData';
 
-const usageWithBackendSummary: UsagePayload = {
-  total_requests: 9,
-  success_count: 8,
-  failure_count: 1,
-  total_tokens: 900,
-  requests_by_day: {},
-  requests_by_hour: {},
-  tokens_by_day: {},
-  tokens_by_hour: {},
+const usageWithBackendSummary: UsageOverviewPayload = {
+  usage: {
+    total_requests: 9,
+    success_count: 8,
+    failure_count: 1,
+    total_tokens: 900,
+  },
   summary: {
     request_count: 3,
     token_count: 777,
@@ -19,6 +17,7 @@ const usageWithBackendSummary: UsagePayload = {
     tpm: 6.475,
     total_cost: 1.234,
     cost_available: true,
+    input_tokens: 220,
     cached_tokens: 22,
     reasoning_tokens: 33,
   },
@@ -28,13 +27,7 @@ const usageWithBackendSummary: UsagePayload = {
     rpm: {},
     tpm: {},
     cost: {},
-    input_tokens: {
-      '2026-04-23T10:00:00Z': 120,
-      '2026-04-23T11:00:00Z': 100,
-    },
-    output_tokens: {},
-    cached_tokens: {},
-    reasoning_tokens: {},
+    cache_rate: {},
   },
 };
 
@@ -57,13 +50,13 @@ describe('buildStatCardMetrics', () => {
     expect(metrics.totalCost).toBe(1.234);
   });
 
-  it('keeps cache rate empty when overview input tokens are missing', () => {
+  it('keeps cache rate empty when overview summary input tokens are missing', () => {
     const metrics = buildStatCardMetrics({
       usage: {
         ...usageWithBackendSummary,
-        series: {
-          ...usageWithBackendSummary.series!,
-          input_tokens: {},
+        summary: {
+          ...usageWithBackendSummary.summary!,
+          input_tokens: 0,
         },
       },
     });
@@ -77,7 +70,7 @@ describe('buildStatCardMetrics', () => {
       usage: {
         ...usageWithBackendSummary,
         usage: {
-          ...usageWithBackendSummary,
+          ...usageWithBackendSummary.usage,
           total_requests: 0,
           success_count: 3,
         },

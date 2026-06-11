@@ -4,8 +4,8 @@ import "time"
 
 // UsageEvent 是落库后的单条 usage 请求事件实体。
 type UsageEvent struct {
-	ID                  int64     `gorm:"primaryKey;index:idx_usage_events_timestamp_id,sort:desc,priority:2;index:idx_usage_events_auth_type_auth_index_id,priority:3"`
-	EventKey            string    `gorm:"index:idx_usage_events_event_key"`
+	ID                  int64 `gorm:"primaryKey;index:idx_usage_events_timestamp_id,sort:desc,priority:2;index:idx_usage_events_auth_type_auth_index_id,priority:3;index:idx_usage_events_auth_index_timestamp_id,priority:3"`
+	EventKey            string
 	APIGroupKey         string    `gorm:"index:idx_usage_events_api_group_key"`
 	Provider            string    `gorm:"column:provider"`
 	Endpoint            string    `gorm:"column:endpoint"`
@@ -16,10 +16,10 @@ type UsageEvent struct {
 	ReasoningEffort     string    `gorm:"column:reasoning_effort;not null;default:''"`
 	ServiceTier         string    `gorm:"column:service_tier;not null;default:''"`
 	ExecutorType        string    `gorm:"column:executor_type;not null;default:''"`
-	Timestamp           time.Time `gorm:"serializer:storageTime;index:idx_usage_events_timestamp_id,sort:desc,priority:1"`
+	Timestamp           time.Time `gorm:"serializer:storageTime;index:idx_usage_events_timestamp_id,sort:desc,priority:1;index:idx_usage_events_auth_index_timestamp_id,priority:2"`
 	Source              string
-	AuthIndex           string `gorm:"index:idx_usage_events_auth_index;index:idx_usage_events_auth_type_auth_index_id,priority:2"`
-	Failed              bool   `gorm:"index:idx_usage_events_failed"`
+	AuthIndex           string `gorm:"index:idx_usage_events_auth_index;index:idx_usage_events_auth_type_auth_index_id,priority:2;index:idx_usage_events_auth_index_timestamp_id,priority:1"`
+	Failed              bool
 	LatencyMS           int64
 	TTFTMS              *int64 `gorm:"column:ttft_ms"`
 	InputTokens         int64

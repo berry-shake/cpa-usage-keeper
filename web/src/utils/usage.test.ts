@@ -1,23 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChartData, calculateCacheRate, getOverviewModelNames, resolveUsageFilterWindow, sanitizeChartLines } from '@/utils/usage';
-
-describe('buildChartData', () => {
-  it('uses overview bucket maps directly for daily chart labels', () => {
-    const chartData = buildChartData({
-      total_requests: 1,
-      success_count: 1,
-      failure_count: 0,
-      total_tokens: 3,
-      requests_by_day: { '2026-04-23': 1 },
-      requests_by_hour: {},
-      tokens_by_day: { '2026-04-23': 3 },
-      tokens_by_hour: {},
-    }, 'day', 'requests', ['all']);
-
-    expect(chartData.labels).toEqual(['2026-04-23']);
-    expect(chartData.datasets[0]?.data).toEqual([1]);
-  });
-});
+import { calculateCacheRate, resolveUsageFilterWindow } from '@/utils/usage';
 
 describe('resolveUsageFilterWindow', () => {
   it('resolves today from local day start through the refresh anchor', () => {
@@ -62,43 +44,6 @@ describe('resolveUsageFilterWindow', () => {
       endMs: nowMs,
       windowMinutes: 30 * 24 * 60,
     });
-  });
-});
-
-describe('sanitizeChartLines', () => {
-  it('falls back to all when persisted lines no longer exist in the current overview payload', () => {
-    expect(sanitizeChartLines(['stale-model'], ['gpt-5.4', 'gpt-5.4-mini'])).toEqual(['all']);
-  });
-});
-
-describe('getOverviewModelNames', () => {
-  it('reads model line options from overview series instead of usage api snapshots', () => {
-    expect(getOverviewModelNames({
-      series: {
-        requests: {},
-        tokens: {},
-        rpm: {},
-        tpm: {},
-        cost: {},
-        input_tokens: {},
-        output_tokens: {},
-        cached_tokens: {},
-        reasoning_tokens: {},
-        models: {
-          'claude-sonnet': {
-            requests: {},
-            tokens: {},
-            rpm: {},
-            tpm: {},
-            cost: {},
-            input_tokens: {},
-            output_tokens: {},
-            cached_tokens: {},
-            reasoning_tokens: {},
-          },
-        },
-      },
-    })).toEqual(['claude-sonnet']);
   });
 });
 

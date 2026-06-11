@@ -60,10 +60,6 @@ const safeNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const sumNumberRecord = (record?: Record<string, number>): number => (
-  Object.values(record ?? {}).reduce((sum, value) => sum + Math.max(safeNumber(value), 0), 0)
-);
-
 const calculateSuccessRate = (usageSnapshot: UsagePayload | null): number | null => {
   const totalRequests = Math.max(safeNumber(usageSnapshot?.total_requests), 0);
   if (totalRequests <= 0) {
@@ -89,7 +85,7 @@ export function buildStatCardMetrics({ usage }: { usage: UsageOverviewPayload | 
   }
 
   const cachedTokens = Math.max(safeNumber(usage.summary.cached_tokens), 0);
-  const inputTokens = sumNumberRecord(usage.series?.input_tokens);
+  const inputTokens = Math.max(safeNumber(usage.summary.input_tokens), 0);
 
   return {
     requestStats,

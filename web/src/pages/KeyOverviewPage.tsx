@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, fetchKeyOverview, logout } from '@/lib/api';
-import type { AuthSessionAPIKeySummary, KeyOverviewTimeRange, UsageOverviewResponse } from '@/lib/types';
+import { ApiError, fetchKeyOverview, fetchKeyOverviewRealtime, logout } from '@/lib/api';
+import type { AuthSessionAPIKeySummary, KeyOverviewTimeRange, OverviewRealtimeBlock, OverviewRealtimeWindow, UsageOverviewResponse } from '@/lib/types';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Select } from '@/components/ui/Select';
@@ -9,38 +9,24 @@ import { IconRefreshCw } from '@/components/ui/icons';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useThemeStore } from '@/stores';
 import {
-  ChartLineSelector,
-  CostTrendChart,
+  OverviewRealtimePanel,
   ServiceHealthCard,
   StatCards,
-  TokenBreakdownChart,
-  UsageChart,
-  useChartData,
   useSparklines,
 } from '@/components/usage';
 import type { UsageOverviewPayload } from '@/components/usage/hooks/useUsageData';
 import { BrandLink } from '@/components/BrandLink';
-import {
-  getOverviewModelNames,
-  resolveUsageFilterWindow,
-  sanitizeChartLines,
-  type UsageFilterWindow,
-} from '@/utils/usage';
-import {
-  getOverviewChartEndMs,
-  getOverviewDisplayLoading,
-  getOverviewHourWindowHours,
-  getPreferredOverviewChartPeriod,
-} from '@/utils/usage/overview';
+import { getOverviewDisplayLoading } from '@/utils/usage/overview';
 import type { Theme } from '@/types';
 import styles from './KeyOverviewPage.module.scss';
 
 const KEY_OVERVIEW_RANGE_STORAGE_KEY = 'cli-proxy-key-overview-range-v1';
-const KEY_OVERVIEW_CHART_LINES_STORAGE_KEY = 'cli-proxy-key-overview-chart-lines-v1';
+const OVERVIEW_REALTIME_WINDOW_STORAGE_KEY = 'cli-proxy-usage-overview-realtime-window-v1';
 const DEFAULT_TIME_RANGE: KeyOverviewTimeRange = '8h';
-const DEFAULT_CHART_LINES = ['all'];
-const MAX_CHART_LINES = 9;
+const DEFAULT_REALTIME_WINDOW: OverviewRealtimeWindow = '15m';
+const KEY_OVERVIEW_REALTIME_VISIBLE_DIMENSIONS = ['models'] as const;
 const REFRESH_THROTTLE_MS = 1_000;
+const KEY_OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
 
 const TIME_RANGE_OPTIONS: ReadonlyArray<{ value: KeyOverviewTimeRange; labelKey: string }> = [
   { value: '4h', labelKey: 'usage_stats.range_4h' },
@@ -63,22 +49,6 @@ const isKeyOverviewTimeRange = (value: unknown): value is KeyOverviewTimeRange =
   value === '4h' || value === '8h' || value === '12h' || value === '24h' || value === 'today' || value === 'yesterday' || value === '7d' || value === '30d'
 );
 
-const toTimestampMs = (value: string | undefined): number | undefined => {
-  if (!value) return undefined;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
-};
-
-const normalizeChartLines = (value: unknown, maxLines = MAX_CHART_LINES): string[] => {
-  if (!Array.isArray(value)) return DEFAULT_CHART_LINES;
-  const filtered = value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, maxLines);
-  return filtered.length ? filtered : DEFAULT_CHART_LINES;
-};
-
 const loadTimeRange = (): KeyOverviewTimeRange => {
   try {
     if (typeof localStorage === 'undefined') return DEFAULT_TIME_RANGE;
@@ -89,14 +59,101 @@ const loadTimeRange = (): KeyOverviewTimeRange => {
   }
 };
 
-const loadChartLines = (): string[] => {
+const isOverviewRealtimeWindow = (value: unknown): value is OverviewRealtimeWindow => (
+  value === '15m' || value === '30m' || value === '60m'
+);
+
+const loadRealtimeWindow = (): OverviewRealtimeWindow => {
   try {
-    if (typeof localStorage === 'undefined') return DEFAULT_CHART_LINES;
-    const raw = localStorage.getItem(KEY_OVERVIEW_CHART_LINES_STORAGE_KEY);
-    return raw ? normalizeChartLines(JSON.parse(raw)) : DEFAULT_CHART_LINES;
+    if (typeof localStorage === 'undefined') return DEFAULT_REALTIME_WINDOW;
+    const raw = localStorage.getItem(OVERVIEW_REALTIME_WINDOW_STORAGE_KEY);
+    return isOverviewRealtimeWindow(raw) ? raw : DEFAULT_REALTIME_WINDOW;
   } catch {
-    return DEFAULT_CHART_LINES;
+    return DEFAULT_REALTIME_WINDOW;
   }
+};
+
+type KeyOverviewAutoRefreshDocument = Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>;
+
+type KeyOverviewAutoRefreshOptions = {
+  refreshOverview: () => void | Promise<void>;
+  onRefreshError?: (error: unknown) => void;
+  documentRef?: KeyOverviewAutoRefreshDocument;
+  intervalMs?: number;
+};
+
+type KeyOverviewLoadOptions = {
+  skipIfInFlight?: boolean;
+};
+
+type KeyOverviewRequestStartOptions = {
+  currentController: AbortController | null;
+  skipIfInFlight?: boolean;
+};
+
+export const startKeyOverviewRequest = ({
+  currentController,
+  skipIfInFlight,
+}: KeyOverviewRequestStartOptions): { controller: AbortController | null; skipped: boolean } => {
+  if (currentController && skipIfInFlight) {
+    return { controller: null, skipped: true };
+  }
+  currentController?.abort();
+  return { controller: new AbortController(), skipped: false };
+};
+
+export const scheduleKeyOverviewAutoRefresh = ({
+  refreshOverview,
+  onRefreshError,
+  documentRef,
+  intervalMs = KEY_OVERVIEW_AUTO_REFRESH_INTERVAL_MS,
+}: KeyOverviewAutoRefreshOptions) => {
+  const targetDocument = documentRef ?? (typeof document === 'undefined' ? undefined : document);
+  if (!targetDocument) {
+    return () => undefined;
+  }
+
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const stopTimer = () => {
+    if (timer === undefined) return;
+    clearInterval(timer);
+    timer = undefined;
+  };
+  const runRefresh = () => {
+    Promise.resolve(refreshOverview()).catch((nextError: unknown) => {
+      onRefreshError?.(nextError);
+    });
+  };
+  const refreshIfVisible = () => {
+    if (targetDocument.visibilityState === 'hidden') {
+      stopTimer();
+      return;
+    }
+    runRefresh();
+  };
+  const startTimer = () => {
+    if (timer !== undefined) return;
+    timer = setInterval(refreshIfVisible, intervalMs);
+  };
+  const handleVisibilityChange = () => {
+    if (targetDocument.visibilityState === 'hidden') {
+      stopTimer();
+      return;
+    }
+    runRefresh();
+    stopTimer();
+    startTimer();
+  };
+
+  if (targetDocument.visibilityState !== 'hidden') {
+    startTimer();
+  }
+  targetDocument.addEventListener('visibilitychange', handleVisibilityChange);
+
+  return () => {
+    stopTimer();
+    targetDocument.removeEventListener('visibilitychange', handleVisibilityChange);
+  };
 };
 
 export interface KeyOverviewPageProps {
@@ -109,19 +166,22 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
   const isMobile = useMediaQuery('(max-width: 768px)');
   const theme = useThemeStore((state) => state.theme);
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
-  const setTheme = useThemeStore((state) => state.setTheme);
   const isDark = resolvedTheme === 'dark';
+  const setTheme = useThemeStore((state) => state.setTheme);
   const [timeRange, setTimeRange] = useState<KeyOverviewTimeRange>(loadTimeRange);
-  const [chartLines, setChartLines] = useState<string[]>(loadChartLines);
+  const [realtimeWindow, setRealtimeWindow] = useState<OverviewRealtimeWindow>(loadRealtimeWindow);
   const [usage, setUsage] = useState<UsageOverviewPayload | null>(null);
+  const [realtime, setRealtime] = useState<OverviewRealtimeBlock | null>(null);
   const [loading, setLoading] = useState(false);
+  const [realtimeLoading, setRealtimeLoading] = useState(false);
   const [error, setError] = useState('');
+  const [realtimeError, setRealtimeError] = useState('');
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [manualRefreshLoading, setManualRefreshLoading] = useState(false);
   const [refreshThrottled, setRefreshThrottled] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const requestControllerRef = useRef<AbortController | null>(null);
-  const refreshLockedUntilRef = useRef(0);
+  const overviewRequestControllerRef = useRef<AbortController | null>(null);
+  const realtimeRequestControllerRef = useRef<AbortController | null>(null);
   const refreshThrottleTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const rangeOptions = useMemo(() => TIME_RANGE_OPTIONS.map((option) => ({
@@ -134,29 +194,20 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
     [t]
   );
 
-  const loadOverview = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    if (force && Date.now() < refreshLockedUntilRef.current) return;
-    requestControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
+  const loadOverview = useCallback(async (options: KeyOverviewLoadOptions = {}) => {
+    const { controller, skipped } = startKeyOverviewRequest({
+      currentController: overviewRequestControllerRef.current,
+      skipIfInFlight: options.skipIfInFlight,
+    });
+    if (skipped || !controller) return;
+    overviewRequestControllerRef.current = controller;
     setLoading(true);
     setError('');
     try {
-      const response = await fetchKeyOverview(timeRange, controller.signal);
-      if (requestControllerRef.current !== controller) return;
-      setUsage(response as UsageOverviewResponse as UsageOverviewPayload);
+      const overview = await fetchKeyOverview(timeRange, controller.signal);
+      if (overviewRequestControllerRef.current !== controller) return;
+      setUsage(overview as UsageOverviewResponse as UsageOverviewPayload);
       setLastRefreshedAt(new Date());
-      if (force) {
-        refreshLockedUntilRef.current = Date.now() + REFRESH_THROTTLE_MS;
-        setRefreshThrottled(true);
-        if (refreshThrottleTimerRef.current !== null) {
-          window.clearTimeout(refreshThrottleTimerRef.current);
-        }
-        refreshThrottleTimerRef.current = window.setTimeout(() => {
-          refreshThrottleTimerRef.current = null;
-          setRefreshThrottled(false);
-        }, REFRESH_THROTTLE_MS);
-      }
     } catch (nextError) {
       if (controller.signal.aborted) return;
       if (nextError instanceof ApiError && nextError.status === 401) {
@@ -169,20 +220,63 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
       }
       setError(nextError instanceof Error ? nextError.message : 'KEY_OVERVIEW_LOAD_FAILED');
     } finally {
-      if (requestControllerRef.current === controller) {
+      if (overviewRequestControllerRef.current === controller) {
         setLoading(false);
-        requestControllerRef.current = null;
+        overviewRequestControllerRef.current = null;
       }
     }
   }, [onAuthRequired, timeRange]);
 
+  const loadRealtime = useCallback(async (options: KeyOverviewLoadOptions = {}) => {
+    const { controller, skipped } = startKeyOverviewRequest({
+      currentController: realtimeRequestControllerRef.current,
+      skipIfInFlight: options.skipIfInFlight,
+    });
+    if (skipped || !controller) return;
+    realtimeRequestControllerRef.current = controller;
+    setRealtimeLoading(true);
+    setRealtimeError('');
+    try {
+      const nextRealtime = await fetchKeyOverviewRealtime({
+        window: realtimeWindow,
+        signal: controller.signal,
+      });
+      if (realtimeRequestControllerRef.current !== controller) return;
+      setRealtime(nextRealtime);
+    } catch (nextError) {
+      if (controller.signal.aborted) return;
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        onAuthRequired?.();
+        return;
+      }
+      if (nextError instanceof ApiError && nextError.status === 429) {
+        setRealtimeError('KEY_OVERVIEW_RATE_LIMITED');
+        return;
+      }
+      setRealtimeError('KEY_OVERVIEW_REALTIME_LOAD_FAILED');
+    } finally {
+      if (realtimeRequestControllerRef.current === controller) {
+        setRealtimeLoading(false);
+        realtimeRequestControllerRef.current = null;
+      }
+    }
+  }, [onAuthRequired, realtimeWindow]);
+
   useEffect(() => {
     void loadOverview();
     return () => {
-      requestControllerRef.current?.abort();
-      requestControllerRef.current = null;
+      overviewRequestControllerRef.current?.abort();
+      overviewRequestControllerRef.current = null;
     };
   }, [loadOverview]);
+
+  useEffect(() => {
+    void loadRealtime();
+    return () => {
+      realtimeRequestControllerRef.current?.abort();
+      realtimeRequestControllerRef.current = null;
+    };
+  }, [loadRealtime]);
 
   useEffect(() => () => {
     if (refreshThrottleTimerRef.current !== null) {
@@ -190,6 +284,28 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
       refreshThrottleTimerRef.current = null;
     }
   }, []);
+
+  const refreshKeyOverview = useCallback(async (options: KeyOverviewLoadOptions = {}) => {
+    await Promise.all([loadOverview(options), loadRealtime(options)]);
+  }, [loadOverview, loadRealtime]);
+
+  const handleAutoRefreshError = useCallback((nextError: unknown) => {
+    if (nextError instanceof ApiError && nextError.status === 401) {
+      onAuthRequired?.();
+      return;
+    }
+    if (nextError instanceof ApiError && nextError.status === 429) {
+      setError('KEY_OVERVIEW_RATE_LIMITED');
+      return;
+    }
+    setError('KEY_OVERVIEW_LOAD_FAILED');
+  }, [onAuthRequired]);
+
+  useEffect(() => scheduleKeyOverviewAutoRefresh({
+    refreshOverview: () => refreshKeyOverview({ skipIfInFlight: true }),
+    onRefreshError: handleAutoRefreshError,
+    intervalMs: KEY_OVERVIEW_AUTO_REFRESH_INTERVAL_MS,
+  }), [handleAutoRefreshError, refreshKeyOverview]);
 
   useEffect(() => {
     try {
@@ -201,49 +317,11 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
 
   useEffect(() => {
     try {
-      localStorage.setItem(KEY_OVERVIEW_CHART_LINES_STORAGE_KEY, JSON.stringify(chartLines));
+      localStorage.setItem(OVERVIEW_REALTIME_WINDOW_STORAGE_KEY, realtimeWindow);
     } catch {
       // ignore storage failures
     }
-  }, [chartLines]);
-
-  const resolvedRangeEndMs = toTimestampMs(usage?.range_end);
-  const filterWindow = useMemo<UsageFilterWindow>(() => {
-    if (!usage) return {};
-    return resolveUsageFilterWindow(usage.usage, timeRange, {
-      nowMs: resolvedRangeEndMs ?? lastRefreshedAt?.getTime() ?? Date.now(),
-    });
-  }, [lastRefreshedAt, resolvedRangeEndMs, timeRange, usage]);
-
-  const hourWindowHours = useMemo(
-    () => getOverviewHourWindowHours({ timeRange, filterWindow }),
-    [filterWindow, timeRange]
-  );
-  const filterWindowEndMs = getOverviewChartEndMs({
-    timeRange,
-    filterWindow,
-    fallbackEndMs: lastRefreshedAt?.getTime() ?? Date.now(),
-    resolvedRangeEndMs,
-  });
-  const includeFinalHourBucket = timeRange === 'today' || timeRange === 'yesterday';
-  const preferredOverviewChartPeriod = getPreferredOverviewChartPeriod({
-    windowMinutes: filterWindow.windowMinutes,
-  });
-
-  const overviewModelNames = useMemo(
-    () => getOverviewModelNames(usage),
-    [usage]
-  );
-
-  useEffect(() => {
-    setChartLines((current) => {
-      const next = sanitizeChartLines(current, overviewModelNames);
-      if (next.length === current.length && next.every((line, index) => line === current[index])) {
-        return current;
-      }
-      return next;
-    });
-  }, [overviewModelNames]);
+  }, [realtimeWindow]);
 
   const overviewDisplayLoading = getOverviewDisplayLoading({ loading, hasUsage: Boolean(usage) });
   const {
@@ -254,38 +332,25 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
     cachedRateSparkline,
     costSparkline,
   } = useSparklines({ usage, loading });
-  const {
-    requestsPeriod,
-    tokensPeriod,
-    requestsChartData,
-    tokensChartData,
-    requestsChartOptions,
-    tokensChartOptions,
-  } = useChartData({
-    usage,
-    chartLines,
-    isDark,
-    isMobile,
-    hourWindowHours,
-    endMs: filterWindowEndMs,
-    includeFinalHourBucket,
-    preferredPeriod: preferredOverviewChartPeriod,
-  });
 
-  const handleChartLinesChange = useCallback((lines: string[]) => {
-    setChartLines(normalizeChartLines(lines));
-  }, []);
-
-  const refreshDisabled = manualRefreshLoading || loading || refreshThrottled;
+  const refreshDisabled = manualRefreshLoading || refreshThrottled;
   const handleManualRefresh = useCallback(async () => {
     if (refreshDisabled) return;
     setManualRefreshLoading(true);
     try {
-      await loadOverview({ force: true });
+      await refreshKeyOverview();
+      setRefreshThrottled(true);
+      if (refreshThrottleTimerRef.current !== null) {
+        window.clearTimeout(refreshThrottleTimerRef.current);
+      }
+      refreshThrottleTimerRef.current = window.setTimeout(() => {
+        refreshThrottleTimerRef.current = null;
+        setRefreshThrottled(false);
+      }, REFRESH_THROTTLE_MS);
     } finally {
       setManualRefreshLoading(false);
     }
-  }, [loadOverview, refreshDisabled]);
+  }, [refreshDisabled, refreshKeyOverview]);
 
   const handleLogout = useCallback(async () => {
     setLoggingOut(true);
@@ -303,6 +368,11 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
     : error === 'KEY_OVERVIEW_LOAD_FAILED'
       ? t('key_overview.load_failed')
       : error;
+  const displayRealtimeError = realtimeError
+    ? realtimeError === 'KEY_OVERVIEW_RATE_LIMITED'
+      ? t('key_overview.rate_limited')
+      : t('usage_stats.overview_realtime_load_failed')
+    : '';
 
   return (
     <div className={styles.pageShell}>
@@ -417,7 +487,7 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
               </div>
             </div>
 
-            {displayError && <div className={styles.errorBox}>{displayError === 'AUTH_REQUIRED' ? t('auth.session_expired') : displayError}</div>}
+            {displayError && <div className={styles.errorBox}>{displayError}</div>}
 
             <StatCards
               usage={usage}
@@ -434,55 +504,17 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
 
             <ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />
 
-            <TokenBreakdownChart
-              usage={usage}
-              loading={overviewDisplayLoading}
+            <OverviewRealtimePanel
+              realtime={realtime?.window === realtimeWindow ? realtime : undefined}
+              loading={realtimeLoading}
+              error={displayRealtimeError}
+              window={realtimeWindow}
+              onWindowChange={setRealtimeWindow}
               isDark={isDark}
               isMobile={isMobile}
-              hourWindowHours={hourWindowHours}
-              endMs={filterWindowEndMs}
-              includeFinalHourBucket={includeFinalHourBucket}
-              preferredPeriod={preferredOverviewChartPeriod}
+              timezone={realtime?.timezone ?? usage?.timezone}
+              visibleDimensions={KEY_OVERVIEW_REALTIME_VISIBLE_DIMENSIONS}
             />
-
-            <CostTrendChart
-              usage={usage}
-              loading={overviewDisplayLoading}
-              isDark={isDark}
-              isMobile={isMobile}
-              hourWindowHours={hourWindowHours}
-              endMs={filterWindowEndMs}
-              includeFinalHourBucket={includeFinalHourBucket}
-              preferredPeriod={preferredOverviewChartPeriod}
-            />
-
-            <ChartLineSelector
-              chartLines={chartLines}
-              modelNames={overviewModelNames}
-              maxLines={MAX_CHART_LINES}
-              onChange={handleChartLinesChange}
-            />
-
-            <div className={styles.chartsGrid}>
-              <UsageChart
-                title={t('usage_stats.requests_trend')}
-                period={requestsPeriod}
-                chartData={requestsChartData}
-                chartOptions={requestsChartOptions}
-                loading={overviewDisplayLoading}
-                isMobile={isMobile}
-                emptyText={t('usage_stats.no_data')}
-              />
-              <UsageChart
-                title={t('usage_stats.tokens_trend')}
-                period={tokensPeriod}
-                chartData={tokensChartData}
-                chartOptions={tokensChartOptions}
-                loading={overviewDisplayLoading}
-                isMobile={isMobile}
-                emptyText={t('usage_stats.no_data')}
-              />
-            </div>
           </div>
         </main>
       </div>

@@ -1,16 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { SPARKLINE_COLORS, buildUsageSparklineSeries } from './useSparklines';
-import type { UsagePayload } from './useUsageData';
+import type { UsageOverviewPayload } from './useUsageData';
 
-const usageWithBackendSeries: UsagePayload = {
-  total_requests: 9,
-  success_count: 8,
-  failure_count: 1,
-  total_tokens: 900,
-  requests_by_day: {},
-  requests_by_hour: {},
-  tokens_by_day: {},
-  tokens_by_hour: {},
+const usageWithBackendSeries: UsageOverviewPayload = {
+  usage: {
+    total_requests: 9,
+    success_count: 8,
+    failure_count: 1,
+    total_tokens: 900,
+  },
+  summary: {
+    request_count: 9,
+    token_count: 900,
+    window_minutes: 120,
+    rpm: 0.075,
+    tpm: 7.5,
+    total_cost: 1,
+    cost_available: true,
+    input_tokens: 500,
+    cached_tokens: 25,
+    reasoning_tokens: 0,
+  },
   series: {
     requests: {
       '2026-04-23T10:00:00Z': 2,
@@ -32,16 +42,10 @@ const usageWithBackendSeries: UsagePayload = {
       '2026-04-23T10:00:00Z': 0.2,
       '2026-04-23T11:00:00Z': 0.8,
     },
-    input_tokens: {
-      '2026-04-23T10:00:00Z': 100,
-      '2026-04-23T11:00:00Z': 400,
-    },
-    output_tokens: {},
-    cached_tokens: {
+    cache_rate: {
       '2026-04-23T10:00:00Z': 25,
-      '2026-04-23T11:00:00Z': 0,
+      '2026-04-23T11:00:00Z': null,
     },
-    reasoning_tokens: {},
   },
 };
 
@@ -57,10 +61,10 @@ describe('buildUsageSparklineSeries', () => {
     expect(series.rpm).toEqual([2 / 60, 4 / 60]);
     expect(series.tpm).toEqual([200 / 60, 800 / 60]);
     expect(series.cost).toEqual([0.2, 0.8]);
-    expect(series.cachedRate).toEqual([25, 0]);
+    expect(series.cachedRate).toEqual([25, null]);
   });
 
-  it('keeps cache rate at zero when a bucket has no input tokens', () => {
+  it('keeps cache rate empty when the backend omits a bucket cache rate', () => {
     const series = buildUsageSparklineSeries({
       usage: {
         ...usageWithBackendSeries,
@@ -69,17 +73,12 @@ describe('buildUsageSparklineSeries', () => {
           requests: {
             '2026-04-23T10:00:00Z': 1,
           },
-          input_tokens: {
-            '2026-04-23T10:00:00Z': 0,
-          },
-          cached_tokens: {
-            '2026-04-23T10:00:00Z': 25,
-          },
+          cache_rate: {},
         },
       },
     });
 
-    expect(series.cachedRate).toEqual([0]);
+    expect(series.cachedRate).toEqual([null]);
   });
 
   it('normalizes invalid sparkline series values to zero', () => {
@@ -104,11 +103,8 @@ describe('buildUsageSparklineSeries', () => {
           cost: {
             '2026-04-23T10:00:00Z': invalidNumber,
           },
-          input_tokens: {
+          cache_rate: {
             '2026-04-23T10:00:00Z': invalidNumber,
-          },
-          cached_tokens: {
-            '2026-04-23T10:00:00Z': 25,
           },
         },
       },
