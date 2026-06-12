@@ -26,7 +26,7 @@ type RedisIngestSubState string
 const (
 	// RedisIngestSubStateStarting 表示正在做 subscribe -> redis pull -> http pull 启动探测。
 	RedisIngestSubStateStarting RedisIngestSubState = "starting"
-	// RedisIngestSubStateSubscribeBackfill 表示订阅已连接，正在用旧拉取方式补历史数据。
+	// RedisIngestSubStateSubscribeBackfill 表示订阅已连接，正在用 batch pull 补历史数据。
 	RedisIngestSubStateSubscribeBackfill RedisIngestSubState = "subscribe_backfill"
 	// RedisIngestSubStateSubscribeReceiving 表示订阅连接稳定，正在等待 Redis 推送 usage 消息。
 	RedisIngestSubStateSubscribeReceiving RedisIngestSubState = "subscribe_receiving"
@@ -41,11 +41,13 @@ const (
 )
 
 const (
-	// RedisIngestSourceSubscribe 是订阅消息来源标签，只用于状态/测试，不写入 queue_key。
+	// RedisIngestSourceSubscribe 是订阅消息来源名，会原样写入 redis_usage_inboxes.source。
 	RedisIngestSourceSubscribe = "redis_subscribe:" + cpa.ManagementUsageSubscribeChannel
-	// RedisIngestSourceRedisPull 是旧 Redis queue 拉取来源标签，只用于状态/测试。
-	RedisIngestSourceRedisPull = "redis_pull:" + cpa.ManagementUsageQueueKey
-	// RedisIngestSourceHTTPPull 是 HTTP usage queue 拉取来源标签，只用于状态/测试。
+	// RedisIngestSourceRedisPullPrefix 是 Redis batch pull 来源名前缀，后面跟实际选定的 CPA key。
+	RedisIngestSourceRedisPullPrefix = "redis_pull:"
+	// RedisIngestSourceRedisPull 是 Redis batch pull 默认来源名，新版本 CPA 使用 usage key。
+	RedisIngestSourceRedisPull = RedisIngestSourceRedisPullPrefix + cpa.ManagementUsageQueueKey
+	// RedisIngestSourceHTTPPull 是 HTTP usage queue 拉取来源名，会原样写入 redis_usage_inboxes.source。
 	RedisIngestSourceHTTPPull = "http_pull:usage_queue"
 )
 

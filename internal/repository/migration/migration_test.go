@@ -56,6 +56,7 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260605_backfill_gemini_codex_token_format",
 		"20260610_remove_usage_event_write_heavy_indexes",
 		"20260611_remove_usage_event_low_value_indexes",
+		"20260612_replace_redis_inbox_queue_key_with_source",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected ordered migrations %v, got %v", want, got)
@@ -81,6 +82,12 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 		if !db.Migrator().HasColumn(&entities.UsageEvent{}, column) {
 			t.Fatalf("expected usage_events.%s column to exist", column)
 		}
+	}
+	if !db.Migrator().HasColumn(&entities.RedisUsageInbox{}, "source") {
+		t.Fatal("expected redis_usage_inboxes.source column to exist")
+	}
+	if db.Migrator().HasColumn(&entities.RedisUsageInbox{}, "queue_key") {
+		t.Fatal("expected redis_usage_inboxes.queue_key column not to exist")
 	}
 	if !db.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		t.Fatal("expected usage_identities.lookup_key column to exist")
@@ -133,6 +140,7 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 		"20260605_backfill_gemini_codex_token_format",
 		"20260610_remove_usage_event_write_heavy_indexes",
 		"20260611_remove_usage_event_low_value_indexes",
+		"20260612_replace_redis_inbox_queue_key_with_source",
 	}
 	if len(versions) != len(expected) {
 		t.Fatalf("expected migration versions %v, got %v", expected, versions)

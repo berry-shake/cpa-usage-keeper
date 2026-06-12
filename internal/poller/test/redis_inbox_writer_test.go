@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/poller"
 	"cpa-usage-keeper/internal/repository"
@@ -46,7 +45,7 @@ func TestClassifyRedisControlMessage(t *testing.T) {
 
 func TestRedisInboxWriterSkipsEmptyMessages(t *testing.T) {
 	db := openPollerTestDB(t)
-	writer := poller.NewRedisInboxWriter(db, cpa.ManagementUsageQueueKey)
+	writer := poller.NewRedisInboxWriter(db)
 
 	inserted, err := writer.Insert(context.Background(), poller.RedisIngestSourceSubscribe, nil, time.Now())
 	if err != nil {
@@ -68,7 +67,7 @@ func TestRedisInboxWriterSkipsEmptyMessages(t *testing.T) {
 func TestRedisInboxWriterPersistsMessagesWithSource(t *testing.T) {
 	db := openPollerTestDB(t)
 	receivedAt := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
-	writer := poller.NewRedisInboxWriter(db, cpa.ManagementUsageQueueKey)
+	writer := poller.NewRedisInboxWriter(db)
 
 	inserted, err := writer.Insert(context.Background(), poller.RedisIngestSourceSubscribe, []string{`{"request_id":"one"}`}, receivedAt)
 	if err != nil {
@@ -85,8 +84,8 @@ func TestRedisInboxWriterPersistsMessagesWithSource(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected one redis inbox row, got %d", len(rows))
 	}
-	if rows[0].QueueKey != cpa.ManagementUsageQueueKey {
-		t.Fatalf("expected queue key %q, got %q", cpa.ManagementUsageQueueKey, rows[0].QueueKey)
+	if rows[0].Source != poller.RedisIngestSourceSubscribe {
+		t.Fatalf("expected source %q, got %q", poller.RedisIngestSourceSubscribe, rows[0].Source)
 	}
 	if rows[0].RawMessage != `{"request_id":"one"}` {
 		t.Fatalf("unexpected raw message %q", rows[0].RawMessage)
@@ -100,7 +99,7 @@ func TestControlAwareRedisInboxWriterFiltersControlMessages(t *testing.T) {
 	db := openPollerTestDB(t)
 	observer := &controlObserverStub{}
 	writer := poller.NewControlAwareRedisInboxWriter(
-		poller.NewRedisInboxWriter(db, cpa.ManagementUsageQueueKey),
+		poller.NewRedisInboxWriter(db),
 		observer,
 	)
 
@@ -129,7 +128,7 @@ func TestControlAwareRedisInboxWriterSkipsControlOnlyBatch(t *testing.T) {
 	db := openPollerTestDB(t)
 	observer := &controlObserverStub{}
 	writer := poller.NewControlAwareRedisInboxWriter(
-		poller.NewRedisInboxWriter(db, cpa.ManagementUsageQueueKey),
+		poller.NewRedisInboxWriter(db),
 		observer,
 	)
 
@@ -154,7 +153,7 @@ func TestControlAwareRedisInboxWriterSkipsEmptyAndNullPayloads(t *testing.T) {
 	db := openPollerTestDB(t)
 	observer := &controlObserverStub{}
 	writer := poller.NewControlAwareRedisInboxWriter(
-		poller.NewRedisInboxWriter(db, cpa.ManagementUsageQueueKey),
+		poller.NewRedisInboxWriter(db),
 		observer,
 	)
 

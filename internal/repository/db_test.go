@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/entities"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -54,11 +53,17 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
 		t.Fatalf("count schema migrations: %v", err)
 	}
-	if count != 37 {
-		t.Fatalf("expected fresh database to mark 37 migrations applied, got %d", count)
+	if count != 38 {
+		t.Fatalf("expected fresh database to mark 38 migrations applied, got %d", count)
 	}
 	if strings.Contains(logs.String(), "schema migration started") {
 		t.Fatalf("expected fresh database creation not to run version migrations, got logs:\n%s", logs.String())
+	}
+	if !db.Migrator().HasColumn(&entities.RedisUsageInbox{}, "source") {
+		t.Fatal("expected redis_usage_inboxes.source column to exist")
+	}
+	if db.Migrator().HasColumn(&entities.RedisUsageInbox{}, "queue_key") {
+		t.Fatal("expected redis_usage_inboxes.queue_key column not to exist")
 	}
 	for _, indexName := range []string{
 		"idx_usage_events_api_group_key",
@@ -357,7 +362,7 @@ func TestDatabaseTimeFieldsUseProjectTimezoneRFC3339Nano(t *testing.T) {
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-sonnet", PromptPricePer1M: 1}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
-	inboxRows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{QueueKey: cpa.ManagementUsageQueueKey, RawMessage: `{"request_id":"event-storage-time"}`, PoppedAt: storageTime}})
+	inboxRows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{Source: testRedisInboxSource, RawMessage: `{"request_id":"event-storage-time"}`, PoppedAt: storageTime}})
 	if err != nil {
 		t.Fatalf("InsertRedisUsageInboxMessages returned error: %v", err)
 	}
@@ -420,8 +425,8 @@ func TestCleanupStorageCleansRedisInboxAndVacuums(t *testing.T) {
 	now := time.Date(2026, 4, 27, 2, 30, 0, 0, time.UTC)
 
 	inboxRows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
-		{QueueKey: cpa.ManagementUsageQueueKey, RawMessage: `{"request_id":"processed-old"}`, PoppedAt: now.AddDate(0, 0, -2)},
-		{QueueKey: cpa.ManagementUsageQueueKey, RawMessage: `{"request_id":"pending"}`, PoppedAt: now.AddDate(0, 0, -2)},
+		{Source: testRedisInboxSource, RawMessage: `{"request_id":"processed-old"}`, PoppedAt: now.AddDate(0, 0, -2)},
+		{Source: testRedisInboxSource, RawMessage: `{"request_id":"pending"}`, PoppedAt: now.AddDate(0, 0, -2)},
 	})
 	if err != nil {
 		t.Fatalf("InsertRedisUsageInboxMessages returned error: %v", err)

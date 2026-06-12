@@ -25,9 +25,14 @@ type UsagePullSource interface {
 	Pull(ctx context.Context) ([]string, error)
 }
 
+// UsagePullSourceNamer 可在拉取成功后提供更精确的来源名，例如 redis_pull 选定的 usage/queue key。
+type UsagePullSourceNamer interface {
+	SourceName() string
+}
+
 // RedisInboxWriter 是远端 ingest 到本地 durable inbox 的唯一写入边界。
 type RedisInboxWriter interface {
-	// Insert 把 raw usage JSON 批量写入 redis_usage_inboxes；source 用于调用方标记来源。
+	// Insert 把 raw usage JSON 批量写入 redis_usage_inboxes；source 会原样落库。
 	Insert(ctx context.Context, source string, messages []string, receivedAt time.Time) (int, error)
 }
 

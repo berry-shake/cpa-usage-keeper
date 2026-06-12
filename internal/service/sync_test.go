@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/config"
-	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/cpa/dto/authfiles"
 	"cpa-usage-keeper/internal/cpa/dto/cpaapikeys"
 	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
@@ -27,6 +26,8 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
+
+const redisUsageInboxTestSource = "redis_pull:usage"
 
 type stubMetadataFetcher struct {
 	authFilesResult *response.AuthFilesResult
@@ -199,43 +200,10 @@ func (s *trackingMetadataFetcher) providerCalls() int {
 	return s.geminiCalls + s.claudeCalls + s.codexCalls + s.vertexCalls + s.openAICalls
 }
 
-func TestPullRedisUsageInboxOnlyStoresPendingRows(t *testing.T) {
-	db := openSyncTestDatabase(t)
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{
-			`{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"pull-only","tokens":{"input_tokens":1,"output_tokens":2}}`,
-		}},
-	})
-
-	result, err := service.PullRedisUsageInbox(context.Background())
-	if err != nil {
-		t.Fatalf("PullRedisUsageInbox returned error: %v", err)
-	}
-	if result == nil || result.Empty || result.Status != "completed" || result.InsertedRows != 1 {
-		t.Fatalf("unexpected pull result: %+v", result)
-	}
-
-	var inbox entities.RedisUsageInbox
-	if err := db.First(&inbox).Error; err != nil {
-		t.Fatalf("load inbox row: %v", err)
-	}
-	if inbox.Status != repository.RedisUsageInboxStatusPending || inbox.UsageEventKey != "" {
-		t.Fatalf("expected pending inbox row without processing links, got %+v", inbox)
-	}
-	var eventCount int64
-	if err := db.Model(&entities.UsageEvent{}).Count(&eventCount).Error; err != nil {
-		t.Fatalf("count usage events: %v", err)
-	}
-	if eventCount != 0 {
-		t.Fatalf("expected pull not to write usage events, got %d", eventCount)
-	}
-}
-
 func TestProcessRedisUsageInboxPersistsEventsWithoutSnapshot(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	rows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","endpoint":"/v1/messages","auth_type":"api_key","model":"sonnet","request_id":"process-only","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}})
@@ -243,8 +211,7 @@ func TestProcessRedisUsageInboxPersistsEventsWithoutSnapshot(t *testing.T) {
 		t.Fatalf("seed inbox row: %v", err)
 	}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:    "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{err: errors.New("redis should not be popped while processing inbox")},
+		BaseURL: "https://cpa.example.com",
 	})
 
 	result, err := service.ProcessRedisUsageInbox(context.Background())
@@ -283,7 +250,7 @@ func TestProcessRedisUsageInboxPersistsEventsWithoutSnapshot(t *testing.T) {
 func TestProcessRedisUsageInboxNotifiesRecentCacheAfterTransactionCommit(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","auth_type":"oauth","source":"auth-user@example.com","auth_index":"auth-1","model":"sonnet","request_id":"notify-cache","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}}); err != nil {
@@ -313,7 +280,7 @@ func TestProcessRedisUsageInboxNotifiesRecentCacheAfterTransactionCommit(t *test
 func TestProcessRedisUsageInboxDoesNotNotifyRecentCacheOnRollback(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"rollback-cache-notify","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}}); err != nil {
@@ -340,7 +307,7 @@ func TestProcessRedisUsageInboxDoesNotNotifyRecentCacheOnRollback(t *testing.T) 
 func TestProcessRedisUsageInboxIgnoresRecentCacheOverflow(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"cache-overflow","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}}); err != nil {
@@ -367,7 +334,7 @@ func TestProcessRedisUsageInboxIgnoresRecentCacheOverflow(t *testing.T) {
 func TestProcessRedisUsageInboxRollsBackEventsWhenProcessedMarkFails(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"rollback-on-mark-failure","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}}); err != nil {
@@ -440,7 +407,7 @@ func TestProcessRedisUsageInboxDoesNotFetchMetadata(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	metadata := &trackingMetadataFetcher{}
 	rows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"redis-no-metadata","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}})
@@ -474,7 +441,7 @@ func TestProcessRedisUsageInboxDoesNotFetchMetadata(t *testing.T) {
 func TestProcessRedisUsageInboxNormalizesClaudeTokensForOAuthProvider(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey: cpa.ManagementUsageQueueKey,
+		Source: redisUsageInboxTestSource,
 		RawMessage: `{
 			"timestamp":"2026-04-27T08:00:00Z",
 			"provider":"claude",
@@ -524,7 +491,7 @@ func TestProcessRedisUsageInboxNormalizesAPIKeyTokensByUsageIdentityType(t *test
 		t.Fatalf("seed usage identity: %v", err)
 	}
 	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey: cpa.ManagementUsageQueueKey,
+		Source: redisUsageInboxTestSource,
 		RawMessage: `{
 			"timestamp":"2026-04-27T08:00:00Z",
 			"provider":"Team Display Name",
@@ -569,7 +536,7 @@ func TestProcessRedisUsageInboxNormalizesGeminiFamilyToCodexTokenFormat(t *testi
 		t.Fatalf("seed usage identity: %v", err)
 	}
 	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey: cpa.ManagementUsageQueueKey,
+		Source: redisUsageInboxTestSource,
 		RawMessage: `{
 			"timestamp":"2026-04-27T08:00:00Z",
 			"provider":"Google Account",
@@ -640,7 +607,7 @@ func TestNormalizeRedisUsageEventsResolvesAPIKeyAuthTypeAlias(t *testing.T) {
 func TestProcessRedisUsageInboxDoesNotFallbackWhenUsageTypeLookupErrors(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	rows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Team Display Name","auth_type":"apikey","auth_index":"provider-auth-index","model":"claude-sonnet","request_id":"type-lookup-error","tokens":{"input_tokens":100,"output_tokens":30,"cache_read_tokens":20,"cache_creation_tokens":10,"total_tokens":160}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}})
@@ -757,7 +724,7 @@ func TestProcessRedisUsageInboxFallsBackToDeletedUsageIdentityType(t *testing.T)
 		t.Fatalf("seed deleted usage identity: %v", err)
 	}
 	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Deleted Team","auth_type":"apikey","auth_index":"deleted-auth-index","model":"claude-sonnet","request_id":"deleted-identity-claude","tokens":{"input_tokens":100,"output_tokens":30,"cache_read_tokens":20,"cache_creation_tokens":10,"total_tokens":160}}`,
 		PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 	}})
@@ -790,12 +757,12 @@ func TestProcessRedisUsageInboxUsesOpenAIStyleForKimiAndMissingType(t *testing.T
 	}
 	_, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
 		{
-			QueueKey:   cpa.ManagementUsageQueueKey,
+			Source:     redisUsageInboxTestSource,
 			RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Kimi","auth_type":"apikey","auth_index":"kimi-auth-index","model":"kimi-k2","request_id":"kimi-openai-style","tokens":{"input_tokens":100,"output_tokens":30,"cached_tokens":20,"cache_read_tokens":20,"cache_creation_tokens":10}}`,
 			PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 		},
 		{
-			QueueKey:   cpa.ManagementUsageQueueKey,
+			Source:     redisUsageInboxTestSource,
 			RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Unknown","auth_type":"apikey","auth_index":"missing-auth-index","model":"unknown-model","request_id":"missing-type-openai-style","tokens":{"input_tokens":100,"output_tokens":30,"cached_tokens":20,"cache_read_tokens":20,"cache_creation_tokens":10}}`,
 			PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 		},
@@ -819,30 +786,39 @@ func TestProcessRedisUsageInboxUsesOpenAIStyleForKimiAndMissingType(t *testing.T
 	}
 }
 
-func processPendingOrPulledRedisUsageForTest(t *testing.T, service *SyncService) (*servicedto.RedisBatchSyncResult, error) {
+func seedRedisInboxMessagesForTest(t *testing.T, db *gorm.DB, messages ...string) []entities.RedisUsageInbox {
 	t.Helper()
-	result, err := service.ProcessRedisUsageInbox(context.Background())
-	if err != nil || result == nil || !result.Empty {
-		return result, err
+	inputs := make([]dto.RedisInboxInsert, 0, len(messages))
+	for _, message := range messages {
+		inputs = append(inputs, dto.RedisInboxInsert{
+			Source:     redisUsageInboxTestSource,
+			RawMessage: message,
+			PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
+		})
 	}
-	if _, err := service.PullRedisUsageInbox(context.Background()); err != nil {
-		return &servicedto.RedisBatchSyncResult{Status: "failed"}, err
+	rows, err := repository.InsertRedisUsageInboxMessages(db, inputs)
+	if err != nil {
+		t.Fatalf("seed redis inbox messages: %v", err)
 	}
+	return rows
+}
+
+func processRedisUsageInboxForTest(t *testing.T, service *SyncService) (*servicedto.RedisBatchSyncResult, error) {
+	t.Helper()
 	return service.ProcessRedisUsageInbox(context.Background())
 }
 
-func TestSplitRedisUsageSyncSkipsEmptyBatchWithoutSnapshotOrMetadata(t *testing.T) {
+func TestProcessRedisUsageInboxSkipsEmptyBatchWithoutSnapshotOrMetadata(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	metadata := &trackingMetadataFetcher{}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
 		BaseURL:         "https://cpa.example.com",
-		RedisQueue:      staticRedisQueue{},
 		MetadataFetcher: metadata,
 	})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	if result == nil || !result.Empty || result.Status != "empty" {
 		t.Fatalf("expected empty redis batch result, got %+v", result)
@@ -853,18 +829,18 @@ func TestSplitRedisUsageSyncSkipsEmptyBatchWithoutSnapshotOrMetadata(t *testing.
 
 }
 
-func TestSplitRedisUsageSyncPersistsNonEmptyBatchWithoutMetadata(t *testing.T) {
+func TestProcessRedisUsageInboxPersistsNonEmptyBatchWithoutMetadata(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	metadata := &trackingMetadataFetcher{}
+	seedRedisInboxMessagesForTest(t, db, `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"redis-1","tokens":{"input_tokens":1,"output_tokens":2}}`)
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
 		BaseURL:         "https://cpa.example.com",
-		RedisQueue:      staticRedisQueue{messages: []string{`{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"redis-1","tokens":{"input_tokens":1,"output_tokens":2}}`}},
 		MetadataFetcher: metadata,
 	})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	if result == nil || result.Empty || result.Status != "completed" || result.InsertedEvents != 1 || result.DedupedEvents != 0 {
 		t.Fatalf("unexpected redis batch result: %+v", result)
@@ -889,17 +865,15 @@ func TestSplitRedisUsageSyncPersistsNonEmptyBatchWithoutMetadata(t *testing.T) {
 	}
 }
 
-func TestSplitRedisUsageSyncPersistsValidRowsWhenBatchContainsMalformedMessage(t *testing.T) {
+func TestProcessRedisUsageInboxPersistsValidRowsWhenBatchContainsMalformedMessage(t *testing.T) {
 	db := openSyncTestDatabase(t)
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{
-			`{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"redis-valid","tokens":{"input_tokens":1,"output_tokens":2}}`,
-			`{bad-json}`,
-		}},
-	})
+	seedRedisInboxMessagesForTest(t, db,
+		`{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"redis-valid","tokens":{"input_tokens":1,"output_tokens":2}}`,
+		`{bad-json}`,
+	)
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err == nil || !strings.Contains(err.Error(), "decode redis usage message") {
 		t.Fatalf("expected decode warning, got %v", err)
 	}
@@ -930,14 +904,12 @@ func TestSplitRedisUsageSyncPersistsValidRowsWhenBatchContainsMalformedMessage(t
 	}
 }
 
-func TestSplitRedisUsageSyncMarksMalformedOnlyBatchWithoutSnapshot(t *testing.T) {
+func TestProcessRedisUsageInboxMarksMalformedOnlyBatchWithoutSnapshot(t *testing.T) {
 	db := openSyncTestDatabase(t)
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:    "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{`{bad-json}`}},
-	})
+	seedRedisInboxMessagesForTest(t, db, `{bad-json}`)
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err == nil || !strings.Contains(err.Error(), "decode redis usage message") {
 		t.Fatalf("expected decode warning, got %v", err)
 	}
@@ -954,15 +926,13 @@ func TestSplitRedisUsageSyncMarksMalformedOnlyBatchWithoutSnapshot(t *testing.T)
 	}
 }
 
-func TestSplitRedisUsageSyncLogsErrorAndMarksDecodeFailedWhenRequestIDMissing(t *testing.T) {
+func TestProcessRedisUsageInboxLogsErrorAndMarksDecodeFailedWhenRequestIDMissing(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	logs := captureSyncDebugLogs(t)
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:    "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{`{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","tokens":{"input_tokens":1,"output_tokens":2}}`}},
-	})
+	seedRedisInboxMessagesForTest(t, db, `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","tokens":{"input_tokens":1,"output_tokens":2}}`)
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err == nil || !strings.Contains(err.Error(), "request_id is required") {
 		t.Fatalf("expected missing request_id warning, got %v", err)
 	}
@@ -983,25 +953,22 @@ func TestSplitRedisUsageSyncLogsErrorAndMarksDecodeFailedWhenRequestIDMissing(t 
 	}
 }
 
-func TestSplitRedisUsageSyncProcessesPendingInboxBeforePoppingRedis(t *testing.T) {
+func TestProcessRedisUsageInboxProcessesPendingInbox(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC)
 	rows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"pending-1","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   poppedAt,
 	}})
 	if err != nil {
 		t.Fatalf("seed inbox row: %v", err)
 	}
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:    "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{err: errors.New("redis should not be popped while inbox is pending")},
-	})
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	if result == nil || result.Status != "completed" || result.InsertedEvents != 1 {
 		t.Fatalf("expected pending inbox row to be processed, got %+v", result)
@@ -1023,7 +990,7 @@ func TestSplitRedisUsageSyncProcessesPendingInboxBeforePoppingRedis(t *testing.T
 	}
 }
 
-func TestSplitRedisUsageSyncDoesNotWatermarkFilterRedisInboxEvents(t *testing.T) {
+func TestProcessRedisUsageInboxDoesNotWatermarkFilterRedisInboxEvents(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "future-watermark",
@@ -1033,16 +1000,12 @@ func TestSplitRedisUsageSyncDoesNotWatermarkFilterRedisInboxEvents(t *testing.T)
 	}}); err != nil {
 		t.Fatalf("seed future event: %v", err)
 	}
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{
-			`{"timestamp":"2026-04-26T07:00:00Z","provider":"claude","model":"sonnet","request_id":"old-but-unique","tokens":{"input_tokens":1,"output_tokens":2}}`,
-		}},
-	})
+	seedRedisInboxMessagesForTest(t, db, `{"timestamp":"2026-04-26T07:00:00Z","provider":"claude","model":"sonnet","request_id":"old-but-unique","tokens":{"input_tokens":1,"output_tokens":2}}`)
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	if result == nil || result.InsertedEvents != 1 {
 		t.Fatalf("expected old unique Redis event to insert despite watermark, got %+v", result)
@@ -1054,11 +1017,11 @@ func TestSplitRedisUsageSyncDoesNotWatermarkFilterRedisInboxEvents(t *testing.T)
 	}
 }
 
-func TestSplitRedisUsageSyncRetriesProcessFailedInboxBeforePoppingRedis(t *testing.T) {
+func TestProcessRedisUsageInboxRetriesProcessFailedInbox(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	poppedAt := time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC)
 	rows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
-		QueueKey:   cpa.ManagementUsageQueueKey,
+		Source:     redisUsageInboxTestSource,
 		RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"retry-process-failed","tokens":{"input_tokens":1,"output_tokens":2}}`,
 		PoppedAt:   poppedAt,
 	}})
@@ -1068,14 +1031,11 @@ func TestSplitRedisUsageSyncRetriesProcessFailedInboxBeforePoppingRedis(t *testi
 	if err := repository.MarkRedisUsageInboxProcessFailed(db, rows[0].ID, errors.New("temporary insert failure")); err != nil {
 		t.Fatalf("mark process failed: %v", err)
 	}
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:    "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{err: errors.New("redis should not be popped while process_failed inbox is retryable")},
-	})
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	if result == nil || result.InsertedEvents != 1 {
 		t.Fatalf("expected process_failed row retry to insert, got %+v", result)
@@ -1089,51 +1049,47 @@ func TestSplitRedisUsageSyncRetriesProcessFailedInboxBeforePoppingRedis(t *testi
 	}
 }
 
-func TestSplitRedisUsageSyncUsesDurableInbox(t *testing.T) {
+func TestProcessRedisUsageInboxUsesDurableInbox(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	metadata := &trackingMetadataFetcher{}
+	seedRedisInboxMessagesForTest(t, db, `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"sync-now-redis","tokens":{"input_tokens":1,"output_tokens":2}}`)
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{
-			`{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"sync-now-redis","tokens":{"input_tokens":1,"output_tokens":2}}`,
-		}},
+		BaseURL:         "https://cpa.example.com",
 		MetadataFetcher: metadata,
 	})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	if result == nil || result.InsertedEvents != 1 {
-		t.Fatalf("unexpected split Redis usage sync result: %+v", result)
+		t.Fatalf("unexpected process Redis usage inbox result: %+v", result)
 	}
 	if metadata.authCalls != 0 || metadata.providerCalls() != 0 {
-		t.Fatalf("expected split Redis usage sync not to fetch metadata, got auth=%d provider=%d", metadata.authCalls, metadata.providerCalls())
+		t.Fatalf("expected process Redis usage inbox not to fetch metadata, got auth=%d provider=%d", metadata.authCalls, metadata.providerCalls())
 	}
 	var inbox entities.RedisUsageInbox
 	if err := db.First(&inbox).Error; err != nil {
 		t.Fatalf("load inbox row: %v", err)
 	}
 	if inbox.Status != repository.RedisUsageInboxStatusProcessed || inbox.UsageEventKey != "sync-now-redis" {
-		t.Fatalf("expected split Redis usage sync redis path to use inbox, got %+v", inbox)
+		t.Fatalf("expected process Redis usage inbox redis path to use inbox, got %+v", inbox)
 	}
 }
 
-func TestSplitRedisUsageSyncKeepsDistinctRedisRequestIDsWithSameEventFields(t *testing.T) {
+func TestProcessRedisUsageInboxKeepsDistinctRedisRequestIDsWithSameEventFields(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	timestamp := time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC)
 	tokens := dto.TokenStats{InputTokens: 10, OutputTokens: 20, ReasoningTokens: 5, CachedTokens: 4, TotalTokens: 39}
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{
-			equivalentRedisMessage("external-api-key", "claude-sonnet", timestamp, "codex-a", "1", false, 123, tokens, "redis-request-1"),
-			equivalentRedisMessage("external-api-key", "claude-sonnet", timestamp, "codex-a", "1", false, 123, tokens, "redis-request-2"),
-		}},
-	})
+	seedRedisInboxMessagesForTest(t, db,
+		equivalentRedisMessage("external-api-key", "claude-sonnet", timestamp, "codex-a", "1", false, 123, tokens, "redis-request-1"),
+		equivalentRedisMessage("external-api-key", "claude-sonnet", timestamp, "codex-a", "1", false, 123, tokens, "redis-request-2"),
+	)
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
+	result, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	if result.InsertedEvents != 2 || result.DedupedEvents != 0 {
 		t.Fatalf("expected distinct Redis request IDs to insert separately, got %+v", result)
@@ -1141,30 +1097,20 @@ func TestSplitRedisUsageSyncKeepsDistinctRedisRequestIDsWithSameEventFields(t *t
 	assertUsageEventCount(t, db, 2)
 }
 
-func TestSplitRedisUsageSyncWritesDebugLogsWithoutRawPayload(t *testing.T) {
+func TestProcessRedisUsageInboxWritesDebugLogsWithoutRawPayload(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	logs := captureSyncDebugLogs(t)
 
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{messages: []string{
-			`{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"redis-log","api_key":"raw-secret-key","tokens":{"input_tokens":1,"output_tokens":2}}`,
-		}},
-	})
+	seedRedisInboxMessagesForTest(t, db, `{"timestamp":"2026-04-27T08:00:00Z","provider":"claude","model":"sonnet","request_id":"redis-log","api_key":"raw-secret-key","tokens":{"input_tokens":1,"output_tokens":2}}`)
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
 
-	_, err := processPendingOrPulledRedisUsageForTest(t, service)
+	_, err := processRedisUsageInboxForTest(t, service)
 	if err != nil {
-		t.Fatalf("split Redis usage sync returned error: %v", err)
+		t.Fatalf("process Redis usage inbox returned error: %v", err)
 	}
 	output := logs.String()
-	for _, expected := range []string{
-		"redis usage batch popped",
-		"redis usage inbox rows inserted",
-		"redis usage inbox rows processed",
-	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("expected debug log %q in output:\n%s", expected, output)
-		}
+	if !strings.Contains(output, "redis usage inbox rows processed") {
+		t.Fatalf("expected process debug log in output:\n%s", output)
 	}
 	if strings.Contains(output, "raw-secret-key") || strings.Contains(output, "redis-log") {
 		t.Fatalf("debug logs should not include raw payload fields, got:\n%s", output)
@@ -1815,19 +1761,6 @@ func TestSyncMetadataKeepsProviderUsageIdentitiesWhenEndpointReturnsNilResult(t 
 	oldGemini := byIdentity["old-gemini-key"]
 	if oldGemini.Identity == "" || oldGemini.IsDeleted || oldGemini.DeletedAt != nil {
 		t.Fatalf("expected old gemini usage identity to remain, got %+v", oldGemini)
-	}
-}
-
-func TestSplitRedisUsageSyncErrorDoesNotCreateSnapshot(t *testing.T) {
-	db := openSyncTestDatabase(t)
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:    "https://cpa.example.com",
-		RedisQueue: staticRedisQueue{err: errors.New("dial failed")},
-	})
-
-	result, err := processPendingOrPulledRedisUsageForTest(t, service)
-	if err == nil || result == nil || result.Status != "failed" {
-		t.Fatalf("expected failed redis batch result, got result=%+v err=%v", result, err)
 	}
 }
 

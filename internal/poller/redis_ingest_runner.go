@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,7 @@ var errRedisIngestInboxWrite = errors.New("redis ingest inbox write failed")
 // - redis_ingest_backoff.go：定义远端拉取连续失败时的指数退避。
 // - redis_ingest_sources.go：定义订阅、拉取和 inbox writer 的接口边界。
 // - redis_subscribe_source.go：实现 Redis SUBSCRIBE usage 的连接、认证和消息读取。
-// - redis_pull_source.go：实现旧 Redis batch pull，只拉取不 fallback。
+// - redis_pull_source.go：实现 Redis batch pull，只拉取不 fallback。
 // - http_pull_source.go：实现 HTTP usage queue 拉取，只拉取不 fallback。
 // - redis_inbox_writer.go：统一把不同来源的 raw usage message 写入 redis_usage_inboxes。
 // - redis_process_runner.go：本地 inbox 到 usage_events 的处理 runner，不参与远端拉取模式选择。
@@ -34,7 +35,7 @@ type RedisIngestRunnerConfig struct {
 type RedisIngestRunner struct {
 	// subscribeSource 只负责建立 Redis SUBSCRIBE usage 连接，不处理 fallback。
 	subscribeSource UsageSubscriptionSource
-	// redisSource 只负责旧 Redis LPOP 批量拉取，失败原因交给 runner 决策。
+	// redisSource 只负责 Redis LPOP 批量拉取，失败原因交给 runner 决策。
 	redisSource UsagePullSource
 	// httpSource 只负责 HTTP usage queue 拉取，是所有模式的最终降级路径。
 	httpSource UsagePullSource
@@ -141,7 +142,7 @@ func (r *RedisIngestRunner) Run(ctx context.Context) error {
 			// subscribe 模式退出后重新回到启动探测，避免停在旧状态。
 			continue
 		}
-		// 订阅失败不是最终失败，先记录降级原因，再尝试旧 Redis pull。
+		// 订阅失败不是最终失败，先记录降级原因，再尝试 Redis batch pull。
 		r.recordWarning("subscribe_unavailable", subErr)
 		// 启动探测第二步：Redis LPOP 成功就把长期模式固定为 redis_pull。
 		redisCount, redisErr := r.serialPullAndWrite(ctx, RedisIngestSourceRedisPull, r.redisSource)
@@ -213,7 +214,7 @@ func (r *RedisIngestRunner) runSubscribeMode(ctx context.Context, sub UsageSubsc
 	defer func() { _ = current.Close() }()
 	// 外层循环表示“每次订阅连接成功后的完整生命周期”。
 	for {
-		// 每次初次连接或重连成功后都做一次旧队列 backfill。
+		// 每次初次连接或重连成功后都做一次 batch pull backfill。
 		if err := r.backfillAfterSubscribe(ctx); err != nil {
 			_ = current.Close()
 			if !r.pauseAfterInboxWriteFailure(ctx, "redis_inbox_write_failed", err) {
@@ -263,7 +264,7 @@ func (r *RedisIngestRunner) runSubscribeMode(ctx context.Context, sub UsageSubsc
 func (r *RedisIngestRunner) backfillAfterSubscribe(ctx context.Context) error {
 	// 订阅刚连接时进入 backfill 状态，补偿订阅建立前已在队列中的数据。
 	r.recordState(RedisIngestSyncModeSubscribe, RedisIngestSubStateSubscribeBackfill, "subscribe_backfill", "", "")
-	// backfill 优先复用旧 Redis queue 拉取，速度快且不经过 HTTP 管理接口。
+	// backfill 优先复用 Redis batch pull，速度快且不经过 HTTP 管理接口。
 	redisCount, redisBatches, err := r.drainBackfillSource(ctx, RedisIngestSourceRedisPull, r.redisSource)
 	if err == nil {
 		// Redis backfill 成功即清退避，后续失败重新从 1s 开始。
@@ -652,23 +653,33 @@ func (r *RedisIngestRunner) serialPullAndWrite(ctx context.Context, sourceName s
 		// 拉取失败由调用方决定是否降级或退避。
 		return 0, err
 	}
+	// writeSourceName 是最终写入 redis_usage_inboxes.source 的值，默认沿用调用方传入的来源。
+	writeSourceName := sourceName
+	// 部分 pull source 会在成功拉取后知道更精确的目标 key，例如 redis_pull:usage 或 redis_pull:queue。
+	if sourceNamer, ok := source.(UsagePullSourceNamer); ok {
+		// 动态来源名只影响落库和日志，不改变当前 runner 已选定的拉取方式。
+		if dynamicSourceName := strings.TrimSpace(sourceNamer.SourceName()); dynamicSourceName != "" {
+			// 空白来源名保持默认值，避免异常 source 覆盖掉可读的基础来源。
+			writeSourceName = dynamicSourceName
+		}
+	}
 	// 每次拉取方式和拉取数量属于可刷屏排查信息，只写 debug。
 	if logrus.IsLevelEnabled(logrus.DebugLevel) {
-		logrus.WithFields(logrus.Fields{"source": sourceName, "message_count": len(messages)}).Debug("redis ingest pulled usage messages")
+		logrus.WithFields(logrus.Fields{"source": writeSourceName, "message_count": len(messages)}).Debug("redis ingest pulled usage messages")
 	}
 	if len(messages) == 0 {
 		// 空批次不调用 writer，避免无意义 DB 事务。
 		return 0, nil
 	}
 	// 所有来源的 raw usage message 都写入 redis_usage_inboxes，保持后续 decode/process 不变。
-	inserted, err := r.writer.Insert(ctx, sourceName, messages, timeutil.NormalizeStorageTime(r.now()))
+	inserted, err := r.writer.Insert(ctx, writeSourceName, messages, timeutil.NormalizeStorageTime(r.now()))
 	if err != nil {
 		// 落库失败必须返回给上层，不能吞掉导致消息丢失不可见。
 		return 0, fmt.Errorf("%w: %v", errRedisIngestInboxWrite, err)
 	}
 	// 每次写入数量也属于可刷屏排查信息，只写 debug。
 	if logrus.IsLevelEnabled(logrus.DebugLevel) {
-		logrus.WithFields(logrus.Fields{"source": sourceName, "message_count": len(messages), "inserted_count": inserted}).Debug("redis ingest wrote usage messages")
+		logrus.WithFields(logrus.Fields{"source": writeSourceName, "message_count": len(messages), "inserted_count": inserted}).Debug("redis ingest wrote usage messages")
 	}
 	// 返回本次远端实际拉取数量，调用方据此判断是否可能还有下一批。
 	return len(messages), nil

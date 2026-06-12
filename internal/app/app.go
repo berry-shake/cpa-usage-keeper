@@ -112,29 +112,17 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
 		BaseURL: cfg.CPABaseURL,
 		Client:  cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify),
-		RedisQueue: cpa.NewRedisQueueClientWithOptions(cpa.RedisQueueOptions{
-			BaseURL:       cfg.CPABaseURL,
-			RedisAddr:     cfg.RedisQueueAddr,
-			ManagementKey: cfg.CPAManagementKey,
-			Timeout:       cfg.RequestTimeout,
-			QueueKey:      cfg.RedisQueueKey,
-			BatchSize:     cfg.RedisQueueBatchSize,
-			TLS:           cfg.RedisQueueTLS,
-			TLSSkipVerify: cfg.TLSSkipVerify,
-		}),
-		RedisQueueKey: cfg.RedisQueueKey,
 		// usage_events 事务提交后通过这个缓存做非阻塞增量追加，供 Overview realtime 和右边界补偿复用。
 		RecentUsageEvents: recentUsageCache,
 	})
 	// metadataSyncRunner 提前创建，保证控制消息和后台任务使用同一个调度器实例。
 	metadataSyncRunner := NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval)
-	// redisPullSource 保持旧 Redis queue 拉取路径不变。
+	// redisPullSource 负责 Redis batch pull，并在 usage/queue 两个 key 间做一次兼容探测。
 	redisPullSource := poller.NewRedisPullSource(cpa.RedisQueueOptions{
 		BaseURL:       cfg.CPABaseURL,
 		RedisAddr:     cfg.RedisQueueAddr,
 		ManagementKey: cfg.CPAManagementKey,
 		Timeout:       cfg.RequestTimeout,
-		QueueKey:      cfg.RedisQueueKey,
 		BatchSize:     cfg.RedisQueueBatchSize,
 		TLS:           cfg.RedisQueueTLS,
 		TLSSkipVerify: cfg.TLSSkipVerify,
@@ -151,7 +139,8 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		TLSSkipVerify: cfg.TLSSkipVerify,
 	})
 	// usage 通道可能混入 metadata 控制消息，落 inbox 前先过滤并转交 metadata runner。
-	redisInboxWriter := poller.NewControlAwareRedisInboxWriter(poller.NewRedisInboxWriter(db, cfg.RedisQueueKey), metadataSyncRunner)
+	// inbox writer 不再接收 queue key，来源由 runner 传入并写入 redis_usage_inboxes.source。
+	redisInboxWriter := poller.NewControlAwareRedisInboxWriter(poller.NewRedisInboxWriter(db), metadataSyncRunner)
 	// redisIngestRunner 继续负责三种 usage 拉取方式的选择和降级。
 	redisIngestRunner := poller.NewRedisIngestRunner(redisSubscribeSource, redisPullSource, httpPullSource, redisInboxWriter, poller.RedisIngestRunnerConfig{
 		IdleInterval:       cfg.RedisQueueIdleInterval,

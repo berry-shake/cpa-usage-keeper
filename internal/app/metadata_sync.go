@@ -13,7 +13,7 @@ type MetadataSyncer interface {
 	SyncMetadata(ctx context.Context) error
 }
 
-const metadataSyncRefreshDebounceDefault = 3 * time.Second
+const metadataSyncRefreshDebounceDefault = time.Second
 
 type MetadataSyncRunner struct {
 	// syncer 是唯一真正执行 metadata 同步的服务入口。
@@ -183,7 +183,7 @@ func (r *MetadataSyncRunner) validate() error {
 	if r.interval <= 0 {
 		return fmt.Errorf("metadata sync interval must be positive")
 	}
-	// 测试可能覆盖为非法值，运行前恢复默认 3s debounce。
+	// 测试可能覆盖为非法值，运行前恢复默认 1s debounce。
 	if r.refreshDebounce <= 0 {
 		r.refreshDebounce = metadataSyncRefreshDebounceDefault
 	}

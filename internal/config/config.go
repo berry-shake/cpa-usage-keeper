@@ -16,7 +16,6 @@ import (
 
 const (
 	DefaultTimeZone                 = "Asia/Shanghai"
-	RedisQueueKeyDefault            = cpa.ManagementUsageQueueKey
 	RedisQueueBatchSizeDefault      = 10000
 	MetadataSyncIntervalDefault     = 30 * time.Second
 	QuotaAutoRefreshIntervalDefault = 5 * time.Minute
@@ -56,8 +55,6 @@ type Config struct {
 	RedisQueueAddr string
 	// RedisQueueTLS 控制是否使用 TLS 连接 Redis 队列。
 	RedisQueueTLS bool
-	// RedisQueueKey 是 CPA usage 队列名。
-	RedisQueueKey string
 	// RedisQueueBatchSize 是单次 Redis LPOP 最多拉取的消息数。
 	RedisQueueBatchSize int
 	// RedisQueueIdleInterval 是 Redis 队列为空时的下一次检查间隔。
@@ -253,7 +250,6 @@ func Load(options LoadOptions) (*Config, error) {
 		CPAManagementKey:         strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
 		RedisQueueAddr:           strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
 		RedisQueueTLS:            redisQueueTLS,
-		RedisQueueKey:            RedisQueueKeyDefault,
 		RedisQueueBatchSize:      redisQueueBatchSize,
 		RedisQueueIdleInterval:   redisQueueIdleInterval,
 		MetadataSyncInterval:     MetadataSyncIntervalDefault,

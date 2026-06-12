@@ -2,9 +2,9 @@ package dto
 
 import "time"
 
-// RedisInboxInsert 是 Redis usage inbox 的入库参数。
+// RedisInboxInsert 是 Redis usage inbox 的入库参数，source 原样落库。
 type RedisInboxInsert struct {
-	QueueKey   string
+	Source     string
 	RawMessage string
 	PoppedAt   time.Time
 }

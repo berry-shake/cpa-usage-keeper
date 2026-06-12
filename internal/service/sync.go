@@ -51,34 +51,21 @@ const (
 	syncMetadataRequired = true
 )
 
-// SyncService 负责把 CPA metadata 和 Redis usage 队列同步到本地 SQLite。
+// SyncService 负责同步 CPA metadata，并处理已经落入本地 inbox 的 usage 原始消息。
 type SyncService struct {
 	db              *gorm.DB
 	client          CPAClientFetcher
-	redisQueue      RedisQueue
-	redisQueueKey   string
 	metadataFetcher MetadataFetcher
 	baseURL         string
 	now             func() time.Time
 	recentUsage     RecentUsageEventAppender
 }
 
-// NewSyncService 按生产配置组装 CPA metadata client 和 Redis queue client。
+// NewSyncService 按生产配置组装 CPA metadata client；远端 usage 拉取由 poller 独立负责。
 func NewSyncService(db *gorm.DB, cfg config.Config) *SyncService {
 	return NewSyncServiceWithOptions(db, SyncServiceOptions{
 		BaseURL: cfg.CPABaseURL,
 		Client:  cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify),
-		RedisQueue: cpa.NewRedisQueueClientWithOptions(cpa.RedisQueueOptions{
-			BaseURL:       cfg.CPABaseURL,
-			RedisAddr:     cfg.RedisQueueAddr,
-			ManagementKey: cfg.CPAManagementKey,
-			Timeout:       cfg.RequestTimeout,
-			QueueKey:      cfg.RedisQueueKey,
-			BatchSize:     cfg.RedisQueueBatchSize,
-			TLS:           cfg.RedisQueueTLS,
-			TLSSkipVerify: cfg.TLSSkipVerify,
-		}),
-		RedisQueueKey: cfg.RedisQueueKey,
 	})
 }
 
@@ -87,13 +74,11 @@ type SyncServiceOptions struct {
 	BaseURL           string
 	Client            CPAClientFetcher
 	MetadataFetcher   MetadataFetcher
-	RedisQueue        RedisQueue
-	RedisQueueKey     string
 	Now               func() time.Time
 	RecentUsageEvents RecentUsageEventAppender
 }
 
-// NewSyncServiceWithOptions 是统一构造入口，负责填充默认时钟、metadata fetcher 和 Redis 队列名。
+// NewSyncServiceWithOptions 是统一构造入口，负责填充默认时钟和 metadata fetcher。
 func NewSyncServiceWithOptions(db *gorm.DB, opts SyncServiceOptions) *SyncService {
 	now := opts.Now
 	if now == nil {
@@ -106,8 +91,6 @@ func NewSyncServiceWithOptions(db *gorm.DB, opts SyncServiceOptions) *SyncServic
 	return &SyncService{
 		db:              db,
 		client:          opts.Client,
-		redisQueue:      opts.RedisQueue,
-		redisQueueKey:   redisQueueKey(opts.RedisQueueKey),
 		metadataFetcher: metadataFetcher,
 		baseURL:         strings.TrimSpace(opts.BaseURL),
 		now:             now,
@@ -158,37 +141,6 @@ func (s *SyncService) SyncMetadata(ctx context.Context) error {
 	}
 	logrus.WithFields(fields).Debug("metadata sync finished")
 	return err
-}
-
-// PullRedisUsageInbox 是兼容测试和手动同步的旧拉取入口；生产远端 ingest 已由 poller 状态机接管。
-func (s *SyncService) PullRedisUsageInbox(ctx context.Context) (*servicedto.RedisInboxPullResult, error) {
-	if err := s.validate(syncMetadataOptional); err != nil {
-		return nil, err
-	}
-	if s.redisQueue == nil {
-		return nil, fmt.Errorf("sync service redis queue is nil")
-	}
-	fetchedAt := timeutil.NormalizeStorageTime(s.now())
-	messages, err := s.redisQueue.PopUsage(ctx)
-	if err != nil {
-		return &servicedto.RedisInboxPullResult{Status: "failed"}, fmt.Errorf("fetch redis usage: %w", err)
-	}
-	logrus.WithFields(logrus.Fields{
-		"queue_key":     s.redisQueueKey,
-		"message_count": len(messages),
-	}).Debug("redis usage batch popped")
-	if len(messages) == 0 {
-		return &servicedto.RedisInboxPullResult{Empty: true, Status: "empty"}, nil
-	}
-	inboxRows, err := insertRedisInboxMessages(s.db, s.redisQueueKey, messages, fetchedAt)
-	if err != nil {
-		return &servicedto.RedisInboxPullResult{Status: "failed"}, fmt.Errorf("insert redis usage inbox: %w", err)
-	}
-	logrus.WithFields(logrus.Fields{
-		"queue_key": s.redisQueueKey,
-		"row_count": len(inboxRows),
-	}).Debug("redis usage inbox rows inserted")
-	return &servicedto.RedisInboxPullResult{Status: "completed", InsertedRows: len(inboxRows)}, nil
 }
 
 // ProcessRedisUsageInbox 是 Redis 同步的本地处理阶段：只读取 pending/process_failed inbox 行并写入 usage_events。
@@ -550,8 +502,9 @@ func (s *SyncService) validate(syncMetadata bool) error {
 }
 
 // insertRedisInboxMessages 在解码前先把 Redis 原始消息落库，降低 LPOP 后本地处理失败导致的数据丢失风险。
-func insertRedisInboxMessages(db *gorm.DB, queueKey string, messages []string, poppedAt time.Time) ([]entities.RedisUsageInbox, error) {
-	return repository.InsertRedisUsageInboxRawMessages(db, queueKey, messages, poppedAt)
+func insertRedisInboxMessages(db *gorm.DB, source string, messages []string, poppedAt time.Time) ([]entities.RedisUsageInbox, error) {
+	// source 已经是完整来源名，这里只透传给仓储层做统一 trim/兜底。
+	return repository.InsertRedisUsageInboxRawMessages(db, source, messages, poppedAt)
 }
 
 // markRedisInboxRowsProcessFailed 记录可重试处理失败；达到仓储阈值后会转为 discarded 并打警告日志。
@@ -571,9 +524,10 @@ func markRedisInboxRowsProcessFailed(db *gorm.DB, rows []entities.RedisUsageInbo
 			continue
 		}
 		if stored.Status == repository.RedisUsageInboxStatusDiscarded {
+			// 丢弃日志保留 source，便于区分 subscribe、redis_pull 和 http_pull 写入的历史原始消息。
 			logrus.WithFields(logrus.Fields{
 				"inbox_id":      stored.ID,
-				"queue_key":     stored.QueueKey,
+				"source":        stored.Source,
 				"message_hash":  stored.MessageHash,
 				"attempt_count": stored.AttemptCount,
 				"last_error":    stored.LastError,
@@ -581,15 +535,6 @@ func markRedisInboxRowsProcessFailed(db *gorm.DB, rows []entities.RedisUsageInbo
 			}).Warn("discarded redis usage inbox row after repeated process failures")
 		}
 	}
-}
-
-// redisQueueKey 统一 Redis usage 队列名默认值，避免构造测试服务时重复传常量。
-func redisQueueKey(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return cpa.ManagementUsageQueueKey
-	}
-	return trimmed
 }
 
 // errorMessage 把可选错误转成仓储 DTO 使用的稳定字符串。

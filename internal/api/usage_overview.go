@@ -250,7 +250,7 @@ func registerKeyOverviewRoute(router gin.IRoutes, usageProvider service.UsagePro
 	})
 }
 
-func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageProvider) {
+func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageProvider, cpaAPIKeyProvider service.CPAAPIKeyProvider) {
 	router.GET("/usage/overview", func(c *gin.Context) {
 		if usageProvider == nil {
 			writeUsageOverviewResponse(c, usageProvider, servicedto.UsageFilter{})
@@ -269,7 +269,7 @@ func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageP
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		writeUsageOverviewRealtimeResponse(c, usageProvider, filter)
+		writeUsageOverviewRealtimeResponse(c, usageProvider, cpaAPIKeyProvider, filter)
 	})
 }
 
@@ -320,7 +320,7 @@ func writeUsageOverviewResponse(c *gin.Context, usageProvider service.UsageProvi
 	})
 }
 
-func writeUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.UsageProvider, filter servicedto.UsageFilter) {
+func writeUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.UsageProvider, cpaAPIKeyProvider service.CPAAPIKeyProvider, filter servicedto.UsageFilter) {
 	if usageProvider == nil {
 		c.JSON(http.StatusOK, emptyUsageOverviewRealtime(filter.RealtimeWindow))
 		return
@@ -330,7 +330,11 @@ func writeUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.Us
 		writeUsageOverviewProviderError(c, "get usage overview realtime failed", err)
 		return
 	}
-	c.JSON(http.StatusOK, buildUsageOverviewRealtime(realtime, filter.RealtimeWindow))
+	apiKeyInfos, err := loadCPAAPIKeyInfos(c, cpaAPIKeyProvider)
+	if err != nil {
+		return
+	}
+	c.JSON(http.StatusOK, buildUsageOverviewRealtime(realtime, filter.RealtimeWindow, apiKeyInfos))
 }
 
 func writeKeyUsageOverviewRealtimeResponse(c *gin.Context, usageProvider service.UsageProvider, filter servicedto.UsageFilter) {
@@ -521,7 +525,7 @@ func realtimeBucketSeconds(window string) int64 {
 	}
 }
 
-func buildUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, window string) usageOverviewRealtime {
+func buildUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, window string, apiKeyInfos map[string]analysisAPIKeyInfo) usageOverviewRealtime {
 	if realtime == nil {
 		return emptyUsageOverviewRealtime(window)
 	}
@@ -534,7 +538,7 @@ func buildUsageOverviewRealtime(realtime *servicedto.UsageOverviewRealtime, wind
 		ResponseDistribution: mapUsageOverviewResponseDistribution(realtime.ResponseDistribution),
 		CurrentUsage: usageOverviewRealtimeCurrentUsage{
 			Models:      mapUsageOverviewRealtimeTopItems(realtime.CurrentUsage.Models, false),
-			APIKeys:     mapUsageOverviewRealtimeTopItems(realtime.CurrentUsage.APIKeys, true),
+			APIKeys:     mapUsageOverviewRealtimeAPIKeyTopItems(realtime.CurrentUsage.APIKeys, apiKeyInfos),
 			AuthFiles:   mapUsageOverviewRealtimeTopItems(realtime.CurrentUsage.AuthFiles, false),
 			AIProviders: mapUsageOverviewRealtimeTopItems(realtime.CurrentUsage.AIProviders, false),
 		},
@@ -692,6 +696,21 @@ func mapUsageOverviewRealtimeTopItems(items []servicedto.RealtimeUsageTopItem, r
 		result = append(result, usageOverviewRealtimeUsageTopItem{
 			Key:      key,
 			Label:    label,
+			Tokens:   item.Tokens,
+			Requests: item.Requests,
+			Cost:     item.CostUSD,
+			Share:    item.Share,
+		})
+	}
+	return result
+}
+
+func mapUsageOverviewRealtimeAPIKeyTopItems(items []servicedto.RealtimeUsageTopItem, apiKeyInfos map[string]analysisAPIKeyInfo) []usageOverviewRealtimeUsageTopItem {
+	result := make([]usageOverviewRealtimeUsageTopItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, usageOverviewRealtimeUsageTopItem{
+			Key:      analysisAPIKeyResponseKey(item.Key, apiKeyInfos),
+			Label:    analysisAPIKeyLabel(item.Key, apiKeyInfos),
 			Tokens:   item.Tokens,
 			Requests: item.Requests,
 			Cost:     item.CostUSD,

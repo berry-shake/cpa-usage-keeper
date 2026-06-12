@@ -2,10 +2,11 @@ package entities
 
 import "time"
 
-// RedisUsageInbox 是从 CPA Redis queue 拉取后等待解码/入库的原始消息实体。
+// RedisUsageInbox 是从 CPA usage 拉取后等待解码/入库的原始消息实体。
 type RedisUsageInbox struct {
-	ID            int64  `gorm:"primaryKey;index:idx_redis_usage_inboxes_status_id,priority:2"`
-	QueueKey      string `gorm:"not null"`
+	ID int64 `gorm:"primaryKey;index:idx_redis_usage_inboxes_status_id,priority:2"`
+	// Source 保存完整拉取来源名，例如 redis_subscribe:usage、redis_pull:usage、redis_pull:queue。
+	Source        string `gorm:"not null"`
 	MessageHash   string `gorm:"not null"`
 	RawMessage    string `gorm:"not null"`
 	Status        string `gorm:"not null;index:idx_redis_usage_inboxes_status_id,priority:1;index:idx_redis_usage_inboxes_status_processed_at,priority:1;index:idx_redis_usage_inboxes_status_updated_at,priority:1;index:idx_redis_usage_inboxes_status_usage_event_key,priority:1"`

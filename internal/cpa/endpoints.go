@@ -19,7 +19,8 @@ const (
 	ManagementRedisAuthCommand       = "AUTH"
 	ManagementRedisPopCommand        = "LPOP"
 	ManagementRedisSubscribeCommand  = "SUBSCRIBE"
-	ManagementUsageQueueKey          = "queue"
+	ManagementUsageQueueKey          = "usage"
+	ManagementUsageLegacyQueueKey    = "queue"
 	ManagementUsageSubscribeChannel  = "usage"
 	ManagementUsageQueueMaxBatchSize = 10000
 )

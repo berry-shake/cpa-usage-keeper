@@ -140,9 +140,6 @@ func TestLoadFromEnvAppliesDefaults(t *testing.T) {
 	if cfg.RedisQueueAddr != "" {
 		t.Fatalf("expected default redis queue addr to be empty, got %q", cfg.RedisQueueAddr)
 	}
-	if cfg.RedisQueueKey != RedisQueueKeyDefault {
-		t.Fatalf("expected default redis queue key queue, got %s", cfg.RedisQueueKey)
-	}
 	if cfg.RedisQueueBatchSize != 10000 {
 		t.Fatalf("expected default redis queue batch size 10000, got %d", cfg.RedisQueueBatchSize)
 	}
@@ -407,20 +404,6 @@ func TestLoadFromEnvUsesRedisQueueAddrOverride(t *testing.T) {
 
 	if cfg.RedisQueueAddr != "redis-stream.example.com:6380" {
 		t.Fatalf("expected redis queue addr override, got %q", cfg.RedisQueueAddr)
-	}
-}
-
-func TestLoadFromEnvIgnoresRemovedRedisQueueKeyOverride(t *testing.T) {
-	t.Setenv("CPA_BASE_URL", "https://cpa.example.com")
-	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
-	t.Setenv("REDIS_QUEUE_KEY", "custom-queue")
-
-	cfg, err := LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv returned error: %v", err)
-	}
-	if cfg.RedisQueueKey != RedisQueueKeyDefault {
-		t.Fatalf("expected removed redis queue key override to be ignored, got %q", cfg.RedisQueueKey)
 	}
 }
 

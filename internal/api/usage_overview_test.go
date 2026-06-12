@@ -261,6 +261,39 @@ func TestUsageOverviewResponseIncludesResolvedRangeAndTimezone(t *testing.T) {
 	}
 }
 
+func TestUsageOverviewRealtimeUsesCPAAPIKeyAliasLabels(t *testing.T) {
+	provider := &usageFilterStub{realtime: &servicedto.UsageOverviewRealtime{
+		Window:        "15m",
+		BucketSeconds: 30,
+		CurrentUsage: servicedto.RealtimeCurrentUsage{
+			APIKeys: []servicedto.RealtimeUsageTopItem{{
+				Key:      "sk-alpha123456",
+				Label:    "sk-alpha123456",
+				Tokens:   20,
+				Requests: 1,
+				Share:    100,
+			}},
+		},
+	}}
+	keyProvider := &authCPAAPIKeyStub{row: entities.CPAAPIKey{ID: 42, APIKey: "sk-alpha123456", KeyAlias: "Primary Key"}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{CPAAPIKeys: keyProvider})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/overview/realtime?window=15m", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d %s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !contains(body, `"api_keys":[{"key":"42","label":"Primary Key","tokens":20,"requests":1,"share":100}]`) {
+		t.Fatalf("expected realtime API key usage to use CPA API key id and alias label, got %s", body)
+	}
+	if contains(body, "sk-alpha123456") {
+		t.Fatalf("expected realtime API key usage to avoid raw key output, got %s", body)
+	}
+}
+
 func TestUsageOverviewRealtimeAcceptsWindowAndReturnsRealtimeBlock(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")

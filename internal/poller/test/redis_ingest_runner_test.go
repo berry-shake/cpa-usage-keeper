@@ -84,6 +84,30 @@ func TestRedisIngestRunnerSubscribeBackfillsBeforeReceiving(t *testing.T) {
 	}
 }
 
+func TestRedisIngestRunnerWritesDynamicPullSourceName(t *testing.T) {
+	writer := newFakeInboxWriter()
+	redisSource := &fakeNamedPullSource{
+		fakePullSource: &fakePullSource{batches: [][]string{{`{"request_id":"redis"}`}}},
+		sourceName:     "redis_pull:queue",
+	}
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{err: errors.New("subscribe unavailable")},
+		redisSource,
+		&fakePullSource{},
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	entry := writer.waitForInsert(t)
+	cancel()
+	if entry.source != "redis_pull:queue" {
+		t.Fatalf("expected dynamic Redis pull source, got %q", entry.source)
+	}
+}
+
 func TestRedisIngestRunnerSubscribeBackfillDrainsRedisBeforeReceiving(t *testing.T) {
 	writer := newFakeInboxWriter()
 	sub := &blockingSubscription{messages: make(chan string)}
@@ -491,6 +515,13 @@ func (s *fakePullSource) Pull(context.Context) ([]string, error) {
 	s.batches = s.batches[1:]
 	return batch, nil
 }
+
+type fakeNamedPullSource struct {
+	*fakePullSource
+	sourceName string
+}
+
+func (s *fakeNamedPullSource) SourceName() string { return s.sourceName }
 
 type fakeInboxInsert struct {
 	source   string

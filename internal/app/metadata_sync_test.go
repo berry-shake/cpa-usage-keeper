@@ -126,11 +126,11 @@ func TestMetadataSyncRunnerValidatesConfig(t *testing.T) {
 	}
 }
 
-func TestMetadataSyncRunnerDefaultsRefreshDebounceToThreeSeconds(t *testing.T) {
+func TestMetadataSyncRunnerDefaultsRefreshDebounceToOneSecond(t *testing.T) {
 	runner := NewMetadataSyncRunner(&metadataSyncStub{}, time.Minute)
 
-	if runner.refreshDebounce != 3*time.Second {
-		t.Fatalf("expected default refresh debounce to be 3s, got %s", runner.refreshDebounce)
+	if runner.refreshDebounce != time.Second {
+		t.Fatalf("expected default refresh debounce to be 1s, got %s", runner.refreshDebounce)
 	}
 }
 

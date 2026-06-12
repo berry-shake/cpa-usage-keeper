@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const redisUsageInboxProcessingColumns = "id, queue_key, raw_message, status, attempt_count, usage_event_key, popped_at"
+const redisUsageInboxProcessingColumns = "id, source, raw_message, status, attempt_count, usage_event_key, popped_at"
 
 const (
 	RedisUsageInboxStatusPending       = "pending"
@@ -21,16 +21,21 @@ const (
 	RedisUsageInboxStatusDecodeFailed  = "decode_failed"
 	RedisUsageInboxStatusProcessFailed = "process_failed"
 	RedisUsageInboxStatusDiscarded     = "discarded"
+	// RedisUsageInboxSourceUnknown 表示历史或异常写入路径无法可靠还原真实来源。
+	RedisUsageInboxSourceUnknown = "unknown"
 
 	redisUsageInboxMaxErrorLength     = 1024
 	redisUsageInboxMaxProcessAttempts = 5
 )
 
-func InsertRedisUsageInboxRawMessages(db *gorm.DB, queueKey string, messages []string, poppedAt time.Time) ([]entities.RedisUsageInbox, error) {
+func InsertRedisUsageInboxRawMessages(db *gorm.DB, source string, messages []string, poppedAt time.Time) ([]entities.RedisUsageInbox, error) {
+	// inputs 统一走结构化 DTO，避免 raw message 快捷入口和测试入口出现两套入库逻辑。
 	inputs := make([]dto.RedisInboxInsert, 0, len(messages))
 	for _, message := range messages {
-		inputs = append(inputs, dto.RedisInboxInsert{QueueKey: queueKey, RawMessage: message, PoppedAt: poppedAt})
+		// source 原样传给标准入口，真正的 trim/兜底只在一个地方完成。
+		inputs = append(inputs, dto.RedisInboxInsert{Source: source, RawMessage: message, PoppedAt: poppedAt})
 	}
+	// InsertRedisUsageInboxMessages 是唯一实际批量写入入口。
 	return InsertRedisUsageInboxMessages(db, inputs)
 }
 
@@ -44,7 +49,7 @@ func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []dto.RedisInboxInsert) (
 	for _, input := range inputs {
 		hash := sha256.Sum256([]byte(input.RawMessage))
 		rows = append(rows, entities.RedisUsageInbox{
-			QueueKey:     strings.TrimSpace(input.QueueKey),
+			Source:       redisUsageInboxSource(input.Source),
 			MessageHash:  fmt.Sprintf("%x", hash),
 			RawMessage:   input.RawMessage,
 			Status:       RedisUsageInboxStatusPending,
@@ -60,6 +65,17 @@ func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []dto.RedisInboxInsert) (
 		return nil, err
 	}
 	return rows, nil
+}
+
+func redisUsageInboxSource(value string) string {
+	// 统一去掉配置或调用方传入来源名两端空白，避免同一来源出现多个字符串形态。
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		// 空来源不能写入非空列，也不能伪造成某个真实拉取方式。
+		return RedisUsageInboxSourceUnknown
+	}
+	// 非空来源保持调用方完整语义，例如 redis_subscribe:usage 或 redis_pull:queue。
+	return trimmed
 }
 
 func MarkRedisUsageInboxProcessed(db *gorm.DB, id int64, eventKey string, processedAt time.Time) error {

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -87,13 +86,4 @@ func TestDecodeRedisUsageMessageReportsOnlyMessageError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "decode redis usage message") {
 		t.Fatalf("expected decode error, got %v", err)
 	}
-}
-
-type staticRedisQueue struct {
-	messages []string
-	err      error
-}
-
-func (q staticRedisQueue) PopUsage(context.Context) ([]string, error) {
-	return q.messages, q.err
 }
