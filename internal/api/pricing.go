@@ -125,6 +125,30 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 		})
 	})
 
+	router.GET("/pricing/sync/preview", func(c *gin.Context) {
+		if pricingProvider == nil {
+			c.JSON(http.StatusOK, servicedto.PricingSyncPreview{
+				Source:          "Models.dev",
+				Matches:         []servicedto.PricingSyncMatch{},
+				UnmatchedModels: []string{},
+			})
+			return
+		}
+
+		preview, err := pricingProvider.PreviewPricingSync(c.Request.Context())
+		if err != nil {
+			writeInternalError(c, "preview pricing sync failed", err)
+			return
+		}
+		if preview.Matches == nil {
+			preview.Matches = []servicedto.PricingSyncMatch{}
+		}
+		if preview.UnmatchedModels == nil {
+			preview.UnmatchedModels = []string{}
+		}
+		c.JSON(http.StatusOK, preview)
+	})
+
 	router.PUT("/pricing", func(c *gin.Context) {
 		updatePricing(c, pricingProvider, "")
 	})

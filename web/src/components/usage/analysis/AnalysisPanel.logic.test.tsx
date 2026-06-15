@@ -250,6 +250,32 @@ describe('AnalysisPanel token chart data', () => {
     expect(markup).not.toContain('usage_stats.analysis_ai_provider_composition_title');
   });
 
+  it('uses a distinct sixth composition color when others are collapsed', () => {
+    const analysis: AnalysisResponse = {
+      ...emptyAnalysis,
+      api_key_composition: Array.from({ length: 7 }, (_, index) => ({
+        key: `key-${index + 1}`,
+        label: `Key ${index + 1}`,
+        total_tokens: 700 - (index * 100),
+        requests: 7 - index,
+        percent: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_tokens: 0,
+        reasoning_tokens: 0,
+        cost_usd: 0,
+        cost_available: true,
+      })),
+    };
+
+    const markup = renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
+    const compositionColors = Array.from(markup.matchAll(/background-color:\s*([^;"']+)/g), (match) => match[1].trim());
+
+    expect(markup).toContain('usage_stats.analysis_others');
+    expect(compositionColors).toHaveLength(6);
+    expect(new Set(compositionColors).size).toBe(6);
+  });
+
   it('renders latency diagnostics scatter before usage distribution', () => {
     const analysis: AnalysisResponse = {
       ...emptyAnalysis,

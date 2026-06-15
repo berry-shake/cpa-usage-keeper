@@ -446,6 +446,239 @@ func TestPricingServiceSyncRemotePricingPersistsClaudeStyleAndCacheCreation(t *t
 	}
 }
 
+func TestBuildPricingSyncPreviewMatchesMetadataModels(t *testing.T) {
+	input := 2.5
+	output := 10.0
+	cacheRead := 1.25
+	gptCacheRead := 0.25
+	gptCacheWrite := 0.0
+	claudeInput := 3.0
+	claudeOutput := 15.0
+	cacheWrite := 3.75
+	zeroPrice := 0.0
+	catalog := map[string]modelsDevProvider{
+		"openai": {
+			ID:   "openai",
+			Name: "OpenAI",
+			Models: map[string]modelsDevModel{
+				"openai/gpt-4o": {
+					ID:          "openai/gpt-4o",
+					Name:        "GPT-4o",
+					Family:      "gpt",
+					LastUpdated: "2026-01-01",
+					Cost: modelsDevCost{
+						Input:     &input,
+						Output:    &output,
+						CacheRead: &cacheRead,
+					},
+				},
+				"openai/gpt-5.4": {
+					ID:          "openai/gpt-5.4",
+					Name:        "GPT-5.4",
+					Family:      "gpt",
+					LastUpdated: "2026-01-01",
+					Cost: modelsDevCost{
+						Input:      &input,
+						Output:     &output,
+						CacheRead:  &gptCacheRead,
+						CacheWrite: &gptCacheWrite,
+					},
+				},
+			},
+		},
+		"anthropic": {
+			ID:   "anthropic",
+			Name: "Anthropic",
+			Models: map[string]modelsDevModel{
+				"anthropic/claude-sonnet-4": {
+					ID:          "anthropic/claude-sonnet-4",
+					Name:        "Claude Sonnet 4",
+					Family:      "claude-sonnet",
+					LastUpdated: "2026-01-01",
+					Cost: modelsDevCost{
+						Input:      &claudeInput,
+						Output:     &claudeOutput,
+						CacheRead:  &cacheRead,
+						CacheWrite: &cacheWrite,
+					},
+				},
+			},
+		},
+		"deepseek": {
+			ID:   "deepseek",
+			Name: "DeepSeek",
+			Models: map[string]modelsDevModel{
+				"deepseek-chat": {
+					ID:          "deepseek-chat",
+					Name:        "DeepSeek Chat",
+					Family:      "deepseek",
+					LastUpdated: "2026-01-01",
+					Cost: modelsDevCost{
+						Input:  &input,
+						Output: &output,
+					},
+				},
+			},
+		},
+		"302ai": {
+			ID:   "302ai",
+			Name: "302.AI",
+			Models: map[string]modelsDevModel{
+				"gpt-4o": {
+					ID:          "gpt-4o",
+					Name:        "GPT-4o",
+					Family:      "gpt",
+					LastUpdated: "2027-01-01",
+					Cost: modelsDevCost{
+						Input:  &claudeInput,
+						Output: &claudeOutput,
+					},
+				},
+				"deepseek-chat": {
+					ID:          "deepseek-chat",
+					Name:        "DeepSeek Chat",
+					Family:      "deepseek",
+					LastUpdated: "2027-01-01",
+					Cost: modelsDevCost{
+						Input:  &claudeInput,
+						Output: &claudeOutput,
+					},
+				},
+			},
+		},
+		"nebius": {
+			ID:   "nebius",
+			Name: "Nebius Token Factory",
+			Models: map[string]modelsDevModel{
+				"deepseek-ai/DeepSeek-V4-Pro": {
+					ID:          "deepseek-ai/DeepSeek-V4-Pro",
+					Name:        "DeepSeek V4 Pro",
+					Family:      "deepseek",
+					LastUpdated: "2026-04-24",
+					Cost: modelsDevCost{
+						Input:  &input,
+						Output: &output,
+					},
+				},
+				"deepseek-ai/DeepSeek-V4-Flash": {
+					ID:          "deepseek-ai/DeepSeek-V4-Flash",
+					Name:        "DeepSeek V4 Flash",
+					Family:      "deepseek-flash",
+					LastUpdated: "2026-04-24",
+					Cost: modelsDevCost{
+						Input:  &input,
+						Output: &output,
+					},
+				},
+			},
+		},
+		"zai": {
+			ID:   "zai",
+			Name: "Z.ai",
+			Models: map[string]modelsDevModel{
+				"zai-org/GLM-4.7-Flash": {
+					ID:          "zai-org/GLM-4.7-Flash",
+					Name:        "GLM-4.7-Flash",
+					Family:      "glm-flash",
+					LastUpdated: "2026-01-19",
+					Cost: modelsDevCost{
+						Input:  &input,
+						Output: &output,
+					},
+				},
+			},
+		},
+		"minimax-coding-plan": {
+			ID:   "minimax-coding-plan",
+			Name: "MiniMax Coding Plan",
+			Models: map[string]modelsDevModel{
+				"MiniMax-M3": {
+					ID:          "MiniMax-M3",
+					Name:        "MiniMax-M3",
+					Family:      "minimax",
+					LastUpdated: "2026-03-01",
+					Cost: modelsDevCost{
+						Input:  &zeroPrice,
+						Output: &zeroPrice,
+					},
+				},
+			},
+		},
+		"vercel": {
+			ID:   "vercel",
+			Name: "Vercel",
+			Models: map[string]modelsDevModel{
+				"minimax/minimax-m3": {
+					ID:          "minimax/minimax-m3",
+					Name:        "MiniMax M3",
+					Family:      "minimax",
+					LastUpdated: "2026-03-01",
+					Cost: modelsDevCost{
+						Input:  &input,
+						Output: &output,
+					},
+				},
+			},
+		},
+	}
+
+	preview, err := buildPricingSyncPreviewFromCatalog([]string{
+		"openai/gpt-4o",
+		"Claude Sonnet 4",
+		"deepseek-chat",
+		"gpt-5.4",
+		"deepseek-v4-pro",
+		"DeepSeek V4 Flash",
+		"GLM-4.7-Flash",
+		"minimax-m3",
+		"missing-model",
+	}, catalog, "https://models.dev/api.json")
+	if err != nil {
+		t.Fatalf("build pricing sync preview: %v", err)
+	}
+
+	if preview.Source != "Models.dev" || preview.SourceURL != "https://models.dev/api.json" {
+		t.Fatalf("unexpected preview source: %#v", preview)
+	}
+	if preview.MetadataModels != 11 {
+		t.Fatalf("expected metadata model count, got %d", preview.MetadataModels)
+	}
+	if len(preview.Matches) != 8 {
+		t.Fatalf("expected 8 matches, got %#v", preview.Matches)
+	}
+	matchesByModel := make(map[string]servicedto.PricingSyncMatch, len(preview.Matches))
+	for _, match := range preview.Matches {
+		matchesByModel[match.Model] = match
+	}
+	if match := matchesByModel["Claude Sonnet 4"]; match.PricingStyle != "claude" || match.CacheCreationPricePer1M != 3.75 {
+		t.Fatalf("unexpected claude match: %#v", match)
+	}
+	if match := matchesByModel["openai/gpt-4o"]; match.MatchedModel != "openai/gpt-4o" || match.MatchType != "index_exact" || match.SourceProviderID != "openai" {
+		t.Fatalf("unexpected gpt match: %#v", match)
+	}
+	if match := matchesByModel["deepseek-chat"]; match.SourceProviderID != "deepseek" {
+		t.Fatalf("unexpected deepseek official priority match: %#v", match)
+	}
+	if match := matchesByModel["gpt-5.4"]; match.PricingStyle != "openai" || match.CachePricePer1M != 0.25 || match.CacheCreationPricePer1M != 0 {
+		t.Fatalf("unexpected openai cache match: %#v", match)
+	}
+	if match := matchesByModel["deepseek-v4-pro"]; match.MatchedModel != "deepseek-ai/DeepSeek-V4-Pro" || match.SourceProviderID != "nebius" {
+		t.Fatalf("unexpected deepseek index match: %#v", match)
+	}
+	if match := matchesByModel["DeepSeek V4 Flash"]; match.MatchedModel != "deepseek-ai/DeepSeek-V4-Flash" || match.SourceProviderID != "nebius" {
+		t.Fatalf("unexpected deepseek flash match: %#v", match)
+	}
+	if match := matchesByModel["GLM-4.7-Flash"]; match.MatchedModel != "zai-org/GLM-4.7-Flash" || match.SourceProviderID != "zai" {
+		t.Fatalf("unexpected glm match: %#v", match)
+	}
+	if match := matchesByModel["minimax-m3"]; match.MatchedModel != "minimax/minimax-m3" || match.SourceProviderID != "vercel" || match.PromptPricePer1M == 0 {
+		t.Fatalf("unexpected minimax plan fallback match: %#v", match)
+	}
+	if len(preview.UnmatchedModels) != 1 || preview.UnmatchedModels[0] != "missing-model" {
+		t.Fatalf("unexpected unmatched models: %#v", preview.UnmatchedModels)
+	}
+}
+
 type stubModelsFetcher struct {
 	result *response.ModelsResult
 	err    error

@@ -16,6 +16,7 @@ import (
 type pricingStub struct {
 	usedModels []string
 	pricing    []entities.ModelPriceSetting
+	preview    servicedto.PricingSyncPreview
 	updated    *entities.ModelPriceSetting
 	lastUpdate *servicedto.UpdatePricingInput
 	deleted    string
@@ -29,6 +30,10 @@ func (s pricingStub) ListUsedModels(context.Context) ([]string, error) {
 
 func (s pricingStub) ListPricing(context.Context) ([]entities.ModelPriceSetting, error) {
 	return s.pricing, s.err
+}
+
+func (s pricingStub) PreviewPricingSync(context.Context) (servicedto.PricingSyncPreview, error) {
+	return s.preview, s.err
 }
 
 func (s *pricingStub) UpdatePricing(_ context.Context, input servicedto.UpdatePricingInput) (*entities.ModelPriceSetting, error) {
@@ -61,6 +66,13 @@ func TestPricingRoutesReturnEmptyResponsesWithoutProvider(t *testing.T) {
 	if pricingResp.Code != http.StatusOK || !contains(pricingResp.Body.String(), `"pricing":[]`) {
 		t.Fatalf("unexpected pricing response: %d %s", pricingResp.Code, pricingResp.Body.String())
 	}
+
+	previewReq := httptest.NewRequest(http.MethodGet, "/api/v1/pricing/sync/preview", nil)
+	previewResp := httptest.NewRecorder()
+	router.ServeHTTP(previewResp, previewReq)
+	if previewResp.Code != http.StatusOK || !contains(previewResp.Body.String(), `"matches":[]`) {
+		t.Fatalf("unexpected pricing sync preview response: %d %s", previewResp.Code, previewResp.Body.String())
+	}
 }
 
 func TestPricingRoutesReturnConfiguredData(t *testing.T) {
@@ -88,6 +100,32 @@ func TestPricingRoutesReturnConfiguredData(t *testing.T) {
 	router.ServeHTTP(pricingResp, pricingReq)
 	if pricingResp.Code != http.StatusOK || !contains(pricingResp.Body.String(), `"prompt_price_per_1m":3`) || !contains(pricingResp.Body.String(), `"pricing_style":"claude"`) || !contains(pricingResp.Body.String(), `"cache_creation_price_per_1m":3.75`) {
 		t.Fatalf("unexpected pricing response: %d %s", pricingResp.Code, pricingResp.Body.String())
+	}
+}
+
+func TestPricingSyncPreviewRoute(t *testing.T) {
+	router := NewRouter(nil, nil, nil, &pricingStub{
+		preview: servicedto.PricingSyncPreview{
+			Source:         "Models.dev",
+			MetadataModels: 1,
+			Matches: []servicedto.PricingSyncMatch{{
+				Model:                "openai/gpt-4o",
+				MatchedModel:         "gpt-4o",
+				MatchType:            "suffix",
+				PricingStyle:         "openai",
+				PromptPricePer1M:     2.5,
+				CompletionPricePer1M: 10,
+				CachePricePer1M:      1.25,
+			}},
+		},
+	}, AuthConfig{}, nil, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pricing/sync/preview", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK || !contains(resp.Body.String(), `"source":"Models.dev"`) || !contains(resp.Body.String(), `"matched_model":"gpt-4o"`) {
+		t.Fatalf("unexpected preview response: %d %s", resp.Code, resp.Body.String())
 	}
 }
 

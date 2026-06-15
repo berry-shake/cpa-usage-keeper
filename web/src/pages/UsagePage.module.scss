@@ -250,6 +250,19 @@
     border-radius: 999px;
   }
 
+  > span:not(:global(.loading-spinner)) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    line-height: 1;
+  }
+
+  svg {
+    display: block;
+    flex: 0 0 auto;
+  }
+
   &:global(.btn-primary) {
     box-shadow: 0 8px 20px rgba($primary-color, 0.18);
   }
@@ -1927,6 +1940,25 @@
   line-height: 1.45;
 }
 
+.pricingToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 2px 2px 0;
+}
+
+.pricingToolbarMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .priceForm {
   padding: 12px;
   background: color-mix(in srgb, var(--bg-secondary) 68%, transparent);
@@ -2343,6 +2375,234 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.syncModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.syncSummaryRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 5px 9px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1;
+    white-space: nowrap;
+  }
+}
+
+.syncBatchActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.syncDraftList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(50vh, 520px);
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 3px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.syncDraftItem {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--bg-secondary) 74%, transparent);
+}
+
+.syncDraftItemFailed {
+  border-color: color-mix(in srgb, var(--danger-color) 52%, var(--border-color));
+  background: color-mix(in srgb, var(--danger-color) 7%, var(--bg-secondary));
+}
+
+.syncDraftCheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+
+  input {
+    width: 17px;
+    height: 17px;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+  }
+}
+
+.syncDraftContent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.syncDraftHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.syncDraftModelBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.syncDraftMatched {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.syncDraftBadges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 4px 7px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1;
+  }
+}
+
+.syncDraftBadges .syncDraftFailureIcon {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--danger-color) 62%, var(--border-color));
+  background: color-mix(in srgb, var(--danger-color) 11%, var(--bg-primary));
+  color: var(--danger-color);
+
+  svg {
+    flex: 0 0 auto;
+  }
+}
+
+.syncDraftGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.syncUnmatched {
+  border-top: 1px solid var(--border-color);
+  padding-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+
+  summary {
+    cursor: pointer;
+  }
+}
+
+.syncUnmatchedList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+
+  span {
+    display: inline-flex;
+    max-width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-tertiary);
+    font-size: 10px;
+    line-height: 1.2;
+    word-break: break-all;
+  }
+}
+
+@include mobile {
+  .pricingToolbar {
+    align-items: stretch;
+
+    :global(.btn) {
+      width: 100%;
+    }
+  }
+
+  .syncSummaryRow,
+  .syncBatchActions {
+    align-items: stretch;
+  }
+
+  .syncSummaryRow span,
+  .syncBatchActions :global(.btn) {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .syncDraftList {
+    max-height: min(52vh, 460px);
+  }
+
+  .syncDraftItem {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .syncDraftCheck {
+    justify-content: flex-start;
+    min-height: 20px;
+  }
+
+  .syncDraftHeader {
+    flex-direction: column;
+  }
+
+  .syncDraftBadges {
+    justify-content: flex-start;
+  }
 }
 
 .detailsGrid {

@@ -98,12 +98,12 @@ export function formatPerMinuteValue(value: number): string {
 }
 
 export function formatUsd(value: number): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: value < 1 ? 4 : 2,
     maximumFractionDigits: value < 1 ? 4 : 2
-  }).format(value || 0);
+  }).format(value || 0).replace(/^US\$/, '$');
 }
 
 export function normalizeAuthIndex(value: unknown): string {

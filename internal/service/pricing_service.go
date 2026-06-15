@@ -19,6 +19,7 @@ import (
 type PricingProvider interface {
 	ListUsedModels(context.Context) ([]string, error)
 	ListPricing(context.Context) ([]entities.ModelPriceSetting, error)
+	PreviewPricingSync(context.Context) (servicedto.PricingSyncPreview, error)
 	UpdatePricing(context.Context, servicedto.UpdatePricingInput) (*entities.ModelPriceSetting, error)
 	DeletePricing(context.Context, string) error
 	SyncRemotePricing(context.Context) (*RemotePricingSyncResult, error)

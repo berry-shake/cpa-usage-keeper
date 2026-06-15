@@ -112,6 +112,7 @@ const CHART_COLORS: GradientColor[] = [
   { base: '#15803d', light: '#22c55e' },
   { base: '#7e22ce', light: '#c084fc' },
   { base: '#b91c1c', light: '#ef4444' },
+  { base: '#0891b2', light: '#67e8f9' },
 ];
 const TOKEN_COLORS = {
   input: { base: '#2563eb', light: '#93c5fd' },

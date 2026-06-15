@@ -721,6 +721,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     syncingPrices,
     syncMeta,
     syncRemoteModelPrices,
+    syncModelPrices,
+    previewPricingSync,
   } = usePricingData({
     onAuthRequired,
     enabled: activeTab === 'settings',
@@ -1925,6 +1927,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   onSyncPrices={syncRemoteModelPrices}
                   syncingPrices={syncingPrices}
                   syncMeta={syncMeta}
+                  onSyncPricesChange={syncModelPrices}
+                  onSyncPreview={previewPricingSync}
                   onNotice={showTopNotice}
                   loading={pricingLoading}
                 />
