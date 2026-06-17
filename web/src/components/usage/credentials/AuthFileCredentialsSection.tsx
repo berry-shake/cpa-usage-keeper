@@ -2,15 +2,16 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { Modal } from '@/components/ui/Modal'
-import { IconRefreshCw, IconSearch, IconShield, IconTrash2 } from '@/components/ui/icons'
+import { IconChartLine, IconRefreshCw, IconSearch, IconShield, IconTrash2 } from '@/components/ui/icons'
 import quotaCostIcon from '@/assets/icons/quota-cost.svg'
 import quotaTokenIcon from '@/assets/icons/quota-token.svg'
 import styles from './CredentialSections.module.scss'
 import type { AuthFileCredentialRow, DisplayQuota, PlanTypeTone } from './credentialViewModels'
 import { deleteAuthFiles, setAuthFilesDisabled, type UsageIdentityPageSort } from '@/lib/api'
 import type { UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus, UsageQuotaInspectionStatusResponse } from '@/lib/types'
+import { CredentialHealthPanel } from './CredentialHealthPanel'
 import { CredentialProviderFilterIcon } from './CredentialProviderFilterBar'
-import { CredentialBadge, CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
+import { CredentialBadge, CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialTableHeader, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
 
 type Translate = (key: string, options?: Record<string, string>) => string
 type InspectionIndicatorTone = 'idle' | 'running' | 'completed'
@@ -18,6 +19,7 @@ type InspectionResultStatusFilter = 'normal' | 'limit_reached' | 'unauthorized_4
 type InspectionResultStatusFilterState = InspectionResultStatusFilter | null
 type InspectionStatTone = 'normal' | 'limitReached' | 'unauthorized' | 'failed' | 'unknown'
 type QuotaUsageMode = 'current' | 'estimated'
+type AuthFileDisplayMode = 'quota' | 'health'
 type InvalidInspectionAccountAction = 'disable' | 'delete'
 type QuotaErrorDisplay = {
   code?: string
@@ -31,6 +33,7 @@ type QuotaErrorDetails = {
 
 const QUOTA_ERROR_MESSAGE_MAX_LENGTH = 96
 const QUOTA_ERROR_PARSE_MAX_DEPTH = 10
+const AUTH_FILE_DISPLAY_MODE_STORAGE_KEY = 'cpa.credentials.authFiles.displayMode'
 export const INSPECTION_RESULT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 const DEFAULT_INSPECTION_RESULT_PAGE_SIZE = INSPECTION_RESULT_PAGE_SIZE_OPTIONS[0]
 const INSPECTION_SELECTABLE_RESULT_STATUSES = new Set<InspectionResultStatusFilter>([
@@ -75,11 +78,17 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
   const { t } = useTranslation()
   const [inspectionOpen, setInspectionOpen] = useState(false)
   const [quotaUsageMode, setQuotaUsageMode] = useState<QuotaUsageMode>('current')
+  const [displayMode, setDisplayModeState] = useState<AuthFileDisplayMode>(() => readStoredAuthFileDisplayMode())
+  const showHealthMode = displayMode === 'health'
   const canRefresh = rows.some((row) => !isRowRefreshing(row) && !row.identity.is_deleted) && !quotaRefreshing
   const inspectionTone = inspectionIndicatorTone(quotaInspectionStatus)
   const openInspection = () => {
     setInspectionOpen(true)
     void onRefreshInspectionStatus()
+  }
+  const setDisplayMode = (mode: AuthFileDisplayMode) => {
+    setDisplayModeState(mode)
+    persistAuthFileDisplayMode(mode)
   }
 
   return (
@@ -89,10 +98,16 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
         subtitle={t('usage_stats.credentials_auth_files_subtitle')}
         countLabel={t('usage_stats.credentials_count', { count: total })}
         titleExtra={(
-          <label className={styles.credentialActiveOnlySwitch}>
-            <input type="checkbox" checked={activeOnly} onChange={(event) => onActiveOnlyChange(event.target.checked)} />
-            <span>{t('usage_stats.credentials_auth_files_active_only')}</span>
-          </label>
+          <div className={styles.credentialAuthFileTitleControls}>
+            <label className={styles.credentialActiveOnlySwitch}>
+              <span className={styles.credentialActiveOnlyLabel}>{t('usage_stats.credentials_auth_files_active_only')}</span>
+              <input type="checkbox" checked={activeOnly} onChange={(event) => onActiveOnlyChange(event.target.checked)} />
+              <span className={styles.credentialActiveOnlyTrack} aria-hidden="true">
+                <span className={styles.credentialActiveOnlyThumb} />
+              </span>
+            </label>
+            <AuthFileDisplayModeSwitch mode={displayMode} onChange={setDisplayMode} />
+          </div>
         )}
         actions={(
           <div className={styles.credentialSectionActionButtons}>
@@ -131,6 +146,17 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
       {quotaRefreshError && <div className={styles.credentialInlineError}>{quotaRefreshError}</div>}
       {loading && rows.length === 0 && <div className={styles.credentialEmptyState}>{t('common.loading')}</div>}
       {!loading && rows.length === 0 && <div className={styles.credentialEmptyState}>{t('usage_stats.credentials_auth_files_empty')}</div>}
+      {rows.length > 0 && (
+        <CredentialTableHeader
+          rowClassName={styles.authFileCredentialRow}
+          nameLabel={t('usage_stats.credentials_column_name')}
+          totalRequestsLabel={t('usage_stats.total_requests')}
+          successRateLabel={t('usage_stats.success_rate')}
+          totalTokensLabel={t('usage_stats.total_tokens')}
+          cacheRateLabel={t('usage_stats.cache_rate')}
+          sideLabel={showHealthMode ? t('usage_stats.credentials_column_health') : t('usage_stats.credentials_column_quota')}
+        />
+      )}
       {rows.map((row) => {
         const rowRefreshing = isRowRefreshing(row)
         return (
@@ -148,14 +174,16 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
             badges={null}
             metrics={(
               <>
-                {row.totalRequests > 0 && <MetricPill label={t('usage_stats.total_requests')} value={<RequestMetric total={row.totalRequests} success={row.successCount} failure={row.failureCount} />} />}
-                {row.successRate !== null && <MetricPill label={t('usage_stats.success_rate')} value={<TonePercent value={row.successRate} tone={successRateTone(row.successRate)} />} />}
-                {row.totalTokens > 0 && <MetricPill label={t('usage_stats.total_tokens')} value={formatCredentialNumber(row.totalTokens)} />}
-                {row.cacheRate !== null && <MetricPill label={t('usage_stats.cache_rate')} value={<TonePercent value={row.cacheRate} tone={cacheRateTone(row.cacheRate)} />} />}
+                <MetricPill value={<RequestMetric total={row.totalRequests} success={row.successCount} failure={row.failureCount} />} />
+                <MetricPill value={<TonePercent value={row.successRate} tone={successRateTone(row.successRate)} />} />
+                <MetricPill value={formatCredentialNumber(row.totalTokens)} />
+                <MetricPill value={<TonePercent value={row.cacheRate} tone={cacheRateTone(row.cacheRate)} />} />
               </>
             )}
             rowClassName={styles.authFileCredentialRow}
-            side={(
+            side={showHealthMode ? (
+              <CredentialHealthPanel displayName={row.displayName} health={row.credentialHealth} lastUsedAt={row.identity.last_used_at} statsUpdatedAt={row.identity.stats_updated_at} />
+            ) : (
               <div className={styles.credentialQuotaSideWithAction}>
                 <AuthFileQuotaPanel row={row} quotaUsageMode={quotaUsageMode} />
                 <button
@@ -174,7 +202,7 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
         )
       })}
       <CredentialsPagination
-        leadingControls={<QuotaUsageModeSwitch label={t('usage_stats.credentials_quota_usage_mode_label')} mode={quotaUsageMode} onChange={setQuotaUsageMode} />}
+        leadingControls={showHealthMode ? undefined : <QuotaUsageModeSwitch label={t('usage_stats.credentials_quota_usage_mode_label')} mode={quotaUsageMode} onChange={setQuotaUsageMode} />}
         page={page}
         total={total}
         totalPages={totalPages}
@@ -758,27 +786,86 @@ function QuotaUsageModeSwitch({ label, mode, onChange }: { label: string; mode: 
   )
 }
 
+function AuthFileDisplayModeSwitch({ mode, onChange }: { mode: AuthFileDisplayMode; onChange: (mode: AuthFileDisplayMode) => void }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className={styles.credentialDisplayModeControl}>
+      <div className={styles.credentialDisplayModeSwitcher} role="group" aria-label={t('usage_stats.credentials_auth_files_display_mode_aria')}>
+        <span className={`${styles.credentialDisplayModeThumb} ${mode === 'health' ? styles.credentialDisplayModeThumbHealth : ''}`.trim()} aria-hidden="true" />
+        <button
+          type="button"
+          className={mode === 'quota' ? styles.credentialDisplayModeButtonActive : undefined}
+          onClick={() => onChange('quota')}
+          aria-pressed={mode === 'quota'}
+        >
+          <IconShield size={12} />
+          <span>{t('usage_stats.credentials_auth_files_display_mode_quota')}</span>
+        </button>
+        <button
+          type="button"
+          className={mode === 'health' ? styles.credentialDisplayModeButtonActive : undefined}
+          onClick={() => onChange('health')}
+          aria-pressed={mode === 'health'}
+        >
+          <IconChartLine size={12} />
+          <span>{t('usage_stats.credentials_auth_files_display_mode_health')}</span>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function readStoredAuthFileDisplayMode(): AuthFileDisplayMode {
+  if (typeof window === 'undefined') {
+    return 'quota'
+  }
+  try {
+    const storedMode = window.localStorage?.getItem(AUTH_FILE_DISPLAY_MODE_STORAGE_KEY)
+    return isAuthFileDisplayMode(storedMode) ? storedMode : 'quota'
+  } catch {
+    return 'quota'
+  }
+}
+
+export function persistAuthFileDisplayMode(mode: AuthFileDisplayMode): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage?.setItem(AUTH_FILE_DISPLAY_MODE_STORAGE_KEY, mode)
+  } catch {
+    // localStorage 可能被隐私模式或浏览器策略禁用，忽略后保持本次页面内状态。
+  }
+}
+
+function isAuthFileDisplayMode(value: string | null | undefined): value is AuthFileDisplayMode {
+  return value === 'quota' || value === 'health'
+}
+
 export function AuthFileQuotaPanel({ row, quotaUsageMode }: { row: AuthFileCredentialRow; quotaUsageMode: QuotaUsageMode }) {
   const { t } = useTranslation()
 
   // 限额区域按加载、错误、刷新中、无缓存、可展示数据的顺序降级。
   if (row.quotaLoading) {
-    return <div className={styles.credentialQuotaState}>{t('usage_stats.credentials_quota_loading')}</div>
+    return <div className={styles.credentialQuotaStateSlot}><div className={styles.credentialQuotaState}>{t('usage_stats.credentials_quota_loading')}</div></div>
   }
   if (row.quotaError) {
     const errorDisplay = formatQuotaErrorDisplay(row.quotaError)
     return (
-      <div className={styles.credentialQuotaErrorSummary} title={errorDisplay.title}>
-        {errorDisplay.code && <span className={styles.credentialQuotaErrorCode}>{errorDisplay.code}</span>}
-        <span className={styles.credentialQuotaErrorMessage}>{errorDisplay.message}</span>
+      <div className={styles.credentialQuotaStateSlot}>
+        <div className={styles.credentialQuotaErrorSummary} title={errorDisplay.title}>
+          {errorDisplay.code && <span className={styles.credentialQuotaErrorCode}>{errorDisplay.code}</span>}
+          <span className={styles.credentialQuotaErrorMessage}>{errorDisplay.message}</span>
+        </div>
       </div>
     )
   }
   if (row.refreshStatus === 'queued' || row.refreshStatus === 'running') {
-    return <div className={styles.credentialQuotaRefreshStatus}>{t(`usage_stats.credentials_refresh_status_${row.refreshStatus}`)}</div>
+    return <div className={styles.credentialQuotaStateSlot}><div className={styles.credentialQuotaRefreshStatus}>{t(`usage_stats.credentials_refresh_status_${row.refreshStatus}`)}</div></div>
   }
   if (row.displayQuotas.length === 0) {
-    return <div className={styles.credentialQuotaState}>{t('usage_stats.credentials_quota_unavailable')}</div>
+    return <div className={styles.credentialQuotaStateSlot}><div className={styles.credentialQuotaState}>{t('usage_stats.credentials_quota_unavailable')}</div></div>
   }
 
   return (

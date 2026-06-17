@@ -312,7 +312,7 @@ func TestUsageEventsResolvesAPIKeySourceFromProviderIdentity(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
 	}
-	if !contains(body, `"source":"Provider Name(Team Prefix)"`) {
+	if !contains(body, `"source":"Team Prefix"`) {
 		t.Fatalf("expected source to use provider identity displayName, got %s", body)
 	}
 	if !contains(body, `"source_type":"openai"`) {
@@ -356,7 +356,7 @@ func TestUsageEventsDoesNotResolveProviderIdentityFromSource(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
 	}
-	if contains(body, `"source":"Provider Name(Team Prefix)"`) || contains(body, `"source_key"`) {
+	if contains(body, `"source":"Team Prefix"`) || contains(body, `"source_key"`) {
 		t.Fatalf("expected event source not to resolve identity through usage event source, got %s", body)
 	}
 	if !contains(body, `"source":"Fallback Provider"`) {
@@ -828,10 +828,10 @@ func TestUsageCredentialsKeepsBaseURLQualifierForActiveProvider(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.Code)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"source":"claude(api.deepseek.com/anthropic)"`) {
+	if !contains(body, `"source":"api.deepseek.com/anthropic"`) {
 		t.Fatalf("expected base_url qualifier preserved, got %s", body)
 	}
-	if contains(body, `claude(api.deepseek.com/anthropic)(2c00929d)`) {
+	if contains(body, `api.deepseek.com/anthropic(2c00929d)`) {
 		t.Fatalf("expected no double qualifier appended, got %s", body)
 	}
 }

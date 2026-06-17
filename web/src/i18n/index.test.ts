@@ -18,6 +18,68 @@ describe('i18n resources', () => {
     }
   });
 
+  it('keeps Auth Files display mode labels available in every language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_auth_files_display_mode_aria')).toBe('Auth file display mode');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_auth_files_display_mode_aria')).toBe('认证文件显示模式');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_auth_files_display_mode_aria')).toBe('認證檔案顯示模式');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_auth_files_display_mode_quota')).toBe('Quota');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_auth_files_display_mode_health')).toBe('Health');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_auth_files_display_mode_quota')).toBe('限额');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_auth_files_display_mode_health')).toBe('健康');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_auth_files_display_mode_quota')).toBe('限額');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_auth_files_display_mode_health')).toBe('健康');
+  });
+
+  it('keeps credential table column headers available in every language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_column_name')).toBe('Name');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_column_quota')).toBe('Quota');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_column_health')).toBe('Health');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_column_activity')).toBe('Activity');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_column_name')).toBe('名称');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_column_quota')).toBe('限额');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_column_health')).toBe('健康');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_column_activity')).toBe('活动');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_column_name')).toBe('名稱');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_column_quota')).toBe('限額');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_column_health')).toBe('健康');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_column_activity')).toBe('活動');
+  });
+
+  it('keeps credential health chart labels available in every language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_last_5h')).toBe('Last 5h');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_ok')).toBe('OK');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_fail')).toBe('Fail');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_status_success')).toBe('healthy');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_status_warning')).toBe('degraded');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_status_failure')).toBe('failed');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_status_empty')).toBe('no data');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_summary_healthy')).toBe('Healthy');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_summary_degraded')).toBe('Degraded');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_summary_quiet')).toBe('Quiet');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_no_failures_5h')).toBe('No failures in 5h');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_no_requests_5h')).toBe('No requests in 5h');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_last_failure')).toBe('Last failure {{timeRange}}');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_time_summary')).toBe('Used {{lastUsed}} · Updated {{statsUpdated}}');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_grid_aria')).toBe('{{name}} request health over the last 5 hours');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_health_bucket_aria')).toBe('{{timeRange}}: {{status}}, {{successCount}} successful, {{failureCount}} failed, {{rate}}');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_last_5h')).toBe('最近 5 小时');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_status_warning')).toBe('部分失败');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_summary_healthy')).toBe('健康');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_summary_degraded')).toBe('异常');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_summary_quiet')).toBe('安静');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_no_failures_5h')).toBe('5 小时内无失败');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_last_failure')).toBe('最近失败 {{timeRange}}');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_health_bucket_aria')).toBe('{{timeRange}}：{{status}}，成功 {{successCount}}，失败 {{failureCount}}，{{rate}}');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_last_5h')).toBe('最近 5 小時');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_status_empty')).toBe('無資料');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_summary_healthy')).toBe('健康');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_summary_degraded')).toBe('異常');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_summary_quiet')).toBe('安靜');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_no_failures_5h')).toBe('5 小時內無失敗');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_last_failure')).toBe('最近失敗 {{timeRange}}');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_health_bucket_aria')).toBe('{{timeRange}}：{{status}}，成功 {{successCount}}，失敗 {{failureCount}}，{{rate}}');
+  });
+
   it('localizes Analysis tab and composition controls in Chinese', () => {
     expect(i18n.getResource('zh', 'translation', 'usage_stats.tab_analysis')).toBe('分析');
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_composition_title')).toBe('Usage Distribution');

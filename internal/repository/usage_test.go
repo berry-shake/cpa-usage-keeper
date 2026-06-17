@@ -585,10 +585,10 @@ func TestBuildAnalysisWithFilterBuildsIdentityCompositionsFromActiveUsageIdentit
 	if len(analysis.AIProviderComposition) != 2 {
 		t.Fatalf("expected two ai provider composition rows, got %+v", analysis.AIProviderComposition)
 	}
-	if analysis.AIProviderComposition[0].Key != "shared-index" || analysis.AIProviderComposition[0].Label != "Provider Shared(Shared Prefix)" || analysis.AIProviderComposition[0].TotalTokens != 90 {
+	if analysis.AIProviderComposition[0].Key != "shared-index" || analysis.AIProviderComposition[0].Label != "Shared Prefix" || analysis.AIProviderComposition[0].TotalTokens != 90 {
 		t.Fatalf("expected shared provider row first, got %+v", analysis.AIProviderComposition)
 	}
-	if analysis.AIProviderComposition[1].Key != "provider-1" || analysis.AIProviderComposition[1].Label != "Provider One(Team Prefix @ api.openai.com)" || analysis.AIProviderComposition[1].TotalTokens != 60 {
+	if analysis.AIProviderComposition[1].Key != "provider-1" || analysis.AIProviderComposition[1].Label != "Team Prefix @ api.openai.com" || analysis.AIProviderComposition[1].TotalTokens != 60 {
 		t.Fatalf("expected active provider row second, got %+v", analysis.AIProviderComposition)
 	}
 }

@@ -168,7 +168,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	}
 
 	usageService := service.NewUsageServiceWithRecentCache(db, recentUsageCache)
-	usageIdentityService := service.NewUsageIdentityService(db)
+	usageIdentityService := service.NewUsageIdentityServiceWithRecentCache(db, recentUsageCache)
 	cpaAPIKeyService := service.NewCPAAPIKeyService(db)
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
 	authFilesManagementService := service.NewAuthFilesManagementService(cpaClient)

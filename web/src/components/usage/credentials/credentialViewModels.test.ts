@@ -32,6 +32,7 @@ function identity(overrides: Partial<UsageIdentity>): UsageIdentity {
     first_used_at: overrides.first_used_at,
     last_used_at: overrides.last_used_at,
     stats_updated_at: overrides.stats_updated_at,
+    credential_health: overrides.credential_health,
     active_start: overrides.active_start,
     active_until: overrides.active_until,
     is_deleted: overrides.is_deleted ?? false,
@@ -385,6 +386,29 @@ describe('credentialViewModels', () => {
 
     expect(authFileRows.map((row) => row.priorityLabel)).toEqual(['P5', 'P0', undefined])
     expect(aiProviderRows[0].priorityLabel).toBe('P7')
+  })
+
+  it('keeps credential health snapshots on Auth Files and AI Provider rows', () => {
+    const credentialHealth = {
+      window_seconds: 18_000,
+      bucket_seconds: 600,
+      window_start: '2026-05-10T05:30:00Z',
+      window_end: '2026-05-10T10:30:00Z',
+      total_success: 2,
+      total_failure: 1,
+      success_rate: 66.6667,
+      buckets: [],
+    }
+
+    const authFileRows = buildAuthFileCredentialRows([
+      identity({ identity: 'auth-1', credential_health: credentialHealth }),
+    ])
+    const aiProviderRows = buildAiProviderCredentialRows([
+      identity({ auth_type: 2, identity: 'provider-1', credential_health: credentialHealth }),
+    ])
+
+    expect(authFileRows[0].credentialHealth).toBe(credentialHealth)
+    expect(aiProviderRows[0].credentialHealth).toBe(credentialHealth)
   })
 
   it('builds AI provider rows without quota data', () => {

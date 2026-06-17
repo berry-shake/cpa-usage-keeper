@@ -209,11 +209,11 @@ describe('RequestEventsDetailsCard pagination', () => {
   it('uses backend source values while showing resolved source labels', () => {
     const html = renderCard({
       sourceFilter: 'source-a',
-      sourceOptions: [{ value: 'source-a', label: 'Provider A', displayName: 'Provider A(Team Prefix)' }, { value: 'source-b', label: 'Provider B' }],
+      sourceOptions: [{ value: 'source-a', label: 'Provider A', displayName: 'Team Prefix' }, { value: 'source-b', label: 'Provider B' }],
     });
 
-    expect(countOccurrences(html, 'Provider A(Team Prefix)')).toBeGreaterThanOrEqual(1);
-    expect(html).toContain('aria-label="Source"><span class="_triggerText_c80422 ">Provider A(Team Prefix)</span>');
+    expect(countOccurrences(html, 'Team Prefix')).toBeGreaterThanOrEqual(1);
+    expect(html).toContain('aria-label="Source"><span class="_triggerText_c80422 ">Team Prefix</span>');
   });
 
   it('uses backend model and source options instead of current page grouping', () => {

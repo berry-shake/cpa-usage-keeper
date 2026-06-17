@@ -66,6 +66,8 @@ describe('AiProviderCredentialsSection', () => {
       successRate: null,
       totalTokens: 0,
       cacheRate: null,
+      lastUsedText: '2026-05-10T10:00:00Z',
+      statsUpdatedText: '2026-05-10T10:02:00Z',
       planTypeLabel: 'Team',
       remainingDaysLabel: '25d',
       primaryQuota: { label: '5h' },
@@ -91,13 +93,20 @@ describe('AiProviderCredentialsSection', () => {
     expect(html.match(/usage_stats\.success_rate/g)).toHaveLength(1)
     expect(html.match(/usage_stats\.total_tokens/g)).toHaveLength(1)
     expect(html.match(/usage_stats\.cache_rate/g)).toHaveLength(1)
+    expect(html).toContain('usage_stats.credentials_column_name')
+    expect(html).toContain('usage_stats.credentials_column_health')
+    expect(html).toContain('usage_stats.credentials_health_last_5h')
+    expect(html).toContain('usage_stats.credentials_last_used')
+    expect(html).toContain('usage_stats.credentials_stats_updated')
     expect(html).toContain('claude')
     expect(html).toContain('P5')
     expect(html).toContain('usage_stats.credentials_sort_priority')
     expect(html).toContain('usage_stats.credentials_sort_last_used')
     expect(html).not.toContain('Team')
     expect(html).not.toContain('25d')
-    expect(html).not.toContain('5h')
     expect(html).not.toContain('Weekly')
+    expect(html).not.toContain('usage_stats.credentials_column_quota')
+    expect(html).not.toContain('usage_stats.credentials_auth_files_display_mode_quota')
+    expect(html).not.toContain('usage_stats.credentials_auth_files_display_mode_health')
   })
 })

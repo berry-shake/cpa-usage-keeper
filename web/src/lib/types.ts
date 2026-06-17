@@ -263,6 +263,25 @@ export interface UsageCredentialsResponse {
 
 export type UsageIdentityAuthType = 1 | 2
 
+export interface UsageCredentialHealthBucket {
+  start_time: string
+  end_time: string
+  success: number
+  failure: number
+  rate: number
+}
+
+export interface UsageCredentialHealth {
+  window_seconds: number
+  bucket_seconds: number
+  window_start: string
+  window_end: string
+  total_success: number
+  total_failure: number
+  success_rate: number
+  buckets: UsageCredentialHealthBucket[]
+}
+
 export interface UsageIdentity {
   id: string
   name: string
@@ -293,6 +312,7 @@ export interface UsageIdentity {
   first_used_at?: string
   last_used_at?: string
   stats_updated_at?: string
+  credential_health?: UsageCredentialHealth
   is_deleted: boolean
   created_at: string
   updated_at: string

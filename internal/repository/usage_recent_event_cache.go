@@ -78,6 +78,8 @@ type UsageRecentEventCache struct {
 	events []RecentUsageEvent
 	// pool 复用重复的 model/api/auth 字符串，降低 10w 级事件缓存内存。
 	pool recentUsageStringPool
+	// credentialHealth 保存 Auth Files / AI Provider 最近 5h 的成功/失败 10 分钟桶。
+	credentialHealth credentialHealthCache
 	// window 是缓存保留时长，只在创建时确定。
 	window time.Duration
 	// now 只用于启动加载和剪枝，不参与 Overview 边界是否 fallback 的判断。
@@ -156,6 +158,19 @@ func NewUsageRecentEventCache(db *gorm.DB, opts UsageRecentEventCacheOptions) (*
 	cache.pruneLocked(now)
 	// 初始化完成后释放锁，后续读写正常并发。
 	cache.mu.Unlock()
+	// 健康图保留 5h，可能覆盖高流量账号的百万级请求；按批流式加载，避免启动峰值内存跟行数线性增长。
+	if err := loadCredentialHealthCacheRowsBatched(db, now.Add(-credentialHealthWindow), credentialHealthStartupBatchSize, func(rows []credentialHealthLoadRow) error {
+		cache.mu.Lock()
+		cache.appendCredentialHealthRowsLocked(rows)
+		cache.mu.Unlock()
+		return nil
+	}); err != nil {
+		cache.Close()
+		return nil, err
+	}
+	cache.mu.Lock()
+	cache.pruneCredentialHealthLocked(now, nil)
+	cache.mu.Unlock()
 	return cache, nil
 }
 
@@ -178,8 +193,11 @@ func newEmptyUsageRecentEventCache(opts UsageRecentEventCacheOptions) *UsageRece
 	}
 	// 初始化空事件切片和字符串池，避免首次 append/read 遇到 nil map。
 	cache := &UsageRecentEventCache{
-		events:      []RecentUsageEvent{},
-		pool:        recentUsageStringPool{values: map[string]*recentUsageInternedString{}},
+		events: []RecentUsageEvent{},
+		pool:   recentUsageStringPool{values: map[string]*recentUsageInternedString{}},
+		credentialHealth: credentialHealthCache{
+			bucketsByCredential: map[credentialHealthKey]map[int64]credentialHealthBucketCounts{},
+		},
 		window:      window,
 		now:         now,
 		appendCh:    make(chan []entities.UsageEvent, queueSize),
@@ -311,7 +329,9 @@ func (c *UsageRecentEventCache) appendEvents(events []entities.UsageEvent) {
 	// 追加、剪枝、字符串池引用计数必须在同一把锁下完成。
 	c.mu.Lock()
 	c.appendRecentEventsLocked(rows)
+	touchedHealthKeys := c.appendCredentialHealthRowsLocked(credentialHealthRowsFromUsageEvents(events))
 	c.pruneLocked(now)
+	c.pruneCredentialHealthLocked(now, touchedHealthKeys)
 	c.mu.Unlock()
 }
 

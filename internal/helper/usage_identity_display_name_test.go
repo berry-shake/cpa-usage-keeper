@@ -6,7 +6,7 @@ import (
 	"cpa-usage-keeper/internal/entities"
 )
 
-func TestDisplayNameFormatsProviderNameAndPrefix(t *testing.T) {
+func TestDisplayNameFormatsProviderPrefixWithoutName(t *testing.T) {
 	identity := entities.UsageIdentity{
 		Name:     "Provider Name",
 		Prefix:   "Team Prefix",
@@ -14,12 +14,12 @@ func TestDisplayNameFormatsProviderNameAndPrefix(t *testing.T) {
 		Identity: "provider-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(identity); got != "Provider Name(Team Prefix)" {
-		t.Fatalf("expected provider displayName to include name and prefix, got %q", got)
+	if got := UsageIdentityDisplayName(identity); got != "Team Prefix" {
+		t.Fatalf("expected provider displayName to use prefix without name, got %q", got)
 	}
 }
 
-func TestDisplayNameAddsProviderBaseURLQualifier(t *testing.T) {
+func TestDisplayNameFormatsProviderPrefixAndBaseURL(t *testing.T) {
 	withPrefix := entities.UsageIdentity{
 		Name:     "Provider Name",
 		Prefix:   "Team Prefix",
@@ -34,11 +34,11 @@ func TestDisplayNameAddsProviderBaseURLQualifier(t *testing.T) {
 		Identity: "codex-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(withPrefix); got != "Provider Name(Team Prefix @ api.openai.com)" {
-		t.Fatalf("expected base URL to be an extra display qualifier, got %q", got)
+	if got := UsageIdentityDisplayName(withPrefix); got != "Team Prefix @ api.openai.com" {
+		t.Fatalf("expected provider displayName to use prefix and base URL, got %q", got)
 	}
-	if got := UsageIdentityDisplayName(providerOnly); got != "codex(chatgpt.com/backend-api/codex)" {
-		t.Fatalf("expected provider displayName to include base URL qualifier, got %q", got)
+	if got := UsageIdentityDisplayName(providerOnly); got != "chatgpt.com/backend-api/codex" {
+		t.Fatalf("expected provider displayName to use base URL without name, got %q", got)
 	}
 }
 
@@ -68,7 +68,7 @@ func TestDisplayNameFallsBackWhenOpenAICompatibilityNameIsMissing(t *testing.T) 
 		Identity: "openrouter-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(identity); got != "openrouter(openrouter.ai/api)" {
+	if got := UsageIdentityDisplayName(identity); got != "openrouter @ openrouter.ai/api" {
 		t.Fatalf("expected unnamed openai compatibility displayName to fall back to provider qualifier rules, got %q", got)
 	}
 }
@@ -84,7 +84,7 @@ func TestDisplayNameUsesProviderWhenAuthFileNameIsMissing(t *testing.T) {
 	}
 }
 
-func TestDisplayNameFallsBackWhenProviderNameOrPrefixIsMissing(t *testing.T) {
+func TestDisplayNameUsesNameWhenProviderPrefixAndBaseURLAreMissing(t *testing.T) {
 	prefixOnly := entities.UsageIdentity{
 		Prefix:   "Team Prefix",
 		AuthType: entities.UsageIdentityAuthTypeAIProvider,
@@ -107,18 +107,7 @@ func TestDisplayNameFallsBackWhenProviderNameOrPrefixIsMissing(t *testing.T) {
 	if got := UsageIdentityDisplayName(nameOnly); got != "Provider Name" {
 		t.Fatalf("expected name-only provider displayName, got %q", got)
 	}
-	if got := UsageIdentityDisplayName(providerOnly); got != "OpenAI" {
-		t.Fatalf("expected provider-only displayName, got %q", got)
-	}
-}
-
-func TestDisplayNameFallsBackToIdentityWhenStoredLabelsAreMissing(t *testing.T) {
-	identity := entities.UsageIdentity{
-		AuthType: entities.UsageIdentityAuthTypeAIProvider,
-		Identity: "provider-auth-index",
-	}
-
-	if got := UsageIdentityDisplayName(identity); got != "provider-auth-index" {
-		t.Fatalf("expected identity fallback when stored labels are missing, got %q", got)
+	if got := UsageIdentityDisplayName(providerOnly); got != "" {
+		t.Fatalf("expected provider without name, prefix, or base URL to be blank, got %q", got)
 	}
 }

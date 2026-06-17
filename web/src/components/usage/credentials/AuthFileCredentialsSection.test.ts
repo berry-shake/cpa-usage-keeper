@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { AuthFileCredentialsSection, AuthFileQuotaPanel, INSPECTION_RESULT_PAGE_SIZE_OPTIONS, buildInspectionResultsPage, buildInvalidInspectionAccountFileNames, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, invertInvalidInspectionAccountFileNames, isInspectionStartDisabled, isSelectableInspectionStatusFilter, nextInspectionResultStatusFilter, selectAllInvalidInspectionAccountFileNames } from './AuthFileCredentialsSection'
+import { AuthFileCredentialsSection, AuthFileQuotaPanel, INSPECTION_RESULT_PAGE_SIZE_OPTIONS, buildInspectionResultsPage, buildInvalidInspectionAccountFileNames, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, invertInvalidInspectionAccountFileNames, isInspectionStartDisabled, isSelectableInspectionStatusFilter, nextInspectionResultStatusFilter, persistAuthFileDisplayMode, readStoredAuthFileDisplayMode, selectAllInvalidInspectionAccountFileNames } from './AuthFileCredentialsSection'
 import type { AuthFileCredentialRow, DisplayQuota } from './credentialViewModels'
 import type { UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus } from '@/lib/types'
 
@@ -78,6 +78,141 @@ describe('AuthFileCredentialsSection title', () => {
 
     expect(html).toContain('usage_stats.credentials_auth_files_title')
     expect(html).not.toContain('usage_stats.credentials_auth_files_eyebrow')
+  })
+
+  it('renders shared metric headers without repeating labels in each row', () => {
+    const row = {
+      identity: { id: '1', identity: 'auth-1', is_deleted: false },
+      displayName: 'Very Long Auth File Name For Wrapping',
+      maskedIdentity: 'auth-1',
+      providerLabel: 'Codex',
+      typeLabel: 'codex',
+      authTypeLabel: 'oauth',
+      priorityLabel: 'P1',
+      totalRequests: 1234,
+      successCount: 1200,
+      failureCount: 34,
+      successRate: 97.24,
+      totalTokens: 456789,
+      cacheRate: 41.5,
+      quota: [],
+      quotaLoading: false,
+      displayQuotas: [],
+    } as AuthFileCredentialRow
+
+    const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, {
+      rows: [row],
+      total: 1,
+      page: 1,
+      totalPages: 1,
+      pageSize: 10,
+      activeOnly: false,
+      sort: 'priority',
+      loading: false,
+      quotaRefreshing: false,
+      quotaRefreshError: '',
+      quotaAutoRefreshEnabled: false,
+      quotaInspectionStatus: null,
+      quotaInspectionLoading: false,
+      quotaInspectionStarting: false,
+      quotaInspectionError: '',
+      onPageChange: () => undefined,
+      onPageSizeChange: () => undefined,
+      onActiveOnlyChange: () => undefined,
+      onSortChange: () => undefined,
+      onRefreshQuota: async () => undefined,
+      onRefreshQuotaForAuthIndex: async () => undefined,
+      onRefreshInspectionStatus: async () => undefined,
+      onStartInspection: async () => undefined,
+    }))
+
+    expect(html.match(/usage_stats\.total_requests/g)).toHaveLength(1)
+    expect(html.match(/usage_stats\.success_rate/g)).toHaveLength(1)
+    expect(html.match(/usage_stats\.total_tokens/g)).toHaveLength(1)
+    expect(html.match(/usage_stats\.cache_rate/g)).toHaveLength(1)
+    expect(html).toContain('usage_stats.credentials_column_name')
+    expect(html).toContain('usage_stats.credentials_column_quota')
+    expect(html).toContain('1.23K')
+    expect(html).toContain('97.24%')
+  })
+
+  it('keeps Auth Files metric cells aligned when values are unavailable', () => {
+    const row = {
+      identity: { id: '1', identity: 'auth-1', is_deleted: false },
+      displayName: 'Sparse Auth File',
+      maskedIdentity: 'auth-1',
+      providerLabel: 'Codex',
+      typeLabel: 'codex',
+      authTypeLabel: 'oauth',
+      totalRequests: 0,
+      successCount: 0,
+      failureCount: 0,
+      successRate: null,
+      totalTokens: 0,
+      cacheRate: null,
+      quota: [],
+      quotaLoading: false,
+      displayQuotas: [],
+    } as AuthFileCredentialRow
+
+    const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, {
+      rows: [row],
+      total: 1,
+      page: 1,
+      totalPages: 1,
+      pageSize: 10,
+      activeOnly: false,
+      sort: 'priority',
+      loading: false,
+      quotaRefreshing: false,
+      quotaRefreshError: '',
+      quotaAutoRefreshEnabled: false,
+      quotaInspectionStatus: null,
+      quotaInspectionLoading: false,
+      quotaInspectionStarting: false,
+      quotaInspectionError: '',
+      onPageChange: () => undefined,
+      onPageSizeChange: () => undefined,
+      onActiveOnlyChange: () => undefined,
+      onSortChange: () => undefined,
+      onRefreshQuota: async () => undefined,
+      onRefreshQuotaForAuthIndex: async () => undefined,
+      onRefreshInspectionStatus: async () => undefined,
+      onStartInspection: async () => undefined,
+    }))
+
+    expect(html.match(/credentialMetricValueCell/g)).toHaveLength(4)
+    expect(html).toContain('usage_stats.total_requests')
+    expect(html).toContain('usage_stats.success_rate')
+    expect(html).toContain('usage_stats.total_tokens')
+    expect(html).toContain('usage_stats.cache_rate')
+  })
+})
+
+describe('AuthFileCredentialsSection display mode persistence', () => {
+  it('stores and restores the Auth Files quota or health display mode', () => {
+    const storage = new Map<string, string>()
+    const localStorage = {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storage.set(key, value)
+      }),
+    }
+    vi.stubGlobal('window', { localStorage })
+    try {
+      expect(readStoredAuthFileDisplayMode()).toBe('quota')
+
+      persistAuthFileDisplayMode('health')
+
+      expect(localStorage.setItem).toHaveBeenCalledWith('cpa.credentials.authFiles.displayMode', 'health')
+      expect(readStoredAuthFileDisplayMode()).toBe('health')
+
+      storage.set('cpa.credentials.authFiles.displayMode', 'unexpected')
+
+      expect(readStoredAuthFileDisplayMode()).toBe('quota')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 

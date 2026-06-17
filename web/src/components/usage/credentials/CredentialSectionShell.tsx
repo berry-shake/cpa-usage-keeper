@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import styles from './CredentialSections.module.scss'
 import { formatCompactNumber } from '@/utils/usage'
+
+type CredentialSectionStyle = CSSProperties
 
 interface CredentialSectionShellProps {
   title: string
@@ -8,6 +10,7 @@ interface CredentialSectionShellProps {
   countLabel: string
   titleExtra?: ReactNode
   actions?: ReactNode
+  style?: CredentialSectionStyle
   children: ReactNode
 }
 
@@ -20,9 +23,19 @@ interface CredentialRowShellProps {
   rowClassName?: string
 }
 
-export function CredentialSectionShell({ title, subtitle, countLabel, titleExtra, actions, children }: CredentialSectionShellProps) {
+interface CredentialTableHeaderProps {
+  nameLabel: string
+  totalRequestsLabel: string
+  successRateLabel: string
+  totalTokensLabel: string
+  cacheRateLabel: string
+  sideLabel: string
+  rowClassName?: string
+}
+
+export function CredentialSectionShell({ title, subtitle, countLabel, titleExtra, actions, style, children }: CredentialSectionShellProps) {
   return (
-    <section className={styles.credentialSectionCard}>
+    <section className={styles.credentialSectionCard} style={style}>
       <div className={styles.credentialSectionHeader}>
         <div className={styles.credentialSectionTitleBlock}>
           <div className={styles.credentialSectionTitleRow}>
@@ -56,6 +69,21 @@ export function CredentialRowShell({ title, subtitle, badges, metrics, side, row
   )
 }
 
+export function CredentialTableHeader({ nameLabel, totalRequestsLabel, successRateLabel, totalTokensLabel, cacheRateLabel, sideLabel, rowClassName }: CredentialTableHeaderProps) {
+  return (
+    <div className={`${styles.credentialTableHeader} ${rowClassName ?? ''}`.trim()}>
+      <span className={styles.credentialTableHeaderName}>{nameLabel}</span>
+      <div className={styles.credentialMetricHeaderGroup}>
+        <span className={styles.credentialMetricHeaderCell}>{totalRequestsLabel}</span>
+        <span className={styles.credentialMetricHeaderCell}>{successRateLabel}</span>
+        <span className={styles.credentialMetricHeaderCell}>{totalTokensLabel}</span>
+        <span className={styles.credentialMetricHeaderCell}>{cacheRateLabel}</span>
+      </div>
+      <span className={styles.credentialTableHeaderSide}>{sideLabel}</span>
+    </div>
+  )
+}
+
 export function CredentialBadge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'success' | 'warning' | 'danger' }) {
   return <span className={`${styles.credentialBadge} ${styles[`credentialBadge${capitalize(tone)}`]}`.trim()}>{children}</span>
 }
@@ -64,12 +92,9 @@ export function CredentialPriorityBadge({ children }: { children: ReactNode }) {
   return <span className={styles.credentialPriorityBadge}>{children}</span>
 }
 
-export function MetricPill({ label, value }: { label: string; value: ReactNode }) {
+export function MetricPill({ value }: { value: ReactNode }) {
   return (
-    <span className={styles.credentialMetricPill}>
-      <span className={styles.credentialMetricLabel}>{label}</span>
-      <span className={styles.credentialMetricValue}>{value}</span>
-    </span>
+    <span className={styles.credentialMetricValueCell}>{value}</span>
   )
 }
 

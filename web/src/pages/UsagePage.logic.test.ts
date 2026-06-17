@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewDisplayLoading, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
+import { buildCustomDateRangeQuery, clampCustomDateRangeToBounds, CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewDisplayLoading, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleCustomDateRangeBoundsRefresh, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
 import { REQUEST_EVENT_COLUMN_IDS } from '@/components/usage/RequestEventsDetailsCard';
 import type { StatusResponse, UsageFilterWindow } from '@/lib/types';
 
@@ -362,6 +362,83 @@ describe('UsagePage status active heartbeat', () => {
   });
 });
 
+describe('UsagePage Custom date range bounds refresh', () => {
+  it('refreshes the bounds anchor immediately and on the visible interval when Custom is active', () => {
+    let intervalHandler: (() => void) | undefined;
+    const testDocument = createAutoRefreshTestDocument();
+    const timerTarget = {
+      setInterval: vi.fn((handler: () => void, timeout: number) => {
+        intervalHandler = handler;
+        expect(timeout).toBe(CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS);
+        return 11;
+      }),
+      clearInterval: vi.fn(),
+    };
+    const refreshBoundsAnchor = vi.fn();
+
+    const cleanup = scheduleCustomDateRangeBoundsRefresh({
+      enabled: true,
+      refreshBoundsAnchor,
+      documentRef: testDocument,
+      timerTarget,
+    });
+
+    expect(refreshBoundsAnchor).toHaveBeenCalledTimes(1);
+    intervalHandler?.();
+    expect(refreshBoundsAnchor).toHaveBeenCalledTimes(2);
+
+    cleanup();
+    intervalHandler?.();
+
+    expect(timerTarget.clearInterval).toHaveBeenCalledWith(11);
+    expect(refreshBoundsAnchor).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not refresh while Custom is inactive', () => {
+    const timerTarget = {
+      setInterval: vi.fn(() => 12),
+      clearInterval: vi.fn(),
+    };
+    const refreshBoundsAnchor = vi.fn();
+
+    const cleanup = scheduleCustomDateRangeBoundsRefresh({
+      enabled: false,
+      refreshBoundsAnchor,
+      timerTarget,
+    });
+
+    expect(refreshBoundsAnchor).not.toHaveBeenCalled();
+    expect(timerTarget.setInterval).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it('refreshes when a hidden Custom page becomes visible again', () => {
+    const testDocument = createAutoRefreshTestDocument('hidden');
+    const timerTarget = {
+      setInterval: vi.fn(() => 13),
+      clearInterval: vi.fn(),
+    };
+    const refreshBoundsAnchor = vi.fn();
+
+    const cleanup = scheduleCustomDateRangeBoundsRefresh({
+      enabled: true,
+      refreshBoundsAnchor,
+      documentRef: testDocument,
+      timerTarget,
+    });
+
+    expect(refreshBoundsAnchor).not.toHaveBeenCalled();
+
+    testDocument.setVisibilityState('visible');
+    testDocument.dispatchEvent(new Event('visibilitychange'));
+
+    expect(refreshBoundsAnchor).toHaveBeenCalledTimes(1);
+
+    cleanup();
+  });
+});
+
 describe('UsagePage active tab auto-refresh guard', () => {
   it('allows Request Events auto-refresh only on the first page', () => {
     expect(shouldAutoRefreshUsageTab({ activeTab: 'events', eventsPage: 1 })).toBe(true);
@@ -623,6 +700,15 @@ describe('UsagePage custom date input bounds', () => {
     expect(isCustomDateWithinBounds('2026-04-01', bounds)).toBe(true);
     expect(isCustomDateWithinBounds('2026-05-14', bounds)).toBe(false);
     expect(isCustomDateWithinBounds('2026-03-31', bounds)).toBe(false);
+  });
+
+  it('clamps saved Custom dates to the moving bounds', () => {
+    const bounds = { min: '2026-05-01', max: '2026-06-16' };
+
+    expect(clampCustomDateRangeToBounds({ start: '2026-04-20', end: '2026-06-20' }, bounds)).toEqual({
+      start: '2026-05-01',
+      end: '2026-06-16',
+    });
   });
 
   it('opens the native date picker when the date field is activated', () => {

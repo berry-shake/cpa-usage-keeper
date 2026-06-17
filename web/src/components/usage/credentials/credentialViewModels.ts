@@ -1,4 +1,4 @@
-import type { UsageIdentity, UsageQuotaRow } from '@/lib/types'
+import type { UsageCredentialHealth, UsageIdentity, UsageQuotaRow } from '@/lib/types'
 import { calculateCacheRate, formatCompactTokenValue } from '@/utils/usage'
 
 export const CREDENTIALS_PAGE_SIZE = 10
@@ -60,6 +60,7 @@ export interface AuthFileCredentialRow {
   quotaError?: string
   refreshStatus?: 'queued' | 'running' | 'completed' | 'failed'
   displayQuotas: DisplayQuota[]
+  credentialHealth?: UsageCredentialHealth
 }
 
 export interface AiProviderCredentialRow {
@@ -78,6 +79,7 @@ export interface AiProviderCredentialRow {
   cacheRate: number | null
   lastUsedText?: string
   statsUpdatedText?: string
+  credentialHealth?: UsageCredentialHealth
 }
 
 export interface CredentialIdentityGroups {
@@ -159,6 +161,7 @@ export function buildAuthFileCredentialRows(
       quotaError: state?.quotaError,
       refreshStatus: state?.refreshStatus,
       displayQuotas,
+      credentialHealth: identity.credential_health,
     }
   })
 }
@@ -180,6 +183,7 @@ export function buildAiProviderCredentialRows(identities: UsageIdentity[]): AiPr
     cacheRate: cacheRate(identity),
     lastUsedText: identity.last_used_at,
     statsUpdatedText: identity.stats_updated_at,
+    credentialHealth: identity.credential_health,
   }))
 }
 

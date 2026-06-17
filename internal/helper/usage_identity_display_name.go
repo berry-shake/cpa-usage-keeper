@@ -24,25 +24,10 @@ func UsageIdentityDisplayName(item entities.UsageIdentity) string {
 	prefix := strings.TrimSpace(item.Prefix)
 	baseURL := formatBaseURLDisplay(item.BaseURL)
 	qualifiers := displayQualifiers(prefix, baseURL)
-	qualifierSeparator := " @ "
-	switch {
-	case name != "" && len(qualifiers) > 0:
-		return name + "(" + strings.Join(qualifiers, qualifierSeparator) + ")"
-	case name != "":
-		return name
-	case prefix != "" && baseURL != "":
-		return prefix + "(" + baseURL + ")"
-	case prefix != "":
-		return prefix
-	case provider != "" && baseURL != "":
-		return provider + "(" + baseURL + ")"
-	case provider != "":
-		return provider
-	case baseURL != "":
-		return baseURL
-	default:
-		return firstNonEmptyString(provider, item.Identity)
+	if len(qualifiers) > 0 {
+		return strings.Join(qualifiers, " @ ")
 	}
+	return name
 }
 
 func displayQualifiers(values ...string) []string {

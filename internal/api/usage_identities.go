@@ -63,6 +63,26 @@ type usageIdentityResponse struct {
 	CreatedAt                  time.Time                      `json:"created_at"`
 	UpdatedAt                  time.Time                      `json:"updated_at"`
 	DeletedAt                  *time.Time                     `json:"deleted_at,omitempty"`
+	CredentialHealth           *usageCredentialHealthResponse `json:"credential_health,omitempty"`
+}
+
+type usageCredentialHealthResponse struct {
+	WindowSeconds int64                         `json:"window_seconds"`
+	BucketSeconds int64                         `json:"bucket_seconds"`
+	WindowStart   time.Time                     `json:"window_start"`
+	WindowEnd     time.Time                     `json:"window_end"`
+	TotalSuccess  int64                         `json:"total_success"`
+	TotalFailure  int64                         `json:"total_failure"`
+	SuccessRate   float64                       `json:"success_rate"`
+	Buckets       []usageCredentialHealthBucket `json:"buckets"`
+}
+
+type usageCredentialHealthBucket struct {
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+	Success   int64     `json:"success"`
+	Failure   int64     `json:"failure"`
+	Rate      float64   `json:"rate"`
 }
 
 func registerUsageIdentityRoutes(router gin.IRoutes, usageIdentityProvider service.UsageIdentityProvider) {
@@ -85,8 +105,12 @@ func registerUsageIdentityRoutes(router gin.IRoutes, usageIdentityProvider servi
 
 		// 复用统一响应映射，保证分页接口和旧列表接口的字段/脱敏规则一致。
 		response := make([]usageIdentityResponse, 0, len(result.Items))
-		for _, item := range result.Items {
-			response = append(response, mapUsageIdentityResponse(item))
+		for index, item := range result.Items {
+			var health *service.UsageCredentialHealthSnapshot
+			if index < len(result.CredentialHealth) {
+				health = &result.CredentialHealth[index]
+			}
+			response = append(response, mapUsageIdentityResponseWithHealth(item, health))
 		}
 		typeCounts := make([]usageIdentityTypeCount, 0, len(result.TypeCounts))
 		for _, item := range result.TypeCounts {
@@ -179,6 +203,10 @@ func totalPages(total int64, pageSize int) int {
 }
 
 func mapUsageIdentityResponse(item entities.UsageIdentity) usageIdentityResponse {
+	return mapUsageIdentityResponseWithHealth(item, nil)
+}
+
+func mapUsageIdentityResponseWithHealth(item entities.UsageIdentity, health *service.UsageCredentialHealthSnapshot) usageIdentityResponse {
 	// AI provider 的 identity 是 API Key，只在返回给前端时脱敏，数据库原值不改。
 	identity := item.Identity
 	if item.AuthType == entities.UsageIdentityAuthTypeAIProvider {
@@ -230,5 +258,32 @@ func mapUsageIdentityResponse(item entities.UsageIdentity) usageIdentityResponse
 		CreatedAt:                  item.CreatedAt,
 		UpdatedAt:                  item.UpdatedAt,
 		DeletedAt:                  item.DeletedAt,
+		CredentialHealth:           mapUsageCredentialHealthResponse(health),
+	}
+}
+
+func mapUsageCredentialHealthResponse(snapshot *service.UsageCredentialHealthSnapshot) *usageCredentialHealthResponse {
+	if snapshot == nil {
+		return nil
+	}
+	buckets := make([]usageCredentialHealthBucket, 0, len(snapshot.Buckets))
+	for _, bucket := range snapshot.Buckets {
+		buckets = append(buckets, usageCredentialHealthBucket{
+			StartTime: bucket.StartTime,
+			EndTime:   bucket.EndTime,
+			Success:   bucket.Success,
+			Failure:   bucket.Failure,
+			Rate:      bucket.Rate,
+		})
+	}
+	return &usageCredentialHealthResponse{
+		WindowSeconds: snapshot.WindowSeconds,
+		BucketSeconds: snapshot.BucketSeconds,
+		WindowStart:   snapshot.WindowStart,
+		WindowEnd:     snapshot.WindowEnd,
+		TotalSuccess:  snapshot.TotalSuccess,
+		TotalFailure:  snapshot.TotalFailure,
+		SuccessRate:   snapshot.SuccessRate,
+		Buckets:       buckets,
 	}
 }
