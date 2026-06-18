@@ -366,6 +366,13 @@ export interface UsageQuotaRow {
 export interface UsageQuotaCheckResponse {
   id: string
   quota: UsageQuotaRow[]
+  rateLimitResetCreditsAvailableCount?: number | null
+}
+
+export interface UsageQuotaResetResponse {
+  authIndex: string
+  code?: string
+  windowsReset?: number
 }
 
 export interface UsageQuotaCacheItem {
