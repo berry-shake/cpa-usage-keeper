@@ -599,6 +599,47 @@ func TestUsageOverviewReturnsFilteredSnapshot(t *testing.T) {
 	}
 }
 
+func TestUsageOverviewReturnsDailyAverageSummaryFields(t *testing.T) {
+	provider := &usageFilterStub{overview: &servicedto.UsageOverviewSnapshot{
+		Usage: &dto.StatisticsSnapshot{
+			TotalRequests: 14,
+			SuccessCount:  14,
+			TotalTokens:   7000000,
+		},
+		Summary: servicedto.UsageOverviewSummary{
+			RequestCount:          14,
+			TokenCount:            7000000,
+			WindowMinutes:         10080,
+			RPM:                   14.0 / 10080.0,
+			TPM:                   7000000.0 / 10080.0,
+			TotalCost:             56.49,
+			CostAvailable:         false,
+			InputTokens:           7000000,
+			DailyAverageRequests:  float64Ptr(2),
+			DailyAverageTokens:    float64Ptr(1000000),
+			DailyAverageCost:      float64Ptr(8.07),
+			DailyAverageRangeDays: float64Ptr(7),
+		},
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/overview?range=7d", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"daily_average_requests":2`) ||
+		!contains(body, `"daily_average_tokens":1000000`) ||
+		!contains(body, `"daily_average_cost":8.07`) ||
+		!contains(body, `"daily_average_range_days":7`) {
+		t.Fatalf("expected daily average summary fields in response body: %s", body)
+	}
+	assertUsageOverviewResponseShape(t, body)
+}
+
 func TestUsageOverviewNilProviderReturnsPrunedShape(t *testing.T) {
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/overview", nil)
@@ -632,6 +673,16 @@ func assertUsageOverviewResponseShape(t *testing.T, body string) {
 		t.Fatalf("expected usage object in response, got %s", body)
 	}
 	assertAllowedJSONKeys(t, usage, "overview usage", body, "total_requests", "success_count", "failure_count", "total_tokens")
+
+	summary, ok := decoded["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected summary object in response, got %s", body)
+	}
+	assertAllowedJSONKeys(t, summary, "overview summary", body,
+		"request_count", "token_count", "window_minutes", "rpm", "tpm", "total_cost", "cost_available",
+		"input_tokens", "cached_tokens", "reasoning_tokens",
+		"daily_average_requests", "daily_average_tokens", "daily_average_cost", "daily_average_range_days",
+	)
 
 	series, ok := decoded["series"].(map[string]any)
 	if !ok {

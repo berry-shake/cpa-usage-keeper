@@ -105,6 +105,7 @@ func NewRouter(
 	registerUsageCredentialsRoute(adminProtected, usageProvider, usageIdentityProvider)
 	registerUsageIdentityRoutes(adminProtected, usageIdentityProvider)
 	registerAuthFileManagementRoutes(adminProtected, authFilesProvider)
+	registerAuthSessionManagementRoutes(adminProtected, authHandler)
 	registerCPAAPIKeyRoutes(adminProtected, cpaAPIKeyProvider)
 	registerPricingRoutes(adminProtected, pricingProvider)
 	registerQuotaRoutes(adminProtected, quotaProvider)

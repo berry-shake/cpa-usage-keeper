@@ -36,6 +36,7 @@ export const REQUEST_EVENT_COLUMN_IDS = [
   'source',
   'model',
   'reasoning_effort',
+  'service_tier',
   'result',
   'request_type',
   'endpoint',
@@ -111,6 +112,7 @@ type RequestEventRow = {
   apiKey: string;
   model: string;
   reasoningEffort: string;
+  serviceTier: string;
   requestType: string;
   endpoint: string;
   sourceRaw: string;
@@ -191,6 +193,20 @@ const formatSpeedTPS = (speedTPS: number | null): string => {
     return '-';
   }
   return `${speedTPS.toFixed(1)} t/s`;
+};
+
+const REQUEST_SPEED_MODE_LABEL_KEYS: Record<string, string> = {
+  default: 'usage_stats.speed_mode_standard',
+  priority: 'usage_stats.speed_mode_fast',
+  fast: 'usage_stats.speed_mode_fast',
+};
+
+const formatRequestSpeedMode = (rawMode: unknown, t: (key: string) => string): string => {
+  const value = String(rawMode ?? '').trim();
+  if (!value) return '-';
+
+  const labelKey = REQUEST_SPEED_MODE_LABEL_KEYS[value.toLowerCase()];
+  return labelKey ? t(labelKey) : value;
 };
 
 const parseRequestEndpoint = (rawEndpoint: unknown): { requestType: string; endpoint: string } => {
@@ -518,6 +534,7 @@ export function RequestEventsDetailsCard({
       const apiKey = String(event.api_key ?? '').trim() || '-';
       const model = String(event.model ?? '').trim() || '-';
       const reasoningEffort = String(event.reasoning_effort ?? '').trim() || '-';
+      const serviceTier = formatRequestSpeedMode(event.service_tier, t);
       const endpointFields = parseRequestEndpoint(event.endpoint);
       const inputTokens = Math.max(toNumber(event.tokens?.input_tokens), 0);
       const outputTokens = Math.max(toNumber(event.tokens?.output_tokens), 0);
@@ -539,6 +556,7 @@ export function RequestEventsDetailsCard({
         apiKey,
         model,
         reasoningEffort,
+        serviceTier,
         requestType: endpointFields.requestType,
         endpoint: endpointFields.endpoint,
         sourceRaw: sourceRaw || '-',
@@ -560,7 +578,7 @@ export function RequestEventsDetailsCard({
         costAvailable,
       };
     });
-  }, [events]);
+  }, [events, t]);
 
   const hasLatencyData = useMemo(() => rows.some((row) => row.latencyMs !== null), [rows]);
   const [mobileRenderState, setMobileRenderState] = useState({ key: '', count: MOBILE_PAGE_SIZE });
@@ -683,6 +701,12 @@ export function RequestEventsDetailsCard({
         label: t('usage_stats.reasoning_effort'),
         header: <th className={styles.requestEventsNoWrapCell} title={t('usage_stats.reasoning_effort_hint')}>{t('usage_stats.reasoning_effort')}</th>,
         renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.reasoningEffort}</td>,
+      },
+      {
+        id: 'service_tier',
+        label: t('usage_stats.speed_mode'),
+        header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.speed_mode')}</th>,
+        renderCell: (row) => <td className={styles.requestEventsNoWrapCell}>{row.serviceTier}</td>,
       },
       {
         id: 'result',

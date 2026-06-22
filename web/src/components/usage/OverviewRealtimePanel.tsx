@@ -35,6 +35,7 @@ interface RealtimeMetric {
 }
 
 type ResponseDistributionDatum = number | null | { x: string; y: number; count: number };
+type ResponseDistributionParticleDatum = { x: string; y: number; count: number };
 
 interface OverviewRealtimePanelProps {
   realtime?: OverviewRealtimeBlock;
@@ -50,6 +51,7 @@ interface OverviewRealtimePanelProps {
 
 const REALTIME_WINDOWS: OverviewRealtimeWindow[] = ['15m', '30m', '60m'];
 const DEFAULT_VISIBLE_DIMENSIONS: readonly RealtimeDimensionKey[] = ['models', 'api_keys', 'auth_files', 'ai_providers'];
+const RESPONSE_DISTRIBUTION_MAX_PARTICLES = 1000;
 
 const CHART_COLORS = {
   token: '#3b82f6',
@@ -281,30 +283,45 @@ function buildSingleLineData(labels: string[], label: string, values: Array<numb
 }
 
 function responseDistributionAveragePoints(
-  points: RealtimeResponseAveragePoint[],
+  points: RealtimeResponseAveragePoint[] | null | undefined,
   fallbackPoints: Array<{ bucket: string; value?: number | null }>,
 ): RealtimeResponseAveragePoint[] {
-  if (points.length > 0) return points;
+  if (points && points.length > 0) return points;
   return fallbackPoints.map((point) => ({
     bucket: point.bucket,
     avg_ms: point.value ?? null,
   }));
 }
 
-function responseDistributionLabels(points: RealtimeResponseAveragePoint[], timezone?: string): string[] {
-  return points.map((point) => formatBucketLabel(point.bucket, timezone));
+function responseDistributionLabels(points: RealtimeResponseAveragePoint[] | null | undefined, timezone?: string): string[] {
+  return (points ?? []).map((point) => formatBucketLabel(point.bucket, timezone));
 }
 
-function responseDistributionValues(points: RealtimeResponseAveragePoint[]): Array<number | null> {
-  return points.map((point) => point.avg_ms == null ? null : safeNumber(point.avg_ms));
+function responseDistributionValues(points: RealtimeResponseAveragePoint[] | null | undefined): Array<number | null> {
+  return (points ?? []).map((point) => {
+    if (point.avg_ms == null) return null;
+    const value = safeNumber(point.avg_ms);
+    return value > 0 ? value : null;
+  });
 }
 
-function responseDistributionParticleData(particles: RealtimeResponseParticle[], timezone?: string): Array<{ x: string; y: number; count: number }> {
-  return particles.map((point) => ({
+function sampleResponseDistributionParticles(particles: RealtimeResponseParticle[] | null | undefined): RealtimeResponseParticle[] {
+  const safeParticles = (particles ?? []).filter(Boolean);
+  if (safeParticles.length <= RESPONSE_DISTRIBUTION_MAX_PARTICLES) return safeParticles;
+  const lastIndex = safeParticles.length - 1;
+  const lastSampleIndex = RESPONSE_DISTRIBUTION_MAX_PARTICLES - 1;
+  return Array.from({ length: RESPONSE_DISTRIBUTION_MAX_PARTICLES }, (_, index) => {
+    const sourceIndex = index === lastSampleIndex ? lastIndex : Math.floor((index * lastIndex) / lastSampleIndex);
+    return safeParticles[sourceIndex];
+  });
+}
+
+function responseDistributionParticleData(particles: RealtimeResponseParticle[] | null | undefined, timezone?: string): ResponseDistributionParticleDatum[] {
+  return sampleResponseDistributionParticles(particles).map((point) => ({
     x: formatBucketLabel(point.bucket, timezone),
     y: safeNumber(point.ms),
     count: Math.max(1, safeNumber(point.count)),
-  }));
+  })).filter((point) => point.y > 0);
 }
 
 function responseParticleRadius(count: number, isMobile: boolean): number {
@@ -363,10 +380,26 @@ function buildResponseDistributionData(
 function buildResponseDistributionOptions(
   isDark: boolean,
   isMobile: boolean,
+  averageValues: Array<number | null>,
+  particles: RealtimeResponseParticle[] | null | undefined,
 ): ChartOptions<'line'> {
   const options = buildRealtimeLineOptions(isDark, isMobile, formatRealtimeDuration, { yMaxTicksLimit: 5 });
+  const yBounds = responseDistributionLogAxisBounds(averageValues, particles);
+  const baseYScale = options.scales?.y;
+  const responseScales = {
+    ...options.scales,
+    y: {
+      type: 'logarithmic' as const,
+      min: yBounds.min,
+      max: yBounds.max,
+      grid: baseYScale?.grid,
+      border: baseYScale?.border,
+      ticks: baseYScale?.ticks,
+    },
+  } as ChartOptions<'line'>['scales'];
   return {
     ...options,
+    animation: false,
     interaction: { mode: 'nearest', intersect: false },
     plugins: {
       ...options.plugins,
@@ -385,6 +418,31 @@ function buildResponseDistributionOptions(
         },
       },
     },
+    scales: responseScales,
+  };
+}
+
+function responseDistributionLogAxisBounds(averageValues: Array<number | null> | null | undefined, particles: RealtimeResponseParticle[] | null | undefined): { min: number; max: number } {
+  let minValue = Number.POSITIVE_INFINITY;
+  let maxValue = 0;
+  for (const value of averageValues ?? []) {
+    if (value == null || !Number.isFinite(value) || value <= 0) continue;
+    minValue = Math.min(minValue, value);
+    maxValue = Math.max(maxValue, value);
+  }
+  for (const particle of particles ?? []) {
+    if (!particle) continue;
+    const value = safeNumber(particle.ms);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    minValue = Math.min(minValue, value);
+    maxValue = Math.max(maxValue, value);
+  }
+  if (!Number.isFinite(minValue) || maxValue <= 0) {
+    return { min: 1, max: 10 };
+  }
+  return {
+    min: Math.max(1, Math.floor(minValue / 1.35)),
+    max: Math.max(10, Math.ceil(maxValue * 1.18)),
   };
 }
 
@@ -494,7 +552,18 @@ export function OverviewRealtimePanel({ realtime, loading, error, window, onWind
 
   const lineOptions = useMemo(() => buildRealtimeLineOptions(isDark, isMobile, formatCompactNumber), [isDark, isMobile]);
   const percentLineOptions = useMemo(() => buildRealtimeLineOptions(isDark, isMobile, (value) => `${formatFixedTwoDecimals(value)}%`, { yMaxTicksLimit: 5 }), [isDark, isMobile]);
-  const responseDistributionOptions = useMemo(() => buildResponseDistributionOptions(isDark, isMobile), [isDark, isMobile]);
+  const ttftDistributionOptions = useMemo(() => buildResponseDistributionOptions(
+    isDark,
+    isMobile,
+    ttftAverageValues,
+    data.response_distribution.ttft.particles,
+  ), [data.response_distribution.ttft.particles, isDark, isMobile, ttftAverageValues]);
+  const latencyDistributionOptions = useMemo(() => buildResponseDistributionOptions(
+    isDark,
+    isMobile,
+    latencyAverageValues,
+    data.response_distribution.latency.particles,
+  ), [data.response_distribution.latency.particles, isDark, isMobile, latencyAverageValues]);
   const latestLabel = t('usage_stats.overview_realtime_latest');
   const averageLabel = t('usage_stats.overview_realtime_average');
   const trendLabel = t('usage_stats.overview_realtime_trend');
@@ -592,7 +661,7 @@ export function OverviewRealtimePanel({ realtime, loading, error, window, onWind
                 compact
               >
                 <RealtimeChartFrame loading={loading} emptyLabel={ttftEmptyLabel}>
-                  <Chart type="line" data={ttftDistributionChartData} options={responseDistributionOptions} />
+                  <Chart type="line" data={ttftDistributionChartData} options={ttftDistributionOptions} />
                 </RealtimeChartFrame>
               </RealtimeCard>
 
@@ -603,7 +672,7 @@ export function OverviewRealtimePanel({ realtime, loading, error, window, onWind
                 compact
               >
                 <RealtimeChartFrame loading={loading} emptyLabel={latencyEmptyLabel}>
-                  <Chart type="line" data={latencyDistributionChartData} options={responseDistributionOptions} />
+                  <Chart type="line" data={latencyDistributionChartData} options={latencyDistributionOptions} />
                 </RealtimeChartFrame>
               </RealtimeCard>
             </div>

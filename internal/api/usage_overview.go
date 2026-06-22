@@ -34,16 +34,20 @@ type usageOverviewPayload struct {
 }
 
 type usageOverviewSummary struct {
-	RequestCount    int64   `json:"request_count"`
-	TokenCount      int64   `json:"token_count"`
-	WindowMinutes   int64   `json:"window_minutes"`
-	RPM             float64 `json:"rpm"`
-	TPM             float64 `json:"tpm"`
-	TotalCost       float64 `json:"total_cost"`
-	CostAvailable   bool    `json:"cost_available"`
-	InputTokens     int64   `json:"input_tokens"`
-	CachedTokens    int64   `json:"cached_tokens"`
-	ReasoningTokens int64   `json:"reasoning_tokens"`
+	RequestCount          int64    `json:"request_count"`
+	TokenCount            int64    `json:"token_count"`
+	WindowMinutes         int64    `json:"window_minutes"`
+	RPM                   float64  `json:"rpm"`
+	TPM                   float64  `json:"tpm"`
+	TotalCost             float64  `json:"total_cost"`
+	CostAvailable         bool     `json:"cost_available"`
+	InputTokens           int64    `json:"input_tokens"`
+	CachedTokens          int64    `json:"cached_tokens"`
+	ReasoningTokens       int64    `json:"reasoning_tokens"`
+	DailyAverageRequests  *float64 `json:"daily_average_requests,omitempty"`
+	DailyAverageTokens    *float64 `json:"daily_average_tokens,omitempty"`
+	DailyAverageCost      *float64 `json:"daily_average_cost,omitempty"`
+	DailyAverageRangeDays *float64 `json:"daily_average_range_days,omitempty"`
 }
 
 type usageOverviewSeries struct {
@@ -382,16 +386,20 @@ func buildUsageOverviewSummary(overview *servicedto.UsageOverviewSnapshot) usage
 		return usageOverviewSummary{}
 	}
 	return usageOverviewSummary{
-		RequestCount:    overview.Summary.RequestCount,
-		TokenCount:      overview.Summary.TokenCount,
-		WindowMinutes:   overview.Summary.WindowMinutes,
-		RPM:             overview.Summary.RPM,
-		TPM:             overview.Summary.TPM,
-		TotalCost:       overview.Summary.TotalCost,
-		CostAvailable:   overview.Summary.CostAvailable,
-		InputTokens:     overview.Summary.InputTokens,
-		CachedTokens:    overview.Summary.CachedTokens,
-		ReasoningTokens: overview.Summary.ReasoningTokens,
+		RequestCount:          overview.Summary.RequestCount,
+		TokenCount:            overview.Summary.TokenCount,
+		WindowMinutes:         overview.Summary.WindowMinutes,
+		RPM:                   overview.Summary.RPM,
+		TPM:                   overview.Summary.TPM,
+		TotalCost:             overview.Summary.TotalCost,
+		CostAvailable:         overview.Summary.CostAvailable,
+		InputTokens:           overview.Summary.InputTokens,
+		CachedTokens:          overview.Summary.CachedTokens,
+		ReasoningTokens:       overview.Summary.ReasoningTokens,
+		DailyAverageRequests:  overview.Summary.DailyAverageRequests,
+		DailyAverageTokens:    overview.Summary.DailyAverageTokens,
+		DailyAverageCost:      overview.Summary.DailyAverageCost,
+		DailyAverageRangeDays: overview.Summary.DailyAverageRangeDays,
 	}
 }
 
