@@ -9,6 +9,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/cpa"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/timeutil"
 
@@ -53,12 +54,13 @@ const (
 
 // SyncService 负责同步 CPA metadata，并处理已经落入本地 inbox 的 usage 原始消息。
 type SyncService struct {
-	db              *gorm.DB
-	client          CPAClientFetcher
-	metadataFetcher MetadataFetcher
-	baseURL         string
-	now             func() time.Time
-	recentUsage     RecentUsageEventAppender
+	db               *gorm.DB
+	client           CPAClientFetcher
+	metadataFetcher  MetadataFetcher
+	baseURL          string
+	now              func() time.Time
+	recentUsage      RecentUsageEventAppender
+	usageHeaderQuota quota.UsageHeaderSnapshotAppender
 }
 
 // NewSyncService 按生产配置组装 CPA metadata client；远端 usage 拉取由 poller 独立负责。
@@ -76,6 +78,7 @@ type SyncServiceOptions struct {
 	MetadataFetcher   MetadataFetcher
 	Now               func() time.Time
 	RecentUsageEvents RecentUsageEventAppender
+	UsageHeaderQuota  quota.UsageHeaderSnapshotAppender
 }
 
 // NewSyncServiceWithOptions 是统一构造入口，负责填充默认时钟和 metadata fetcher。
@@ -89,12 +92,13 @@ func NewSyncServiceWithOptions(db *gorm.DB, opts SyncServiceOptions) *SyncServic
 		metadataFetcher = opts.Client
 	}
 	return &SyncService{
-		db:              db,
-		client:          opts.Client,
-		metadataFetcher: metadataFetcher,
-		baseURL:         strings.TrimSpace(opts.BaseURL),
-		now:             now,
-		recentUsage:     opts.RecentUsageEvents,
+		db:               db,
+		client:           opts.Client,
+		metadataFetcher:  metadataFetcher,
+		baseURL:          strings.TrimSpace(opts.BaseURL),
+		now:              now,
+		recentUsage:      opts.RecentUsageEvents,
+		usageHeaderQuota: opts.UsageHeaderQuota,
 	}
 }
 
@@ -153,20 +157,36 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.R
 	// process_failed 也在这里重试，避免临时 SQLite 锁或短暂解析外问题导致数据永久卡住。
 	processableRows, err := repository.ListProcessableRedisUsageInbox(s.db, redisInboxProcessLimit)
 	if err != nil {
-		return &servicedto.RedisBatchSyncResult{Status: "failed"}, fmt.Errorf("list processable redis usage inbox: %w", err)
+		// 列表失败时没有可靠取出行，返回 0 行失败结果供 runner 保守等待。
+		return newRedisBatchSyncResult("failed", 0), fmt.Errorf("list processable redis usage inbox: %w", err)
 	}
 	if len(processableRows) == 0 {
 		// 空轮次先做轻量 cursor 检查，只有发现 usage_events 尚未聚合时才写派生统计。
 		pendingAggregation, err := repository.HasPendingUsageOverviewAggregation(ctx, s.db)
 		if err != nil {
-			return &servicedto.RedisBatchSyncResult{Empty: true, Status: "failed"}, err
+			// 空批聚合检查失败仍然是空结果，runner 需要按失败路径等待。
+			result := newRedisBatchSyncResult("failed", 0)
+			// Empty 明确告诉调用方本轮没有 inbox 行参与处理。
+			result.Empty = true
+			// 返回失败结果和原始错误，保持既有错误语义。
+			return result, err
 		}
 		if pendingAggregation {
 			if err := s.aggregateUsageEventStats(ctx, fetchedAt); err != nil {
-				return &servicedto.RedisBatchSyncResult{Empty: true, Status: "failed"}, err
+				// 空批补聚合失败仍然不代表 inbox 有积压，runner 保守等待下一轮。
+				result := newRedisBatchSyncResult("failed", 0)
+				// Empty 明确告诉调用方本轮没有 inbox 行参与处理。
+				result.Empty = true
+				// 返回失败结果和原始错误，保持既有错误语义。
+				return result, err
 			}
 		}
-		return &servicedto.RedisBatchSyncResult{Empty: true, Status: "empty"}, nil
+		// 空批成功时返回 0 行结果，避免 runner 误判为需要连续 drain。
+		result := newRedisBatchSyncResult("empty", 0)
+		// Empty 明确告诉调用方本轮没有 inbox 行参与处理。
+		result.Empty = true
+		// 返回空批结果，保持既有空轮次语义。
+		return result, nil
 	}
 	logrus.WithField("row_count", len(processableRows)).Debug("redis usage inbox rows found for processing")
 	return s.processRedisInboxRows(ctx, processableRows, fetchedAt)
@@ -199,22 +219,29 @@ func (s *SyncService) CleanupStorage(ctx context.Context) error {
 // 可解码但入库失败的消息标记为 process_failed，后续 ProcessRedisUsageInbox 会按 id 顺序重试。
 func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []entities.RedisUsageInbox, fetchedAt time.Time) (*servicedto.RedisBatchSyncResult, error) {
 	logrus.WithField("row_count", len(inboxRows)).Debug("redis usage inbox processing started")
+	// processedRows 记录本轮实际取出的原始 inbox 行数，包含后续 decode_failed/process_failed 行。
+	processedRows := len(inboxRows)
 	validRows := make([]entities.RedisUsageInbox, 0, len(inboxRows))
 	events := make([]entities.UsageEvent, 0, len(inboxRows))
+	headerSnapshots := make([]quota.UsageHeaderSnapshot, 0)
 	decodeErrs := make([]error, 0)
 	// 先完整解码本批数据，坏消息单独标记，不阻断同批其它可用消息。
 	for _, row := range inboxRows {
-		event, _, decodeErr := DecodeRedisUsageMessage(row.RawMessage, fetchedAt)
+		event, _, snapshot, decodeErr := DecodeRedisUsageMessageWithHeaders(row.RawMessage, fetchedAt)
 		if decodeErr != nil {
 			logrus.WithError(decodeErr).WithField("inbox_id", row.ID).Error("redis usage message decode failed")
 			if markErr := repository.MarkRedisUsageInboxDecodeFailed(s.db, row.ID, decodeErr); markErr != nil {
-				return &servicedto.RedisBatchSyncResult{Status: "failed"}, fmt.Errorf("mark redis usage inbox decode failed: %w", markErr)
+				// 标记坏消息失败时保留本轮已取行数，runner 仍按真正失败路径等待。
+				return newRedisBatchSyncResult("failed", processedRows), fmt.Errorf("mark redis usage inbox decode failed: %w", markErr)
 			}
 			decodeErrs = append(decodeErrs, decodeErr)
 			continue
 		}
 		validRows = append(validRows, row)
 		events = append(events, event)
+		if snapshot != nil {
+			headerSnapshots = append(headerSnapshots, *snapshot)
+		}
 	}
 	decodeErr := joinErrors(decodeErrs...)
 	logrus.WithFields(logrus.Fields{
@@ -224,9 +251,13 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 	}).Debug("redis usage inbox rows decoded")
 	if len(events) == 0 {
 		if decodeErr != nil {
-			return &servicedto.RedisBatchSyncResult{Status: "completed_with_warnings"}, decodeErr
+			// 全部消息解码失败时也算本轮已消耗这些 inbox 行，避免满批坏消息误触发 sleep。
+			return newRedisBatchSyncResult("completed_with_warnings", processedRows), decodeErr
 		}
-		return &servicedto.RedisBatchSyncResult{Empty: true, Status: "empty"}, nil
+		// 非空输入却没有事件且没有错误时保留已取行数供诊断。
+		result := newRedisBatchSyncResult("empty", processedRows)
+		// Empty 只表示本轮没有取到 inbox 行，因此这里不标记为空批。
+		return result, nil
 	}
 	var typeErr error
 	events, typeErr = normalizeRedisUsageEvents(ctx, s.db, events)
@@ -234,7 +265,8 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		// type 查询失败代表当前无法可靠判断 provider 口径，不能当作“找不到 type”降级处理。
 		// 将已解码行标记为 process_failed，后续重试时再按真实 type 归一化入库。
 		markRedisInboxRowsProcessFailed(s.db, validRows, typeErr)
-		return &servicedto.RedisBatchSyncResult{Status: "failed"}, joinErrors(decodeErr, typeErr)
+		// 归一化失败时保留本轮已取行数，但 runner 仍按真正失败路径等待。
+		return newRedisBatchSyncResult("failed", processedRows), joinErrors(decodeErr, typeErr)
 	}
 
 	// usage_events 入库和 inbox processed 标记必须同事务提交，避免标记失败后同一 inbox 重试造成重复事件。
@@ -254,13 +286,12 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		}
 		return nil
 	})
-	if result == nil {
+	// 事务错误或未产出持久化结果时统一走失败路径，避免两个等价分支后续漂移。
+	if err != nil || result == nil {
+		// 有具体错误时把可重试行标成 process_failed，异常空结果也复用同一保守返回。
 		markRedisInboxRowsProcessFailed(s.db, validRows, err)
-		return nil, err
-	}
-	if err != nil {
-		markRedisInboxRowsProcessFailed(s.db, validRows, err)
-		return &servicedto.RedisBatchSyncResult{Status: "failed"}, err
+		// 失败返回仍保留本轮已取行数，但不允许 runner 立即忙循环。
+		return newRedisBatchSyncResult("failed", processedRows), err
 	}
 	if result.InsertedEvents > 0 {
 		// usage_events 事务已经提交后才通知最近事件缓存，避免缓存看到未落库的数据。
@@ -270,11 +301,18 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		}
 		// Redis process 是 usage_events 的高频写入入口，成功插入后串行刷新依赖事件表的增量统计。
 		if err := s.aggregateUsageEventStats(ctx, timeutil.NormalizeStorageTime(s.now())); err != nil {
-			return &servicedto.RedisBatchSyncResult{Status: "failed"}, err
+			// 聚合失败时保留本轮已取行数，但保持失败路径的保守等待。
+			return newRedisBatchSyncResult("failed", processedRows), err
+		}
+		// header quota 需要复用窗口 token/cost 兜底统计，因此必须在 usage overview 聚合追平后再通知 worker。
+		headerSnapshots = coalesceUsageHeaderSnapshotsByAuthIndex(headerSnapshots)
+		if s.usageHeaderQuota != nil && len(headerSnapshots) > 0 && !s.usageHeaderQuota.TryAppendUsageHeaderSnapshots(headerSnapshots) {
+			// header worker 队列满只影响 quota cache 新鲜度，不能影响 usage_events 写入成功。
+			logrus.WithField("snapshot_count", len(headerSnapshots)).Warn("usage header quota cache append skipped")
 		}
 	}
 	logrus.WithFields(logrus.Fields{
-		"processed_rows":  len(validRows),
+		"processed_rows":  processedRows,
 		"inserted_events": result.InsertedEvents,
 		"deduped_events":  result.DedupedEvents,
 		"status":          result.Status,
@@ -292,10 +330,53 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, inboxRows []ent
 		}
 	}
 	return &servicedto.RedisBatchSyncResult{
-		Status:         status,
+		// Status 保持原有 completed/completed_with_warnings 语义。
+		Status: status,
+		// InsertedEvents 保持原有 usage_events 新增数量语义。
 		InsertedEvents: result.InsertedEvents,
-		DedupedEvents:  result.DedupedEvents,
+		// DedupedEvents 保持原有 usage_events 去重数量语义。
+		DedupedEvents: result.DedupedEvents,
+		// ProcessedRows 使用本轮取出的 inbox 行数，而不是最终写入事件数。
+		ProcessedRows: processedRows,
+		// BatchFull 只表示本轮取数达到上限，供 runner 判断是否继续 drain。
+		BatchFull: processedRows >= redisInboxProcessLimit,
 	}, returnErr
+}
+
+func newRedisBatchSyncResult(status string, processedRows int) *servicedto.RedisBatchSyncResult {
+	// 负数输入没有业务意义，统一收敛为 0，避免调用方误报批次大小。
+	if processedRows < 0 {
+		// 只修正异常输入，不影响正常批次行数。
+		processedRows = 0
+	}
+	// BatchFull 只看取出的原始行数是否达到 service 批次上限。
+	batchFull := processedRows >= redisInboxProcessLimit
+	// 返回统一填充批次信号的 Redis 处理结果。
+	return &servicedto.RedisBatchSyncResult{Status: status, ProcessedRows: processedRows, BatchFull: batchFull}
+}
+
+func coalesceUsageHeaderSnapshotsByAuthIndex(snapshots []quota.UsageHeaderSnapshot) []quota.UsageHeaderSnapshot {
+	if len(snapshots) <= 1 {
+		return snapshots
+	}
+	indexByAuthIndex := make(map[string]int, len(snapshots))
+	coalesced := make([]quota.UsageHeaderSnapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		authIndex := strings.TrimSpace(snapshot.AuthIndex)
+		if authIndex == "" {
+			continue
+		}
+		snapshot.AuthIndex = authIndex
+		if index, ok := indexByAuthIndex[authIndex]; ok {
+			if !snapshot.ObservedAt.Before(coalesced[index].ObservedAt) {
+				coalesced[index] = snapshot
+			}
+			continue
+		}
+		indexByAuthIndex[authIndex] = len(coalesced)
+		coalesced = append(coalesced, snapshot)
+	}
+	return coalesced
 }
 
 type usageEventTypeResolver struct {
