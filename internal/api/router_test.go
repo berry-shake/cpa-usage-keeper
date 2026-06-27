@@ -370,25 +370,6 @@ func TestStatusOmitsVersionFields(t *testing.T) {
 	}
 }
 
-func TestStatusReturnsForkVersionAndUpdateCheckFlag(t *testing.T) {
-	previousVersion := version.Version
-	t.Cleanup(func() { version.Version = previousVersion })
-	version.Version = "v1.2.3-fork.1"
-
-	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
-	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", resp.Code)
-	}
-	body := resp.Body.String()
-	if !contains(body, `"version":"v1.2.3-fork.1"`) || !contains(body, `"updateCheckEnabled":true`) {
-		t.Fatalf("unexpected response body: %s", body)
-	}
-}
-
 func TestStatusReturnsCPAPublicURL(t *testing.T) {
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", OptionalProviders{
 		Status: StatusRouteConfig{CPAPublicURL: "https://cpa.public.example.com/"},
