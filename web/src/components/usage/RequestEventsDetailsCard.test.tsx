@@ -5,6 +5,7 @@ import {
   RequestEventsDetailsCard,
   isRequestEventColumnSelectionControlled,
   resolveRequestEventColumnMenuFocusIndex,
+  shouldCloseMenuOnFocusLeave,
   toggleRequestEventColumnId,
   type RequestEventColumnId,
 } from './RequestEventsDetailsCard';
@@ -293,10 +294,15 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).not.toContain('_requestEventsLimitHint_');
   });
 
-  it('hides export buttons while keeping clear filters available', () => {
+  it('renders one export menu trigger instead of separate CSV and JSON buttons', () => {
     const html = renderCard({ modelFilter: 'claude-sonnet' });
 
     expect(html).toContain('Clear Filters');
+    expect(countOccurrences(html, '>Export<')).toBe(1);
+    expect(html.indexOf('Clear Filters')).toBeLessThan(html.indexOf('>Export<'));
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('_requestEventsExportButton_');
+    expect(html).toContain('_requestEventsExportButtonInner_');
     expect(html).not.toContain('Export CSV');
     expect(html).not.toContain('Export JSON');
   });
@@ -401,6 +407,16 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(isRequestEventColumnSelectionControlled(['timestamp'], () => undefined)).toBe(true);
     expect(isRequestEventColumnSelectionControlled(undefined, () => undefined)).toBe(false);
     expect(isRequestEventColumnSelectionControlled(['timestamp'], undefined)).toBe(false);
+  });
+
+  it('closes export menu only when focus leaves the menu container', () => {
+    const insideTarget = {};
+    const outsideTarget = {};
+    const container = { contains: (target: EventTarget) => target === insideTarget };
+
+    expect(shouldCloseMenuOnFocusLeave(container, insideTarget as EventTarget)).toBe(false);
+    expect(shouldCloseMenuOnFocusLeave(container, outsideTarget as EventTarget)).toBe(true);
+    expect(shouldCloseMenuOnFocusLeave(container, null)).toBe(true);
   });
 
   it('cycles column menu focus for arrow and tab navigation', () => {

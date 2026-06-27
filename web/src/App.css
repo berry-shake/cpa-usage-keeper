@@ -109,4 +109,14 @@
   .app-footer-line {
     gap: 7px;
   }
+
+  .app-footer-version-separator {
+    display: none;
+  }
+
+  .app-footer-version {
+    display: block;
+    flex-basis: 100%;
+    text-align: center;
+  }
 }

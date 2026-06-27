@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 type usageEventsStub struct {
 	events             []servicedto.UsageEventRecord
 	eventsPage         *servicedto.UsageEventsPage
+	exportEvents       []servicedto.UsageEventRecord
 	eventFilterOptions *servicedto.UsageEventFilterOptions
 	credentialStats    []servicedto.UsageCredentialStat
 	err                error
@@ -22,6 +25,7 @@ type usageEventsStub struct {
 	filterCalls        int
 	filterOptionCalls  int
 	credentialsCalls   int
+	exportCalls        int
 }
 
 func (s *usageEventsStub) GetUsageOverview(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
@@ -39,6 +43,21 @@ func (s *usageEventsStub) ListUsageEvents(_ context.Context, filter servicedto.U
 		return s.eventsPage, s.err
 	}
 	return &servicedto.UsageEventsPage{Events: s.events, TotalCount: int64(len(s.events)), Page: 1, PageSize: servicedto.DefaultUsageEventsLimit, TotalPages: 1}, s.err
+}
+
+func (s *usageEventsStub) StreamUsageEvents(_ context.Context, filter servicedto.UsageFilter, emit func(servicedto.UsageEventRecord) error) error {
+	s.lastFilter = filter
+	s.exportCalls++
+	events := s.events
+	if s.exportEvents != nil {
+		events = s.exportEvents
+	}
+	for _, event := range events {
+		if err := emit(event); err != nil {
+			return err
+		}
+	}
+	return s.err
 }
 
 func (s *usageEventsStub) ListUsageEventFilterOptions(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
@@ -161,6 +180,170 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	}
 	if provider.lastFilter.StartTime == nil || provider.lastFilter.EndTime == nil {
 		t.Fatalf("expected resolved time bounds in filter, got %+v", provider.lastFilter)
+	}
+}
+
+func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) {
+	provider := &usageEventsStub{exportEvents: []servicedto.UsageEventRecord{{
+		ID:                  52,
+		Timestamp:           time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
+		APIGroupKey:         "sk-export123456",
+		Model:               "claude-sonnet",
+		ReasoningEffort:     "medium",
+		ServiceTier:         "priority",
+		ExecutorType:        "responses",
+		Endpoint:            "POST /v1/responses",
+		AuthType:            "apikey",
+		Provider:            "Provider Fallback",
+		AuthIndex:           "authidx-export-main",
+		Failed:              true,
+		LatencyMS:           2045,
+		TTFTMS:              usageEventInt64Ptr(45),
+		InputTokens:         10,
+		OutputTokens:        61,
+		ReasoningTokens:     2,
+		CachedTokens:        1,
+		CacheReadTokens:     3,
+		CacheCreationTokens: 4,
+		TotalTokens:         18,
+		CostUSD:             0.1234,
+		CostAvailable:       true,
+		PricingStyle:        "claude",
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{
+		CPAAPIKeys: &authCPAAPIKeyStub{row: entities.CPAAPIKey{
+			ID:         7,
+			APIKey:     "sk-export123456",
+			DisplayKey: "sk-*********123456",
+			KeyAlias:   "Export Key",
+		}},
+		UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{
+			ID:           12,
+			Name:         "Export Provider",
+			AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+			AuthTypeName: "apikey",
+			Identity:     "authidx-export-main",
+			Type:         "openai",
+			Provider:     "Provider",
+		}}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&page=3&page_size=100&model=claude-sonnet&source=authidx-export-main&result=failed&format=csv", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
+	}
+	if provider.exportCalls != 1 || provider.filterCalls != 0 {
+		t.Fatalf("expected export only, export=%d list=%d", provider.exportCalls, provider.filterCalls)
+	}
+	if provider.lastFilter.Page != 0 || provider.lastFilter.PageSize != 0 || provider.lastFilter.Limit != 0 || provider.lastFilter.Offset != 0 {
+		t.Fatalf("expected export to drop pagination, got %+v", provider.lastFilter)
+	}
+	if provider.lastFilter.Model != "claude-sonnet" || provider.lastFilter.AuthIndex != "authidx-export-main" || provider.lastFilter.Source != "" || provider.lastFilter.Result != "failed" {
+		t.Fatalf("expected export filters to match list filters, got %+v", provider.lastFilter)
+	}
+	if !contains(resp.Header().Get("Content-Type"), "text/csv") || !contains(resp.Header().Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("expected csv attachment headers, got content-type=%q disposition=%q", resp.Header().Get("Content-Type"), resp.Header().Get("Content-Disposition"))
+	}
+	if !regexp.MustCompile(`filename="usage-events-\d{8}-\d{6}\.csv"`).MatchString(resp.Header().Get("Content-Disposition")) {
+		t.Fatalf("expected timestamped csv filename, got %q", resp.Header().Get("Content-Disposition"))
+	}
+	if !contains(body, "cpa_api_key_id") || !contains(body, "auth_index") || !contains(body, "executor_type") || !contains(body, "is_identity_deleted") {
+		t.Fatalf("expected cpa_api_key_id, auth_index, executor_type, and is_identity_deleted columns, got %s", body)
+	}
+	if contains(body, "is_deleted") {
+		t.Fatalf("expected export to use is_identity_deleted instead of is_deleted, got %s", body)
+	}
+	if contains(body, "cost_available") || contains(body, "pricing_style") {
+		t.Fatalf("expected csv export to omit cost availability metadata, got %s", body)
+	}
+	if !contains(body, "Export Key") || !contains(body, ",7,") || !contains(body, "authidx-export-main") || !contains(body, "responses") || !contains(body, "failed") {
+		t.Fatalf("expected exported row values, got %s", body)
+	}
+}
+
+func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
+	provider := &usageEventsStub{events: []servicedto.UsageEventRecord{{
+		ID:            53,
+		Timestamp:     time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
+		APIGroupKey:   "sk-json-export",
+		Model:         "gpt-5",
+		ServiceTier:   "default",
+		ExecutorType:  "chat_completions",
+		Endpoint:      "GET /v1/responses",
+		AuthType:      "oauth",
+		Source:        "claude-code",
+		AuthIndex:     "auth-file-export",
+		Failed:        false,
+		LatencyMS:     300,
+		InputTokens:   9,
+		OutputTokens:  5,
+		TotalTokens:   14,
+		CostAvailable: true,
+		PricingStyle:  "openai",
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{
+		CPAAPIKeys: &authCPAAPIKeyStub{row: entities.CPAAPIKey{
+			ID:       9,
+			APIKey:   "sk-json-export",
+			KeyAlias: "Team <Ops> & Co",
+		}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format=json", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	body := resp.Body.String()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, body)
+	}
+	if !contains(resp.Header().Get("Content-Type"), "application/json") || !contains(resp.Header().Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("expected json attachment headers, got content-type=%q disposition=%q", resp.Header().Get("Content-Type"), resp.Header().Get("Content-Disposition"))
+	}
+	if !regexp.MustCompile(`filename="usage-events-\d{8}-\d{6}\.json"`).MatchString(resp.Header().Get("Content-Disposition")) {
+		t.Fatalf("expected timestamped json filename, got %q", resp.Header().Get("Content-Disposition"))
+	}
+	if !contains(body, `"total_count":1`) || contains(body, `"page"`) || contains(body, `"page_size"`) {
+		t.Fatalf("expected export metadata without pagination, got %s", body)
+	}
+	if !contains(body, `"auth_index":"auth-file-export"`) || !contains(body, `"executor_type":"chat_completions"`) || !contains(body, `"endpoint":"GET /v1/responses"`) || !contains(body, `"is_identity_deleted":true`) {
+		t.Fatalf("expected raw export fields in json body, got %s", body)
+	}
+	if !contains(body, `"api_key":"Team <Ops> & Co"`) || contains(body, `\u003c`) || contains(body, `\u0026`) || contains(body, `\u003e`) {
+		t.Fatalf("expected json export to preserve plain text values without HTML escaping, got %s", body)
+	}
+	if !contains(body, `"cpa_api_key_id":"9"`) || !contains(body, `"source_type":""`) || !contains(body, `"reasoning_effort":""`) || !contains(body, `"ttft_ms":null`) || !contains(body, `"speed_tps":null`) {
+		t.Fatalf("expected json export to keep a stable field set, got %s", body)
+	}
+	if contains(body, `"is_deleted"`) {
+		t.Fatalf("expected json export to use is_identity_deleted instead of is_deleted, got %s", body)
+	}
+	if contains(body, `"cost_available"`) || contains(body, `"pricing_style"`) {
+		t.Fatalf("expected json export to omit cost availability metadata, got %s", body)
+	}
+}
+
+func TestUsageEventsExportStreamSetupErrorReturnsServerError(t *testing.T) {
+	for _, format := range []string{"csv", "json"} {
+		t.Run(format, func(t *testing.T) {
+			provider := &usageEventsStub{err: errors.New("stream setup failed")}
+			router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format="+format, nil)
+			resp := httptest.NewRecorder()
+
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusInternalServerError {
+				t.Fatalf("expected status 500 before export body is written, got %d: %s", resp.Code, resp.Body.String())
+			}
+			if contains(resp.Body.String(), "usage-events-") || contains(resp.Body.String(), `"events":[`) || contains(resp.Body.String(), "id,timestamp") {
+				t.Fatalf("expected error response instead of partial export body, got %s", resp.Body.String())
+			}
+		})
 	}
 }
 

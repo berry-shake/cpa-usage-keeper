@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, clampCustomDateRangeToBounds, CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewDisplayLoading, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleCustomDateRangeBoundsRefresh, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
+import { buildCustomDateRangeQuery, clampCustomDateRangeToBounds, CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewDisplayLoading, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, loadUsagePageVersionInfo, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleCustomDateRangeBoundsRefresh, scheduleOverviewAutoRefresh, scheduleStatusActiveHeartbeat, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS, getUpdateCheckToastDuration } from './UsagePage';
 import { REQUEST_EVENT_COLUMN_IDS } from '@/components/usage/RequestEventsDetailsCard';
-import type { StatusResponse, UsageFilterWindow } from '@/lib/types';
+import { ApiError } from '@/lib/api';
+import type { StatusResponse, UsageFilterWindow, VersionResponse } from '@/lib/types';
 
 const usagePageSource = readFileSync(new URL('./UsagePage.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
@@ -91,16 +92,68 @@ describe('UsagePage Back to CPA link', () => {
 });
 
 describe('UsagePage update check controls', () => {
-  it('hides the update button before status loads', () => {
+  it('loads version info through the dedicated version loader', async () => {
+    const signal = new AbortController().signal;
+    const versionInfo = { version: 'v1.2.3', updateCheckEnabled: true };
+    const loadVersion = vi.fn(async () => versionInfo);
+    const setVersionInfo = vi.fn();
+
+    await loadUsagePageVersionInfo({ loadVersion, signal, setVersionInfo });
+
+    expect(loadVersion).toHaveBeenCalledWith(signal);
+    expect(setVersionInfo).toHaveBeenCalledWith(versionInfo);
+  });
+
+  it('clears version info when version loading fails', async () => {
+    const signal = new AbortController().signal;
+    const loadVersion = vi.fn(async () => {
+      throw new Error('network failed');
+    });
+    const setVersionInfo = vi.fn();
+
+    await loadUsagePageVersionInfo({ loadVersion, signal, setVersionInfo });
+
+    expect(setVersionInfo).toHaveBeenCalledWith(null);
+  });
+
+  it('requests reauthentication when version loading returns 401', async () => {
+    const signal = new AbortController().signal;
+    const loadVersion = vi.fn(async () => {
+      throw new ApiError('expired', 401);
+    });
+    const setVersionInfo = vi.fn();
+    const onAuthRequired = vi.fn();
+
+    await loadUsagePageVersionInfo({ loadVersion, signal, setVersionInfo, onAuthRequired });
+
+    expect(onAuthRequired).toHaveBeenCalledTimes(1);
+    expect(setVersionInfo).not.toHaveBeenCalled();
+  });
+
+  it('ignores version results after the request is aborted', async () => {
+    const requestController = new AbortController();
+    const versionInfo = { version: 'v1.2.3', updateCheckEnabled: true };
+    const loadVersion = vi.fn(async () => {
+      requestController.abort();
+      return versionInfo;
+    });
+    const setVersionInfo = vi.fn();
+
+    await loadUsagePageVersionInfo({ loadVersion, signal: requestController.signal, setVersionInfo });
+
+    expect(setVersionInfo).not.toHaveBeenCalled();
+  });
+
+  it('hides the update button before version loads', () => {
     expect(shouldShowUpdateCheckButton(null)).toBe(false);
   });
 
   it('hides the update button for dev builds', () => {
-    expect(shouldShowUpdateCheckButton({ updateCheckEnabled: false })).toBe(false);
+    expect(shouldShowUpdateCheckButton({ version: 'dev', updateCheckEnabled: false } satisfies VersionResponse)).toBe(false);
   });
 
   it('shows the update button for release builds', () => {
-    expect(shouldShowUpdateCheckButton({ updateCheckEnabled: true })).toBe(true);
+    expect(shouldShowUpdateCheckButton({ version: 'v1.2.3', updateCheckEnabled: true })).toBe(true);
   });
 
   it('keeps failure toasts visible longer than success toasts', () => {

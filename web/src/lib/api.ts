@@ -1,4 +1,4 @@
-import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsItem, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type PricingSyncResponse, type StatusResponse, type UpdateCheckResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetResponse } from './types'
+import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsItem, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type PricingSyncResponse, type StatusResponse, type UpdateCheckResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -260,23 +260,14 @@ export interface FetchUsageEventsOptions {
   apiKeyId?: string
 }
 
-export async function fetchUsageEventModelFilterOptions(signal?: AbortSignal): Promise<UsageEventModelFilterOptionsResponse> {
-  const response = await apiFetch(apiPath('/usage/events/filters/models'), { signal, cache: 'no-store' })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to load usage event model filters: ${response.status}`)
-  }
-  return response.json()
+export type UsageEventsExportFormat = 'csv' | 'json'
+
+export interface UsageEventsExportFile {
+  blob: Blob
+  filename: string
 }
 
-export async function fetchUsageEventSourceFilterOptions(signal?: AbortSignal): Promise<UsageEventSourceFilterOptionsResponse> {
-  const response = await apiFetch(apiPath('/usage/events/filters/sources'), { signal, cache: 'no-store' })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to load usage event source filters: ${response.status}`)
-  }
-  return response.json()
-}
-
-export async function fetchUsageEvents(range: string, start?: string, end?: string, signal?: AbortSignal, options?: FetchUsageEventsOptions): Promise<UsageEventsResponse> {
+function buildUsageEventsParams(range: string, start?: string, end?: string, options?: FetchUsageEventsOptions, includePagination = true): URLSearchParams {
   const params = new URLSearchParams()
   params.set('range', range)
   if (start) {
@@ -285,10 +276,10 @@ export async function fetchUsageEvents(range: string, start?: string, end?: stri
   if (end) {
     params.set('end', end)
   }
-  if (typeof options?.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
+  if (includePagination && typeof options?.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
     params.set('page', String(Math.floor(options.page)))
   }
-  if (typeof options?.pageSize === 'number' && Number.isFinite(options.pageSize) && options.pageSize > 0) {
+  if (includePagination && typeof options?.pageSize === 'number' && Number.isFinite(options.pageSize) && options.pageSize > 0) {
     params.set('page_size', String(Math.floor(options.pageSize)))
   }
   const model = options?.model?.trim()
@@ -308,12 +299,52 @@ export async function fetchUsageEvents(range: string, start?: string, end?: stri
   if (selectedAPIKeyId) {
     params.set('api_key_id', selectedAPIKeyId)
   }
+  return params
+}
+
+function parseAttachmentFilename(contentDisposition: string | null, fallback: string): string {
+  const match = contentDisposition?.match(/filename="([^"]+)"/i)
+  return match?.[1]?.trim() || fallback
+}
+
+export async function fetchUsageEventModelFilterOptions(signal?: AbortSignal): Promise<UsageEventModelFilterOptionsResponse> {
+  const response = await apiFetch(apiPath('/usage/events/filters/models'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage event model filters: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUsageEventSourceFilterOptions(signal?: AbortSignal): Promise<UsageEventSourceFilterOptionsResponse> {
+  const response = await apiFetch(apiPath('/usage/events/filters/sources'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage event source filters: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUsageEvents(range: string, start?: string, end?: string, signal?: AbortSignal, options?: FetchUsageEventsOptions): Promise<UsageEventsResponse> {
+  const params = buildUsageEventsParams(range, start, end, options)
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/events')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage events: ${response.status}`)
   }
   return response.json()
+}
+
+export async function exportUsageEvents(range: string, start: string | undefined, end: string | undefined, format: UsageEventsExportFormat, options?: FetchUsageEventsOptions): Promise<UsageEventsExportFile> {
+  const params = buildUsageEventsParams(range, start, end, options, false)
+  params.set('format', format)
+  const query = params.toString()
+  const response = await apiFetch(`${apiPath('/usage/events/export')}${query ? `?${query}` : ''}`)
+  if (!response.ok) {
+    await parseApiError(response, `Failed to export usage events: ${response.status}`)
+  }
+  return {
+    blob: await response.blob(),
+    filename: parseAttachmentFilename(response.headers.get('Content-Disposition'), `usage-events.${format}`),
+  }
 }
 
 export type UsageIdentityPageSort = 'priority' | 'total_requests' | 'total_tokens' | 'last_used_at'
@@ -558,6 +589,14 @@ export async function fetchStatus(signal?: AbortSignal): Promise<StatusResponse>
   const response = await apiFetch(apiPath('/status'), { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load status: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchVersion(signal?: AbortSignal): Promise<VersionResponse> {
+  const response = await apiFetch(apiPath('/version'), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load version: ${response.status}`)
   }
   return response.json()
 }

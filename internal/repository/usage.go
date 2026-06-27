@@ -91,27 +91,37 @@ func ListUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (*dto.U
 	query := applyUsageEventListQuery(db.Model(&entities.UsageEvent{}), filter)
 	query = query.Select(usageEventProjectionColumns).Order("timestamp DESC, id DESC").Limit(pageSize).Offset(offset)
 
-	var events []usageEventProjection
-	if err := query.Find(&events).Error; err != nil {
-		return nil, fmt.Errorf("load usage events: %w", err)
-	}
-	pricingByModel, err := loadPriceSettingsByModel(db)
+	rows, err := loadUsageEventRecordsForQuery(db, query)
 	if err != nil {
-		return nil, fmt.Errorf("load usage event pricing settings: %w", err)
-	}
-
-	rows := make([]dto.UsageEventRecord, 0, len(events))
-	for _, event := range events {
-		record := usageEventProjectionToRecord(event)
-		// Request Events cost 只在响应阶段按当前价格配置计算，不回写 usage_events。
-		record.CostUSD, record.CostAvailable, record.PricingStyle = usageEventRecordCost(record, pricingByModel)
-		rows = append(rows, record)
+		return nil, err
 	}
 	totalPages := 0
 	if totalCount > 0 {
 		totalPages = int((totalCount + int64(pageSize) - 1) / int64(pageSize))
 	}
 	return &dto.UsageEventsPageRecord{Events: rows, Models: modelOptions, TotalCount: totalCount, Page: page, PageSize: pageSize, TotalPages: totalPages}, nil
+}
+
+// ExportUsageEventsWithFilter 使用 Request Event Log 相同筛选，但不应用分页。
+func ExportUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) ([]dto.UsageEventRecord, error) {
+	rows := []dto.UsageEventRecord{}
+	if err := StreamUsageEventsWithFilter(db, filter, func(row dto.UsageEventRecord) error {
+		rows = append(rows, row)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// StreamUsageEventsWithFilter 使用 Request Event Log 相同筛选逐行导出，不应用分页。
+func StreamUsageEventsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter, emit func(dto.UsageEventRecord) error) error {
+	if db == nil {
+		return fmt.Errorf("database is nil")
+	}
+	query := applyUsageEventListQuery(db.Model(&entities.UsageEvent{}), filter)
+	query = query.Select(usageEventProjectionColumns).Order("timestamp DESC, id DESC")
+	return streamUsageEventRecordsForQuery(db, query, emit)
 }
 
 // Request Event Log Filter Options：只按时间窗口收集 model 候选值。
@@ -130,17 +140,76 @@ func listUsageEventModelFilterOptions(db *gorm.DB, filter dto.UsageQueryFilter) 
 	// 第一步：model 候选值只来自 usage_events，并且只套用时间窗口。
 	query := applyUsageEventFilterOptionsQuery(queryUsageEvents(db), filter)
 
-	// 第二步：去重并排除空 model，保持下拉选项稳定排序。
+	// 第二步：只按 model 索引去重排序；空白值由内存兜底过滤，避免给索引扫描追加无意义条件。
 	var values []string
-	if err := query.Select("DISTINCT model").Where("model <> ''").Order("model ASC").Pluck("model", &values).Error; err != nil {
+	if err := query.Select("DISTINCT model").Order("model ASC").Pluck("model", &values).Error; err != nil {
 		return nil, fmt.Errorf("load usage event model filter options: %w", err)
 	}
-	return values, nil
+	models := values[:0]
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		models = append(models, value)
+	}
+	return models, nil
 }
 
 // queryUsageEvents 统一 usage_events 的 GORM model 入口，方便后续追加通用 scope。
 func queryUsageEvents(db *gorm.DB) *gorm.DB {
 	return db.Model(&entities.UsageEvent{})
+}
+
+func loadUsageEventRecordsForQuery(db *gorm.DB, query *gorm.DB) ([]dto.UsageEventRecord, error) {
+	var events []usageEventProjection
+	if err := query.Find(&events).Error; err != nil {
+		return nil, fmt.Errorf("load usage events: %w", err)
+	}
+	pricingByModel, err := loadPriceSettingsByModel(db)
+	if err != nil {
+		return nil, fmt.Errorf("load usage event pricing settings: %w", err)
+	}
+
+	rows := make([]dto.UsageEventRecord, 0, len(events))
+	for _, event := range events {
+		record := usageEventProjectionToRecord(event)
+		// Request Events cost 只在响应阶段按当前价格配置计算，不回写 usage_events。
+		record.CostUSD, record.CostAvailable, record.PricingStyle = usageEventRecordCost(record, pricingByModel)
+		rows = append(rows, record)
+	}
+	return rows, nil
+}
+
+func streamUsageEventRecordsForQuery(db *gorm.DB, query *gorm.DB, emit func(dto.UsageEventRecord) error) error {
+	if emit == nil {
+		return fmt.Errorf("usage event stream callback is nil")
+	}
+	pricingByModel, err := loadPriceSettingsByModel(db)
+	if err != nil {
+		return fmt.Errorf("load usage event pricing settings: %w", err)
+	}
+	rows, err := query.Rows()
+	if err != nil {
+		return fmt.Errorf("load usage events: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var event usageEventProjection
+		if err := db.ScanRows(rows, &event); err != nil {
+			return fmt.Errorf("scan usage event: %w", err)
+		}
+		record := usageEventProjectionToRecord(event)
+		// Request Events cost 只在响应阶段按当前价格配置计算，不回写 usage_events。
+		record.CostUSD, record.CostAvailable, record.PricingStyle = usageEventRecordCost(record, pricingByModel)
+		if err := emit(record); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate usage events: %w", err)
+	}
+	return nil
 }
 
 // usageEventProjectionToRecord 把数据库投影转换成 Request Event Log 的外部 DTO。

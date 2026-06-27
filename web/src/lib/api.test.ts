@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appPath, deleteAuthFiles, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchKeyOverviewRealtime, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, loginWithCPAAPIKey, logout, markStatusActive, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias } from './api';
+import { appPath, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchKeyOverviewRealtime, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, markStatusActive, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias } from './api';
 
 describe('fetchUsageEvents', () => {
   afterEach(() => {
@@ -171,6 +171,23 @@ describe('fetchUsageEvents', () => {
     expect(init).toMatchObject({ credentials: 'include', signal });
   });
 
+  it('loads app version from the dedicated version endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: 'v1.2.3', updateCheckEnabled: true }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    const response = await fetchVersion(signal);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(response.version).toBe('v1.2.3');
+    expect(response.updateCheckEnabled).toBe(true);
+    expect(new URL(String(url), 'http://localhost').pathname).toBe('/api/v1/version');
+    expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
+  });
+
   it('loads model filter options without query params', async () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
@@ -247,6 +264,45 @@ describe('fetchUsageEvents', () => {
     expect(parsed.searchParams.get('result')).toBe('failed');
     expect(parsed.searchParams.get('auth_index')).toBeNull();
     expect(init).toMatchObject({ credentials: 'include', signal });
+  });
+
+  it('exports usage events with filters but without pagination params', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const blob = new Blob(['id,timestamp\n']);
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'Content-Disposition': 'attachment; filename="usage-events-20260627-013245.csv"' }),
+      blob: async () => blob,
+    } as Response);
+
+    const file = await exportUsageEvents('custom', '2026-04-20T00:00:00Z', '2026-04-21T00:00:00Z', 'csv', {
+      page: 3,
+      pageSize: 100,
+      model: 'claude-sonnet',
+      source: 'authidx-source-a',
+      result: 'failed',
+      apiKeyId: '42',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(file.blob).toBe(blob);
+    expect(file.filename).toBe('usage-events-20260627-013245.csv');
+    expect(parsed.pathname).toBe('/api/v1/usage/events/export');
+    expect(parsed.searchParams.get('range')).toBe('custom');
+    expect(parsed.searchParams.get('start')).toBe('2026-04-20T00:00:00Z');
+    expect(parsed.searchParams.get('end')).toBe('2026-04-21T00:00:00Z');
+    expect(parsed.searchParams.get('format')).toBe('csv');
+    expect(parsed.searchParams.get('model')).toBe('claude-sonnet');
+    expect(parsed.searchParams.get('source')).toBe('authidx-source-a');
+    expect(parsed.searchParams.get('result')).toBe('failed');
+    expect(parsed.searchParams.get('api_key_id')).toBe('42');
+    expect(parsed.searchParams.get('page')).toBeNull();
+    expect(parsed.searchParams.get('page_size')).toBeNull();
+    expect(parsed.searchParams.get('auth_index')).toBeNull();
+    expect(parsed.searchParams.get('visibleColumnIds')).toBeNull();
+    expect(init).toMatchObject({ credentials: 'include' });
   });
 
   it('passes API key id to overview and events requests', async () => {

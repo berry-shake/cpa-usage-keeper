@@ -6,11 +6,13 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 	"strings"
 	"time"
 
+	"cpa-usage-keeper/internal/auth"
 	"cpa-usage-keeper/internal/poller"
 	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/service"
@@ -71,9 +73,9 @@ func NewRouter(
 	registerHealthRoutes(appGroup)
 
 	apiV1 := appGroup.Group("/api/v1")
-	apiV1.GET("/ping", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-	})
+	if debugAPIRoutesEnabled() {
+		registerPingRoutes(apiV1)
+	}
 
 	authGroup := apiV1.Group("/auth")
 	if authHandler == nil {
@@ -94,6 +96,10 @@ func NewRouter(
 		statusConfig = optionalProviders[0].Status
 	}
 	authHandler.setCPAAPIKeyProvider(cpaAPIKeyProvider)
+
+	versionProtected := apiV1.Group("")
+	versionProtected.Use(authHandler.roleMiddleware(auth.RoleAdmin, auth.RoleAPIKeyViewer))
+	registerVersionRoutes(versionProtected)
 
 	adminProtected := apiV1.Group("")
 	adminProtected.Use(authHandler.adminMiddleware())
@@ -169,7 +175,21 @@ func NewRouter(
 	return router
 }
 
+func debugAPIRoutesEnabled() bool {
+	return version.Version == "dev" || os.Getenv("GIN_MODE") == gin.DebugMode
+}
+
+func registerPingRoutes(router gin.IRoutes) {
+	router.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	})
+}
+
 func setHTMLCacheHeaders(c *gin.Context) {
+	setNoStoreHeaders(c)
+}
+
+func setNoStoreHeaders(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
 	c.Header("Expires", "0")
@@ -242,14 +262,31 @@ type statusResponse struct {
 	Running                 bool       `json:"running"`
 	SyncRunning             bool       `json:"sync_running"`
 	Timezone                string     `json:"timezone"`
-	Version                 string     `json:"version"`
-	UpdateCheckEnabled      bool       `json:"updateCheckEnabled"`
 	QuotaAutoRefreshEnabled bool       `json:"quotaAutoRefreshEnabled"`
 	CPAPublicURL            string     `json:"cpa_public_url,omitempty"`
 	LastRunAt               *time.Time `json:"last_run_at,omitempty"`
 	LastError               string     `json:"last_error,omitempty"`
 	LastWarning             string     `json:"last_warning,omitempty"`
 	LastStatus              string     `json:"last_status,omitempty"`
+}
+
+type versionResponse struct {
+	Version            string `json:"version"`
+	UpdateCheckEnabled bool   `json:"updateCheckEnabled"`
+}
+
+func registerVersionRoutes(router gin.IRoutes) {
+	router.GET("/version", func(c *gin.Context) {
+		setNoStoreHeaders(c)
+		c.JSON(http.StatusOK, buildVersionResponse())
+	})
+}
+
+func buildVersionResponse() versionResponse {
+	return versionResponse{
+		Version:            version.Version,
+		UpdateCheckEnabled: updatecheck.IsStableVersion(version.Version),
+	}
 }
 
 func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider, config StatusRouteConfig) {
@@ -275,8 +312,6 @@ func buildStatusResponse(status poller.Status, config StatusRouteConfig) statusR
 		Running:                 status.Running,
 		SyncRunning:             status.SyncRunning,
 		Timezone:                time.Local.String(),
-		Version:                 version.Version,
-		UpdateCheckEnabled:      updatecheck.IsStableVersion(version.Version),
 		QuotaAutoRefreshEnabled: config.QuotaAutoRefreshEnabled,
 		CPAPublicURL:            config.CPAPublicURL,
 		LastError:               status.LastError,

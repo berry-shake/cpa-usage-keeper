@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias } from '@/lib/api';
-import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageEvent, UsageSourceFilterOption } from '@/lib/types';
+import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageEvent, UsageSourceFilterOption, VersionResponse } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
@@ -103,7 +103,7 @@ export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'settings';
 
 export const shouldShowApiKeyFilter = (tab: UsageTab) => tab === 'overview' || tab === 'analysis' || tab === 'events';
 
-export const shouldShowUpdateCheckButton = (status: Pick<StatusResponse, 'updateCheckEnabled'> | null) => status?.updateCheckEnabled === true;
+export const shouldShowUpdateCheckButton = (versionInfo: Pick<VersionResponse, 'updateCheckEnabled'> | null) => versionInfo?.updateCheckEnabled === true;
 
 export const isUsagePageVisible = (documentRef?: Pick<Document, 'visibilityState'>) => {
   const targetDocument = documentRef ?? (typeof document === 'undefined' ? undefined : document);
@@ -343,6 +343,35 @@ type StatusActiveHeartbeatOptions = {
   documentRef?: StatusActiveHeartbeatDocument;
   timerTarget?: StatusActiveHeartbeatTimerTarget;
   intervalMs?: number;
+};
+
+type VersionInfoLoader = (signal: AbortSignal) => Promise<VersionResponse>;
+
+type UsagePageVersionInfoOptions = {
+  loadVersion: VersionInfoLoader;
+  signal: AbortSignal;
+  setVersionInfo: (versionInfo: VersionResponse | null) => void;
+  onAuthRequired?: () => void;
+};
+
+export const loadUsagePageVersionInfo = async ({
+  loadVersion,
+  signal,
+  setVersionInfo,
+  onAuthRequired,
+}: UsagePageVersionInfoOptions) => {
+  try {
+    const nextVersionInfo = await loadVersion(signal);
+    if (signal.aborted) return;
+    setVersionInfo(nextVersionInfo);
+  } catch (error) {
+    if (signal.aborted) return;
+    if (error instanceof ApiError && error.status === 401) {
+      onAuthRequired?.();
+      return;
+    }
+    setVersionInfo(null);
+  }
 };
 
 export const refreshPageData = async ({ refreshActiveTab }: RefreshPageDataOptions) => {
@@ -761,6 +790,17 @@ const loadRealtimeWindow = (): OverviewRealtimeWindow => {
   }
 };
 
+export const triggerBrowserFileDownload = (blob: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -775,6 +815,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [selectedApiKeyId, setSelectedApiKeyId] = useState('');
   const [apiKeyOptions, setApiKeyOptions] = useState<CpaApiKeyOption[]>([]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [versionInfo, setVersionInfo] = useState<VersionResponse | null>(null);
   const [customDateRangeAnchorMs, setCustomDateRangeAnchorMs] = useState(() => Date.now());
   const apiKeyOptionsRequestControllerRef = useRef<AbortController | null>(null);
   const credentialSectionVisibility = getCredentialSectionVisibility(activeTab);
@@ -859,6 +900,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [eventsSourceFilter, setEventsSourceFilter] = useState(initialRequestEventsPreferences.filters.source);
   const [eventsResultFilter, setEventsResultFilter] = useState(initialRequestEventsPreferences.filters.result);
   const [eventsVisibleColumnIds, setEventsVisibleColumnIds] = useState<RequestEventColumnId[]>(initialRequestEventsPreferences.visibleColumnIds);
+  const [eventsExportingFormat, setEventsExportingFormat] = useState<UsageEventsExportFormat | null>(null);
   const [eventsFilterOptionsLoaded, setEventsFilterOptionsLoaded] = useState(false);
   const eventsRequestControllerRef = useRef<AbortController | null>(null);
   const eventsFilterOptionsRequestControllerRef = useRef<AbortController | null>(null);
@@ -1313,6 +1355,19 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, [onAuthRequired]);
 
   useEffect(() => {
+    const requestController = new AbortController();
+    void loadUsagePageVersionInfo({
+      loadVersion: fetchVersion,
+      signal: requestController.signal,
+      setVersionInfo,
+      onAuthRequired,
+    });
+    return () => {
+      requestController.abort();
+    };
+  }, [onAuthRequired]);
+
+  useEffect(() => {
     void loadApiKeyOptions();
     return () => {
       apiKeyOptionsRequestControllerRef.current?.abort();
@@ -1327,10 +1382,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, [apiKeyOptions, selectedApiKeyId]);
 
   useEffect(() => {
-    if (!shouldShowUpdateCheckButton(status)) {
+    if (!shouldShowUpdateCheckButton(versionInfo)) {
       setHasNewVersion(false);
     }
-  }, [status?.updateCheckEnabled]);
+  }, [versionInfo]);
 
   useEffect(() => () => {
     if (topNoticeTimerRef.current !== null) {
@@ -1467,6 +1522,32 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setEventsResultFilter(result);
     resetEventsPage();
   }, [resetEventsPage]);
+
+  const handleEventsExport = useCallback(async (format: UsageEventsExportFormat) => {
+    const queryWindow = getEventQueryWindow();
+    if (!queryWindow.valid) {
+      return;
+    }
+    setEventsExportingFormat(format);
+    try {
+      const file = await exportUsageEvents(timeRange, queryWindow.start, queryWindow.end, format, {
+        model: eventsModelFilter === ALL_REQUEST_EVENTS_FILTER ? undefined : eventsModelFilter,
+        source: eventsSourceFilter === ALL_REQUEST_EVENTS_FILTER ? undefined : eventsSourceFilter,
+        result: eventsResultFilter === ALL_REQUEST_EVENTS_FILTER ? undefined : eventsResultFilter,
+        apiKeyId: selectedApiKeyId,
+      });
+      triggerBrowserFileDownload(file.blob, file.filename);
+      showTopNotice('success', t('usage_stats.export_success'));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequired?.();
+        return;
+      }
+      showTopNotice('error', t('notification.download_failed'));
+    } finally {
+      setEventsExportingFormat(null);
+    }
+  }, [eventsModelFilter, eventsResultFilter, eventsSourceFilter, getEventQueryWindow, onAuthRequired, selectedApiKeyId, showTopNotice, t, timeRange]);
 
   const refreshActiveTab = useCallback(async () => {
     if (activeTab === 'events') {
@@ -1730,7 +1811,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 );
               })}
             </div>
-            {shouldShowUpdateCheckButton(status) && (
+            {shouldShowUpdateCheckButton(versionInfo) && (
               <div className={styles.updateCheckSwitcher} role="group" aria-label={t('usage_stats.check_updates')}>
                 <button
                   type="button"
@@ -2039,12 +2120,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   modelFilter={eventsModelFilter}
                   sourceFilter={eventsSourceFilter}
                   resultFilter={eventsResultFilter}
+                  exportingFormat={eventsExportingFormat}
                   visibleColumnIds={eventsVisibleColumnIds}
                   onPageChange={setEventsPage}
                   onPageSizeChange={handleEventsPageSizeChange}
                   onModelFilterChange={handleEventsModelFilterChange}
                   onSourceFilterChange={handleEventsSourceFilterChange}
                   onResultFilterChange={handleEventsResultFilterChange}
+                  onExport={handleEventsExport}
                   onVisibleColumnIdsChange={setEventsVisibleColumnIds}
                 />
               </>

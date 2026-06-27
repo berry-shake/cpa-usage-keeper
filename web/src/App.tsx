@@ -136,7 +136,7 @@ function App() {
   return (
     <div className="app-frame">
       <main className="app-main">{page}</main>
-      <AppFooter />
+      <AppFooter loadVersion={authState === 'authenticated'} />
     </div>
   );
 }

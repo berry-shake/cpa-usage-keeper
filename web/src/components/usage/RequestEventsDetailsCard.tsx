@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
-import { IconCheck, IconChevronDown } from '@/components/ui/icons';
+import { IconCheck, IconChevronDown, IconDownload } from '@/components/ui/icons';
 import type { UsageEvent, UsageSourceFilterOption } from '@/lib/types';
 import {
   calculateCacheRate,
@@ -29,6 +29,8 @@ const ALL_FILTER = '__all__';
 const MOBILE_PAGE_SIZE = 5;
 
 type SelectOption = { value: string; label: string };
+
+export type RequestEventExportFormat = 'csv' | 'json';
 
 export const REQUEST_EVENT_COLUMN_IDS = [
   'timestamp',
@@ -93,6 +95,11 @@ export const isRequestEventColumnSelectionControlled = (
   onVisibleColumnIdsChange: ((columnIds: RequestEventColumnId[]) => void) | undefined,
 ) => visibleColumnIds !== undefined && onVisibleColumnIdsChange !== undefined;
 
+export const shouldCloseMenuOnFocusLeave = (
+  container: { contains: (target: EventTarget) => boolean },
+  nextFocus: EventTarget | null
+): boolean => nextFocus === null || !container.contains(nextFocus);
+
 const appendSelectedOption = (
   options: SelectOption[],
   selectedValue: string,
@@ -154,6 +161,7 @@ export interface RequestEventsDetailsCardProps {
   modelFilter: string;
   sourceFilter: string;
   resultFilter: string;
+  exportingFormat?: RequestEventExportFormat | null;
   initialVisibleColumnIds?: readonly RequestEventColumnId[];
   visibleColumnIds?: readonly RequestEventColumnId[];
   onPageChange: (page: number) => void;
@@ -161,6 +169,7 @@ export interface RequestEventsDetailsCardProps {
   onModelFilterChange: (model: string) => void;
   onSourceFilterChange: (source: string) => void;
   onResultFilterChange: (result: string) => void;
+  onExport?: (format: RequestEventExportFormat) => void;
   onVisibleColumnIdsChange?: (columnIds: RequestEventColumnId[]) => void;
 }
 
@@ -489,6 +498,85 @@ function RequestEventsTitle({ title, subtitle, totalLabel }: { title: string; su
   );
 }
 
+function RequestEventsExportMenu({
+  label,
+  csvLabel,
+  jsonLabel,
+  exportingFormat,
+  onExport,
+}: {
+  label: string;
+  csvLabel: string;
+  jsonLabel: string;
+  exportingFormat: RequestEventExportFormat | null;
+  onExport?: (format: RequestEventExportFormat) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const disabled = !onExport || exportingFormat !== null;
+
+  const handleSelect = (format: RequestEventExportFormat) => {
+    setOpen(false);
+    onExport?.(format);
+  };
+
+  const handleTriggerClick = () => {
+    if (disabled) return;
+    setOpen((currentOpen) => !currentOpen);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+
+  const handleBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    if (shouldCloseMenuOnFocusLeave({
+      contains: (target) => target instanceof Node && event.currentTarget.contains(target),
+    }, event.relatedTarget)) {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div
+      className={styles.requestEventsExportMenu}
+      onMouseEnter={() => !disabled && setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onKeyDown={handleKeyDown}
+      onBlur={handleBlur}
+    >
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className={styles.requestEventsExportButton}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={disabled}
+        loading={exportingFormat !== null}
+        onClick={handleTriggerClick}
+      >
+        <span className={styles.requestEventsExportButtonInner}>
+          <IconDownload size={12} aria-hidden="true" />
+          <span>{label}</span>
+          <IconChevronDown size={12} aria-hidden="true" />
+        </span>
+      </Button>
+      {open && !disabled && (
+        <div className={styles.requestEventsExportDropdown} role="menu" aria-label={label}>
+          <button type="button" role="menuitem" onClick={() => handleSelect('csv')}>
+            {csvLabel}
+          </button>
+          <button type="button" role="menuitem" onClick={() => handleSelect('json')}>
+            {jsonLabel}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RequestEventsDetailsCard({
   events,
   loading,
@@ -502,6 +590,7 @@ export function RequestEventsDetailsCard({
   modelFilter,
   sourceFilter,
   resultFilter,
+  exportingFormat = null,
   initialVisibleColumnIds,
   visibleColumnIds,
   onPageChange,
@@ -509,6 +598,7 @@ export function RequestEventsDetailsCard({
   onModelFilterChange,
   onSourceFilterChange,
   onResultFilterChange,
+  onExport,
   onVisibleColumnIdsChange,
 }: RequestEventsDetailsCardProps) {
   const { t } = useTranslation();
@@ -868,6 +958,13 @@ export function RequestEventsDetailsCard({
           >
             {t('usage_stats.clear_filters')}
           </Button>
+          <RequestEventsExportMenu
+            label={t('usage_stats.export')}
+            csvLabel={t('usage_stats.export_csv')}
+            jsonLabel={t('usage_stats.export_json')}
+            exportingFormat={exportingFormat}
+            onExport={onExport}
+          />
         </div>
       }
     >

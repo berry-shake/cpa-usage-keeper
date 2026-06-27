@@ -462,7 +462,51 @@ func (s *usageService) ListUsageEvents(_ context.Context, filter servicedto.Usag
 	return &servicedto.UsageEventsPage{Events: result, Models: page.Models, TotalCount: page.TotalCount, Page: page.Page, PageSize: page.PageSize, TotalPages: page.TotalPages}, nil
 }
 
-// Usage 页面里的 Request Event Log tab 的 model 筛选项只按当前时间窗口加载候选值。
+// StreamUsageEvents 使用 Request Event Log 相同筛选条件逐行导出，不应用分页。
+func (s *usageService) StreamUsageEvents(ctx context.Context, filter servicedto.UsageFilter, emit func(servicedto.UsageEventRecord) error) error {
+	apiGroupKey, err := s.resolveAPIGroupKey(filter.APIKeyID)
+	if err != nil {
+		return err
+	}
+	return repository.StreamUsageEventsWithFilter(s.db.WithContext(ctx), repodto.UsageQueryFilter{
+		StartTime:   filter.StartTime,
+		EndTime:     filter.EndTime,
+		Model:       filter.Model,
+		AuthIndex:   filter.AuthIndex,
+		APIGroupKey: apiGroupKey,
+		Result:      filter.Result,
+	}, func(row repodto.UsageEventRecord) error {
+		return emit(servicedto.UsageEventRecord{
+			ID:                  row.ID,
+			Timestamp:           row.Timestamp,
+			APIGroupKey:         row.APIGroupKey,
+			Model:               row.Model,
+			ReasoningEffort:     row.ReasoningEffort,
+			ServiceTier:         row.ServiceTier,
+			ExecutorType:        row.ExecutorType,
+			Endpoint:            row.Endpoint,
+			AuthType:            row.AuthType,
+			Provider:            row.Provider,
+			Source:              row.Source,
+			AuthIndex:           row.AuthIndex,
+			Failed:              row.Failed,
+			LatencyMS:           row.LatencyMS,
+			TTFTMS:              row.TTFTMS,
+			InputTokens:         row.InputTokens,
+			OutputTokens:        row.OutputTokens,
+			ReasoningTokens:     row.ReasoningTokens,
+			CachedTokens:        row.CachedTokens,
+			CacheReadTokens:     row.CacheReadTokens,
+			CacheCreationTokens: row.CacheCreationTokens,
+			TotalTokens:         row.TotalTokens,
+			CostUSD:             row.CostUSD,
+			CostAvailable:       row.CostAvailable,
+			PricingStyle:        row.PricingStyle,
+		})
+	})
+}
+
+// Request Event Log 的 model 筛选项只应用调用方传入的时间窗口；独立筛选项接口当前传空 filter。
 func (s *usageService) ListUsageEventFilterOptions(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	options, err := repository.ListUsageEventFilterOptionsWithFilter(s.db, repodto.UsageQueryFilter{
 		StartTime: filter.StartTime,

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -68,6 +70,37 @@ type usageEventTokenPayload struct {
 	TotalTokens         int64 `json:"total_tokens"`
 }
 
+type usageEventExportPayload struct {
+	ID                  string   `json:"id"`
+	Timestamp           string   `json:"timestamp"`
+	APIKey              string   `json:"api_key"`
+	CPAAPIKeyID         string   `json:"cpa_api_key_id"`
+	Source              string   `json:"source"`
+	SourceType          string   `json:"source_type"`
+	AuthIndex           string   `json:"auth_index"`
+	IsIdentityDeleted   bool     `json:"is_identity_deleted"`
+	Model               string   `json:"model"`
+	ReasoningEffort     string   `json:"reasoning_effort"`
+	ServiceTier         string   `json:"service_tier"`
+	ExecutorType        string   `json:"executor_type"`
+	Result              string   `json:"result"`
+	Endpoint            string   `json:"endpoint"`
+	TTFTMS              *int64   `json:"ttft_ms"`
+	LatencyMS           int64    `json:"latency_ms"`
+	SpeedTPS            *float64 `json:"speed_tps"`
+	InputTokens         int64    `json:"input_tokens"`
+	OutputTokens        int64    `json:"output_tokens"`
+	ReasoningTokens     int64    `json:"reasoning_tokens"`
+	CachedTokens        int64    `json:"cached_tokens"`
+	CacheReadTokens     int64    `json:"cache_read_tokens"`
+	CacheCreationTokens int64    `json:"cache_creation_tokens"`
+	CacheRate           *float64 `json:"cache_rate"`
+	TotalTokens         int64    `json:"total_tokens"`
+	CostUSD             float64  `json:"cost_usd"`
+}
+
+type usageEventStreamFunc func(func(servicedto.UsageEventRecord) error) error
+
 func registerUsageEventsRoute(
 	router gin.IRoutes,
 	usageProvider service.UsageProvider,
@@ -132,6 +165,57 @@ func registerUsageEventsRoute(
 			TotalPages: rows.TotalPages,
 		})
 	})
+
+	router.GET("/usage/events/export", func(c *gin.Context) {
+		format := strings.ToLower(strings.TrimSpace(c.Query("format")))
+		if format == "" {
+			format = "csv"
+		}
+		if format != "csv" && format != "json" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid export format"})
+			return
+		}
+
+		filter, err := parseUsageFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := applyUsageEventsSourceFilter(&filter); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		filter.Limit = 0
+		filter.Page = 0
+		filter.PageSize = 0
+		filter.Offset = 0
+
+		identities, err := loadUsageResolutionData(c, usageIdentityProvider)
+		if err != nil {
+			writeInternalError(c, "load usage resolution data failed", err)
+			return
+		}
+		resolver := newUsageIdentityResolver(identities)
+		apiKeyInfos, err := loadCPAAPIKeyInfos(c, cpaAPIKeyProvider)
+		if err != nil {
+			return
+		}
+		streamEvents := func(emit func(servicedto.UsageEventRecord) error) error {
+			if usageProvider == nil {
+				return nil
+			}
+			return usageProvider.StreamUsageEvents(c.Request.Context(), filter, emit)
+		}
+		if format == "json" {
+			if err := writeUsageEventsJSONExport(c, streamEvents, resolver, apiKeyInfos); err != nil {
+				writeUsageEventsExportError(c, err)
+			}
+			return
+		}
+		if err := writeUsageEventsCSVExport(c, streamEvents, resolver, apiKeyInfos); err != nil {
+			writeUsageEventsExportError(c, err)
+		}
+	})
 }
 
 // Source 下拉提交的是 usage identity；为了兼容前端命名，API 收 source，但进入仓储前只转换成 auth_index 查询。
@@ -195,6 +279,47 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 	return payload
 }
 
+func buildUsageEventExportPayload(row servicedto.UsageEventRecord, resolver usageIdentityResolver, apiKeyInfos map[string]analysisAPIKeyInfo) usageEventExportPayload {
+	identity, matched := resolver.resolveByAuthIndex(row.AuthIndex)
+	source, isIdentityDeleted := usageEventPublicSource(row, identity, matched)
+	id := ""
+	if row.ID != 0 {
+		id = strconv.FormatInt(row.ID, 10)
+	}
+	result := "success"
+	if row.Failed {
+		result = "failed"
+	}
+	return usageEventExportPayload{
+		ID:                  id,
+		Timestamp:           timeutil.FormatStorageTime(row.Timestamp),
+		APIKey:              usageEventAPIKeyLabel(row.APIGroupKey, apiKeyInfos),
+		CPAAPIKeyID:         usageEventCPAAPIKeyID(row.APIGroupKey, apiKeyInfos),
+		Source:              source,
+		SourceType:          identity.Type,
+		AuthIndex:           strings.TrimSpace(row.AuthIndex),
+		IsIdentityDeleted:   isIdentityDeleted,
+		Model:               row.Model,
+		ReasoningEffort:     strings.TrimSpace(row.ReasoningEffort),
+		ServiceTier:         strings.TrimSpace(row.ServiceTier),
+		ExecutorType:        strings.TrimSpace(row.ExecutorType),
+		Result:              result,
+		Endpoint:            strings.TrimSpace(row.Endpoint),
+		TTFTMS:              row.TTFTMS,
+		LatencyMS:           row.LatencyMS,
+		SpeedTPS:            usageEventSpeedTPS(row),
+		InputTokens:         row.InputTokens,
+		OutputTokens:        row.OutputTokens,
+		ReasoningTokens:     row.ReasoningTokens,
+		CachedTokens:        row.CachedTokens,
+		CacheReadTokens:     row.CacheReadTokens,
+		CacheCreationTokens: row.CacheCreationTokens,
+		CacheRate:           usageEventCacheRate(row),
+		TotalTokens:         row.TotalTokens,
+		CostUSD:             row.CostUSD,
+	}
+}
+
 func usageEventSpeedTPS(row servicedto.UsageEventRecord) *float64 {
 	visibleOutputTokens := row.OutputTokens - row.ReasoningTokens
 	if visibleOutputTokens < 0 {
@@ -208,12 +333,215 @@ func usageEventSpeedTPS(row servicedto.UsageEventRecord) *float64 {
 	return &speed
 }
 
+func usageEventCacheRate(row servicedto.UsageEventRecord) *float64 {
+	if row.InputTokens <= 0 {
+		return nil
+	}
+	rate := float64(row.CachedTokens) / float64(row.InputTokens) * 100
+	return &rate
+}
+
+var usageEventsExportCSVHeader = []string{
+	"id",
+	"timestamp",
+	"api_key",
+	"cpa_api_key_id",
+	"source",
+	"source_type",
+	"auth_index",
+	"is_identity_deleted",
+	"model",
+	"reasoning_effort",
+	"service_tier",
+	"executor_type",
+	"result",
+	"endpoint",
+	"ttft_ms",
+	"latency_ms",
+	"speed_tps",
+	"input_tokens",
+	"output_tokens",
+	"reasoning_tokens",
+	"cached_tokens",
+	"cache_read_tokens",
+	"cache_creation_tokens",
+	"cache_rate",
+	"total_tokens",
+	"cost_usd",
+}
+
+func writeUsageEventsJSONExport(c *gin.Context, stream usageEventStreamFunc, resolver usageIdentityResolver, apiKeyInfos map[string]analysisAPIKeyInfo) error {
+	encoder := json.NewEncoder(c.Writer)
+	encoder.SetEscapeHTML(false)
+	started := false
+	begin := func() error {
+		if started {
+			return nil
+		}
+		c.Header("Content-Disposition", `attachment; filename="`+usageEventsExportFilename("json")+`"`)
+		c.Header("Content-Type", "application/json; charset=utf-8")
+		c.Status(http.StatusOK)
+		if _, err := c.Writer.Write([]byte(`{"events":[`)); err != nil {
+			return err
+		}
+		started = true
+		return nil
+	}
+	var count int64
+	if err := stream(func(row servicedto.UsageEventRecord) error {
+		if err := begin(); err != nil {
+			return err
+		}
+		if count > 0 {
+			if _, err := c.Writer.Write([]byte(",")); err != nil {
+				return err
+			}
+		}
+		if err := encoder.Encode(buildUsageEventExportPayload(row, resolver, apiKeyInfos)); err != nil {
+			return err
+		}
+		count++
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := begin(); err != nil {
+		return err
+	}
+	if _, err := c.Writer.Write([]byte(`],"total_count":` + strconv.FormatInt(count, 10) + `}`)); err != nil {
+		return err
+	}
+	c.Writer.Flush()
+	return nil
+}
+
+func writeUsageEventsCSVExport(c *gin.Context, stream usageEventStreamFunc, resolver usageIdentityResolver, apiKeyInfos map[string]analysisAPIKeyInfo) error {
+	var writer *csv.Writer
+	started := false
+	begin := func() error {
+		if started {
+			return nil
+		}
+		c.Header("Content-Disposition", `attachment; filename="`+usageEventsExportFilename("csv")+`"`)
+		c.Header("Content-Type", "text/csv; charset=utf-8")
+		c.Status(http.StatusOK)
+		writer = csv.NewWriter(c.Writer)
+		if err := writer.Write(usageEventsExportCSVHeader); err != nil {
+			return err
+		}
+		started = true
+		return nil
+	}
+	var count int64
+	if err := stream(func(row servicedto.UsageEventRecord) error {
+		if err := begin(); err != nil {
+			return err
+		}
+		if err := writer.Write(usageEventExportCSVRecord(buildUsageEventExportPayload(row, resolver, apiKeyInfos))); err != nil {
+			return err
+		}
+		count++
+		if count%100 == 0 {
+			writer.Flush()
+			if err := writer.Error(); err != nil {
+				return err
+			}
+			c.Writer.Flush()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := begin(); err != nil {
+		return err
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return err
+	}
+	c.Writer.Flush()
+	return nil
+}
+
+func writeUsageEventsExportError(c *gin.Context, err error) {
+	if err == nil {
+		return
+	}
+	if c.Writer.Written() {
+		_ = c.Error(err)
+		return
+	}
+	c.Writer.Header().Del("Content-Disposition")
+	writeInternalError(c, "export usage events failed", err)
+}
+
+func usageEventsExportFilename(format string) string {
+	timestamp := timeutil.NormalizeStorageTime(time.Now()).Format("20060102-150405")
+	return "usage-events-" + timestamp + "." + format
+}
+
+func usageEventExportCSVRecord(event usageEventExportPayload) []string {
+	return []string{
+		event.ID,
+		event.Timestamp,
+		event.APIKey,
+		event.CPAAPIKeyID,
+		event.Source,
+		event.SourceType,
+		event.AuthIndex,
+		strconv.FormatBool(event.IsIdentityDeleted),
+		event.Model,
+		event.ReasoningEffort,
+		event.ServiceTier,
+		event.ExecutorType,
+		event.Result,
+		event.Endpoint,
+		formatOptionalInt64(event.TTFTMS),
+		strconv.FormatInt(event.LatencyMS, 10),
+		formatOptionalFloat64(event.SpeedTPS),
+		strconv.FormatInt(event.InputTokens, 10),
+		strconv.FormatInt(event.OutputTokens, 10),
+		strconv.FormatInt(event.ReasoningTokens, 10),
+		strconv.FormatInt(event.CachedTokens, 10),
+		strconv.FormatInt(event.CacheReadTokens, 10),
+		strconv.FormatInt(event.CacheCreationTokens, 10),
+		formatOptionalFloat64(event.CacheRate),
+		strconv.FormatInt(event.TotalTokens, 10),
+		strconv.FormatFloat(event.CostUSD, 'f', -1, 64),
+	}
+}
+
+func formatOptionalInt64(value *int64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatInt(*value, 10)
+}
+
+func formatOptionalFloat64(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*value, 'f', -1, 64)
+}
+
 func usageEventAPIKeyLabel(apiGroupKey string, apiKeyInfos map[string]analysisAPIKeyInfo) string {
 	apiKey := strings.TrimSpace(apiGroupKey)
 	if apiKey == "" {
 		return ""
 	}
 	return analysisAPIKeyLabel(apiKey, apiKeyInfos)
+}
+
+func usageEventCPAAPIKeyID(apiGroupKey string, apiKeyInfos map[string]analysisAPIKeyInfo) string {
+	apiKey := strings.TrimSpace(apiGroupKey)
+	if apiKey == "" {
+		return ""
+	}
+	if info, ok := apiKeyInfos[apiKey]; ok {
+		return info.ID
+	}
+	return ""
 }
 
 func usageEventPublicSource(row servicedto.UsageEventRecord, identity resolvedUsageIdentity, matched bool) (string, bool) {

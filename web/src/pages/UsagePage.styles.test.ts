@@ -551,4 +551,34 @@ describe('UsagePage toolbar styles', () => {
     expect(priceSettingsSource).toContain('styles.usagePillAction')
     expect(priceSettingsSource).toContain('styles.usagePillActionDanger')
   })
+
+  it('keeps the Request Event export menu styled and hoverable like the credential inspection control', () => {
+    const exportMenuBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.requestEventsExportMenu {'),
+      usagePageStyles.indexOf('.requestEventsExportButton:global(.btn) {')
+    )
+    const exportButtonBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.requestEventsExportButton:global(.btn) {'),
+      usagePageStyles.indexOf('.requestEventsExportButtonInner {')
+    )
+    const exportDropdownBlock = usagePageStyles.slice(
+      usagePageStyles.indexOf('.requestEventsExportDropdown {'),
+      usagePageStyles.indexOf('.requestEventsToolbar {')
+    )
+
+    expect(requestEventsSource).toContain('styles.requestEventsExportButton')
+    expect(requestEventsSource).toContain('styles.requestEventsExportButtonInner')
+    expect(requestEventsSource).toContain('<IconDownload size={12} aria-hidden="true" />')
+    expect(exportMenuBlock).toMatch(/min-height:\s*42px;/)
+    expect(exportMenuBlock).toMatch(/padding:\s*4px;/)
+    expect(exportMenuBlock).toMatch(/align-items:\s*center;/)
+    expect(exportMenuBlock).not.toMatch(/padding-bottom:\s*6px;/)
+    expect(exportMenuBlock).not.toMatch(/margin-bottom:\s*-6px;/)
+    expect(exportMenuBlock).toContain('&::after')
+    expect(exportMenuBlock).toMatch(/border-radius:\s*999px;/)
+    expect(exportButtonBlock).toMatch(/border:\s*0;/)
+    expect(exportButtonBlock).toMatch(/background:\s*var\(--bg-primary\);/)
+    expect(exportButtonBlock).toMatch(/box-shadow:\s*0 8px 20px rgba\(0,\s*0,\s*0,\s*0\.1\);/)
+    expect(exportDropdownBlock).toMatch(/top:\s*calc\(100% \+ 6px\);/)
+  })
 })

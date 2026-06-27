@@ -54,6 +54,10 @@ func (s *usageAnalysisStub) ListUsageEvents(context.Context, servicedto.UsageFil
 	return nil, nil
 }
 
+func (s *usageAnalysisStub) StreamUsageEvents(context.Context, servicedto.UsageFilter, func(servicedto.UsageEventRecord) error) error {
+	return nil
+}
+
 func (s *usageAnalysisStub) ListUsageEventFilterOptions(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	return nil, nil
 }

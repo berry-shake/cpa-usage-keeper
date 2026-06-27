@@ -33,14 +33,17 @@ export interface StatusResponse {
   running: boolean
   sync_running: boolean
   timezone: string
-  version?: string
-  updateCheckEnabled?: boolean
   quotaAutoRefreshEnabled?: boolean
   cpa_public_url?: string
   last_run_at?: string
   last_error?: string
   last_warning?: string
   last_status?: string
+}
+
+export interface VersionResponse {
+  version: string
+  updateCheckEnabled: boolean
 }
 
 export interface UpdateCheckResponse {

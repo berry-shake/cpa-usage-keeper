@@ -141,6 +141,39 @@ func TestListUsageEventsWithFilterAppliesModelAuthIndexAndResultFilters(t *testi
 	}
 }
 
+func TestExportUsageEventsWithFilterAppliesFiltersWithoutPagination(t *testing.T) {
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-export.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
+	events := []entities.UsageEvent{
+		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", ExecutorType: "responses", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "auth-a", Failed: false, TotalTokens: 10},
+		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", ExecutorType: "responses", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "auth-a", Failed: false, TotalTokens: 20},
+		{EventKey: "event-3", APIGroupKey: "provider-a", Model: "claude-sonnet", ExecutorType: "chat_completions", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "auth-b", Failed: false, TotalTokens: 30},
+		{EventKey: "event-4", APIGroupKey: "provider-a", Model: "claude-sonnet", ExecutorType: "responses", Timestamp: time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC), Source: "source-a", AuthIndex: "auth-a", Failed: true, TotalTokens: 40},
+	}
+	if _, _, err := InsertUsageEvents(db, events); err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+
+	rows, err := ExportUsageEventsWithFilter(db, dto.UsageQueryFilter{Model: "claude-sonnet", AuthIndex: "auth-a", Result: "success", Page: 1, PageSize: 1, Limit: 1})
+	if err != nil {
+		t.Fatalf("ExportUsageEventsWithFilter returned error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected export to ignore pagination and return two filtered rows, got %+v", rows)
+	}
+	if rows[0].TotalTokens != 20 || rows[1].TotalTokens != 10 {
+		t.Fatalf("expected newest filtered rows first, got %+v", rows)
+	}
+	for _, row := range rows {
+		if row.AuthIndex != "auth-a" || row.ExecutorType != "responses" || row.Failed {
+			t.Fatalf("unexpected exported row: %+v", row)
+		}
+	}
+}
+
 func TestListUsageEventsWithFilterAddsBackendCost(t *testing.T) {
 	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-events-cost.db")})
 	if err != nil {
@@ -252,6 +285,7 @@ func TestListUsageEventFilterOptionsWithFilterReturnsStableModels(t *testing.T) 
 		{EventKey: "event-1", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC), Source: "source-a", Failed: false, TotalTokens: 10},
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), Source: "source-b", Failed: true, TotalTokens: 20},
 		{EventKey: "event-3", APIGroupKey: "provider-b", Model: "gpt-5", Timestamp: time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC), Source: "source-a", Failed: false, TotalTokens: 30},
+		{EventKey: "event-blank-model", APIGroupKey: "provider-c", Model: "   ", Timestamp: time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC), Source: "source-c", Failed: false, TotalTokens: 40},
 	}
 	if _, _, err := InsertUsageEvents(db, events); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
