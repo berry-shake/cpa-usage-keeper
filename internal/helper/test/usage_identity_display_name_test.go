@@ -1,9 +1,10 @@
-package helper
+package test
 
 import (
 	"testing"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 )
 
 func TestDisplayNameFormatsProviderPrefixWithoutName(t *testing.T) {
@@ -14,8 +15,33 @@ func TestDisplayNameFormatsProviderPrefixWithoutName(t *testing.T) {
 		Identity: "provider-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(identity); got != "Team Prefix" {
+	if got := helper.UsageIdentityDisplayName(identity); got != "Team Prefix" {
 		t.Fatalf("expected provider displayName to use prefix without name, got %q", got)
+	}
+}
+
+func TestDisplayNamePrefersUsageIdentityAlias(t *testing.T) {
+	alias := "  Friendly Account  "
+	authFile := entities.UsageIdentity{
+		Alias:    &alias,
+		Name:     "Upstream Auth Name",
+		AuthType: entities.UsageIdentityAuthTypeAuthFile,
+		Identity: "auth-1",
+	}
+	provider := entities.UsageIdentity{
+		Alias:    &alias,
+		Name:     "Provider Name",
+		Prefix:   "Team Prefix",
+		BaseURL:  "https://api.openai.com/v1",
+		AuthType: entities.UsageIdentityAuthTypeAIProvider,
+		Identity: "provider-auth-index",
+	}
+
+	if got := helper.UsageIdentityDisplayName(authFile); got != "Friendly Account" {
+		t.Fatalf("expected auth file displayName to prefer trimmed alias, got %q", got)
+	}
+	if got := helper.UsageIdentityDisplayName(provider); got != "Friendly Account" {
+		t.Fatalf("expected AI provider displayName to prefer trimmed alias, got %q", got)
 	}
 }
 
@@ -34,10 +60,10 @@ func TestDisplayNameFormatsProviderPrefixAndBaseURL(t *testing.T) {
 		Identity: "codex-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(withPrefix); got != "Team Prefix @ api.openai.com" {
+	if got := helper.UsageIdentityDisplayName(withPrefix); got != "Team Prefix @ api.openai.com" {
 		t.Fatalf("expected provider displayName to use prefix and base URL, got %q", got)
 	}
-	if got := UsageIdentityDisplayName(providerOnly); got != "chatgpt.com/backend-api/codex" {
+	if got := helper.UsageIdentityDisplayName(providerOnly); got != "chatgpt.com/backend-api/codex" {
 		t.Fatalf("expected provider displayName to use base URL without name, got %q", got)
 	}
 }
@@ -53,7 +79,7 @@ func TestDisplayNameKeepsOpenAICompatibilityName(t *testing.T) {
 		Identity: "openrouter-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(identity); got != "OpenRouter" {
+	if got := helper.UsageIdentityDisplayName(identity); got != "OpenRouter" {
 		t.Fatalf("expected openai compatibility displayName to keep name without qualifiers, got %q", got)
 	}
 }
@@ -68,7 +94,7 @@ func TestDisplayNameFallsBackWhenOpenAICompatibilityNameIsMissing(t *testing.T) 
 		Identity: "openrouter-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(identity); got != "openrouter @ openrouter.ai/api" {
+	if got := helper.UsageIdentityDisplayName(identity); got != "openrouter @ openrouter.ai/api" {
 		t.Fatalf("expected unnamed openai compatibility displayName to fall back to provider qualifier rules, got %q", got)
 	}
 }
@@ -79,7 +105,7 @@ func TestDisplayNameUsesProviderWhenAuthFileNameIsMissing(t *testing.T) {
 		Provider: "Claude",
 	}
 
-	if got := UsageIdentityDisplayName(identity); got != "Claude" {
+	if got := helper.UsageIdentityDisplayName(identity); got != "Claude" {
 		t.Fatalf("expected auth file displayName to fall back to provider, got %q", got)
 	}
 }
@@ -101,13 +127,13 @@ func TestDisplayNameUsesNameWhenProviderPrefixAndBaseURLAreMissing(t *testing.T)
 		Identity: "provider-auth-index",
 	}
 
-	if got := UsageIdentityDisplayName(prefixOnly); got != "Team Prefix" {
+	if got := helper.UsageIdentityDisplayName(prefixOnly); got != "Team Prefix" {
 		t.Fatalf("expected prefix-only provider displayName, got %q", got)
 	}
-	if got := UsageIdentityDisplayName(nameOnly); got != "Provider Name" {
+	if got := helper.UsageIdentityDisplayName(nameOnly); got != "Provider Name" {
 		t.Fatalf("expected name-only provider displayName, got %q", got)
 	}
-	if got := UsageIdentityDisplayName(providerOnly); got != "" {
+	if got := helper.UsageIdentityDisplayName(providerOnly); got != "" {
 		t.Fatalf("expected provider without name, prefix, or base URL to be blank, got %q", got)
 	}
 }

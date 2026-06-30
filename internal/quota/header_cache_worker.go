@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/timeutil"
 
@@ -448,7 +449,7 @@ func (s *Service) mergeUsageHeaderQuotaCache(authIndex string, response CheckRes
 	// 写入一条 completed refresh task，让前端 quota cache API 可以直接读取。
 	s.refreshTasks[authIndex] = &RefreshTaskRecord{
 		AuthIndex:   authIndex,
-		Name:        identity.Name,
+		Name:        helper.UsageIdentityDisplayName(identity),
 		Type:        identity.Type,
 		FileName:    identity.FileName,
 		Status:      RefreshTaskStatusCompleted,

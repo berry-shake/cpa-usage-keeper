@@ -7,7 +7,7 @@ import {
   paginateCredentials,
   selectQuotaEligibleAuthIndexes,
   splitCredentialIdentities,
-} from './credentialViewModels'
+} from '../credentialViewModels'
 
 
 function quotaResponse(authIndex: string, quota: UsageQuotaRow[], rateLimitResetCreditsAvailableCount?: number | null): UsageQuotaCheckResponse {
@@ -185,6 +185,16 @@ describe('credentialViewModels', () => {
       barPercent: 17,
       status: 'danger',
     })
+  })
+
+  it('uses backend displayName instead of raw usage identity name for credential titles', () => {
+    const rows = buildAuthFileCredentialRows([
+      identity({ identity: 'auth-1', name: 'Raw Upstream Name', displayName: 'Helper Display Name' }),
+      identity({ identity: 'auth-2', name: 'Raw Only Name' }),
+    ])
+
+    expect(rows[0].displayName).toBe('Helper Display Name')
+    expect(rows[1].displayName).toBe('auth-2')
   })
 
   it('formats zero quota window cost with two decimals', () => {

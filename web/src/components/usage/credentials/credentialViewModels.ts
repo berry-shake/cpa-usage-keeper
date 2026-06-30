@@ -428,7 +428,7 @@ function isDisplayableQuota(quota: DisplayQuota | undefined): quota is DisplayQu
 }
 
 function credentialDisplayName(identity: UsageIdentity): string {
-  return firstNonEmpty(identity.displayName, identity.name, identity.identity) ?? '-'
+  return firstNonEmpty(identity.displayName, identity.identity) ?? '-'
 }
 
 function credentialProviderLabel(identity: UsageIdentity): string {

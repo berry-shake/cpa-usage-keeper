@@ -43,6 +43,7 @@ import {
 } from '@/utils/usage';
 import type { Theme } from '@/types';
 import { BrandLink } from '@/components/BrandLink';
+import { isCPAMCEmbed } from '@/embed/cpamcEmbed';
 import styles from './UsagePage.module.scss';
 
 const TIME_RANGE_STORAGE_KEY = 'cli-proxy-usage-time-range-v1';
@@ -804,6 +805,7 @@ export const triggerBrowserFileDownload = (blob: Blob, filename: string) => {
 export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 768px)');
+  const isEmbeddedInCPAMC = isCPAMCEmbed();
   const theme = useThemeStore((state) => state.theme);
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const setTheme = useThemeStore((state) => state.setTheme);
@@ -1786,7 +1788,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const dailyAveragePanelUsage = getDailyAveragePanelUsage(currentOverviewUsage, usage, reserveDailyAveragePanel, loading);
 
   return (
-    <div className={styles.pageShell}>
+    <div className={styles.pageShell} data-keeper-page="usage">
       <div className={styles.pageFrame}>
         <header className={styles.topBar}>
           <div className={styles.brandBlock}>
@@ -1859,14 +1861,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
               </div>
             )}
 
-            {(cpaManagementURL || lastSyncAt) && (
+            {((!isEmbeddedInCPAMC && cpaManagementURL) || lastSyncAt) && (
               <div className={styles.toolbarMetaRow}>
                 {lastSyncAt && (
                   <span className={styles.lastRefreshed}>
                     {t('usage_stats.last_updated')}: {lastSyncAt.toLocaleTimeString()}
                   </span>
                 )}
-                {cpaManagementURL && (
+                {(!isEmbeddedInCPAMC && cpaManagementURL) && (
                   <div className={styles.toolbarMetaRight}>
                     <a
                       className={styles.backToCpaLink}
@@ -2172,6 +2174,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       onRefreshQuota={credentialsData.refreshQuotaForCurrentAuthFilePage}
                       onRefreshQuotaForAuthIndex={credentialsData.refreshQuotaForAuthIndex}
                       onResetQuotaForAuthIndex={credentialsData.resetQuotaForAuthIndex}
+                      aliasSavingId={credentialsData.aliasSavingId}
+                      onSaveAlias={credentialsData.saveUsageIdentityAlias}
                       onRefreshInspectionStatus={credentialsData.refreshQuotaInspectionStatus}
                       onStartInspection={credentialsData.startQuotaInspection}
                       onAfterInvalidAccountAction={credentialsData.refresh}
@@ -2186,6 +2190,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       pageSize={credentialsData.aiProviderPageSize}
                       sort={credentialsData.aiProviderSort}
                       loading={credentialsData.loading}
+                      aliasSavingId={credentialsData.aliasSavingId}
+                      onSaveAlias={credentialsData.saveUsageIdentityAlias}
                       onPageChange={credentialsData.setAiProviderPage}
                       onPageSizeChange={credentialsData.setAiProviderPageSize}
                       onSortChange={credentialsData.setAiProviderSort}

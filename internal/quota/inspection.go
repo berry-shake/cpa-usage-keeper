@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/helper"
 	"cpa-usage-keeper/internal/timeutil"
 )
 
@@ -267,7 +268,7 @@ func inspectionResultForTask(identity entities.UsageIdentity, task *RefreshTaskR
 	// 展示字段优先使用入队时的身份快照，避免刷新过程中用户改名导致最近结果跳动。
 	result := InspectionResult{
 		AuthIndex:      identity.Identity,
-		Name:           firstNonEmpty(task.Name, identity.Name),
+		Name:           firstNonEmpty(strings.TrimSpace(task.Name), helper.UsageIdentityDisplayName(identity)),
 		Type:           firstNonEmpty(task.Type, identity.Type),
 		FileName:       task.FileName,
 		Error:          task.Error,

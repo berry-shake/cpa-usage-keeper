@@ -64,6 +64,34 @@ func TestApplyUsageHeaderSnapshotWritesCompletedCacheWithWindowUsageStats(t *tes
 	}
 }
 
+func TestApplyUsageHeaderSnapshotStoresUsageIdentityDisplayName(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Name: "   ", Provider: "Codex Team", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	defer service.StopRefreshTasks()
+
+	applied := applyUsageHeaderSnapshot(service, context.Background(), UsageHeaderSnapshot{
+		AuthType:   "oauth",
+		AuthIndex:  "codex-auth",
+		Provider:   "codex",
+		ObservedAt: time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local),
+		Headers: http.Header{
+			"X-Codex-Plan-Type":              []string{"pro"},
+			"X-Codex-Primary-Used-Percent":   []string{"4"},
+			"X-Codex-Primary-Window-Minutes": []string{"300"},
+			"X-Codex-Primary-Reset-At":       []string{strconv.FormatInt(time.Date(2026, 6, 22, 15, 0, 0, 0, time.Local).Unix(), 10)},
+		},
+	})
+	if !applied {
+		t.Fatal("expected header snapshot to apply")
+	}
+
+	task := refreshTaskRecord(service, "codex-auth")
+	if task == nil || task.Name != "Codex Team" {
+		t.Fatalf("expected header cache to store display name, got %+v", task)
+	}
+}
+
 func TestApplyUsageHeaderSnapshotUsesObservedAtAsWindowUsageStatsEnd(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})

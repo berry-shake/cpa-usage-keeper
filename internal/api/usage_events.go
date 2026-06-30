@@ -610,9 +610,8 @@ func usageSourceFilterOptionFromIdentity(identity entities.UsageIdentity) (usage
 		if value == "" {
 			return usageSourceFilterOption{}, false
 		}
-		label := strings.TrimSpace(identity.Name)
 		displayName := helper.UsageIdentityDisplayName(identity)
-		return usageSourceFilterOption{Value: value, Label: label, DisplayName: displayName}, true
+		return usageSourceFilterOption{Value: value, Label: displayName, DisplayName: displayName}, true
 	default:
 		return usageSourceFilterOption{}, false
 	}

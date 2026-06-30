@@ -382,7 +382,7 @@ export function KeyOverviewPage({ apiKey, onAuthRequired }: KeyOverviewPageProps
     : '';
 
   return (
-    <div className={styles.pageShell}>
+    <div className={styles.pageShell} data-keeper-page="key-overview">
       <div className={styles.pageFrame}>
         <header className={styles.topBar}>
           <div className={styles.brandBlock}>

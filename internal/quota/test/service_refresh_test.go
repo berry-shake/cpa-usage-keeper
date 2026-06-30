@@ -322,6 +322,46 @@ func TestRefreshCreatesTaskPerAuthIndexAndCachesCompletedQuota(t *testing.T) {
 	}
 }
 
+func TestRefreshTaskStoresUsageIdentityDisplayName(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Name: "   ", Provider: "Claude Workspace", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
+
+	response, err := service.Refresh(context.Background(), RefreshRequest{AuthIndexes: []string{"auth-1"}, Source: RefreshSourceManual})
+	if err != nil {
+		t.Fatalf("Refresh returned error: %v", err)
+	}
+	waitForRefreshTask(t, service, response.Tasks[0].AuthIndex, RefreshTaskStatusCompleted)
+
+	task := refreshTaskRecord(service, "auth-1")
+	if task == nil || task.Name != "Claude Workspace" {
+		t.Fatalf("expected refresh task to cache display name, got %+v", task)
+	}
+}
+
+func TestUpdateUsageIdentityDisplayNameSnapshotUpdatesExistingRefreshTask(t *testing.T) {
+	service := NewServiceWithRegistry(openQuotaTestDatabase(t), NewProviderRegistry(nil))
+	defer service.StopRefreshTasks()
+	setRefreshTasks(service, map[string]*RefreshTaskRecord{
+		"auth-1": {AuthIndex: "auth-1", Name: "Original Name", Status: RefreshTaskStatusCompleted},
+	})
+	alias := "  Friendly Alias  "
+
+	service.UpdateUsageIdentityDisplayNameSnapshot(entities.UsageIdentity{
+		Identity: "auth-1",
+		Alias:    &alias,
+		Name:     "Upstream Name",
+		Provider: "Claude",
+		AuthType: entities.UsageIdentityAuthTypeAuthFile,
+	})
+
+	task := refreshTaskRecord(service, "auth-1")
+	if task == nil || task.Name != "Friendly Alias" {
+		t.Fatalf("expected existing refresh task name to follow alias display name, got %+v", task)
+	}
+}
+
 func TestRefreshOverwritesPreviousCompletedTaskForSameAuthIndex(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
@@ -1135,6 +1175,27 @@ func TestInspectionStatusUsesRefreshTaskIdentitySnapshot(t *testing.T) {
 	}
 	if status.Results[0].Name != "Original Account" || status.Results[0].Type != "claude" || status.Results[0].FileName == nil || *status.Results[0].FileName != "original.json" {
 		t.Fatalf("expected task identity snapshot to be reused, got %+v", status.Results[0])
+	}
+}
+
+func TestInspectionStatusUsesUsageIdentityDisplayNameSnapshot(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Name: "   ", Provider: "Claude Workspace", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
+	setRefreshCooldown(service, func(time.Duration) {})
+
+	if _, err := service.StartInspection(context.Background()); err != nil {
+		t.Fatalf("StartInspection returned error: %v", err)
+	}
+	waitForRefreshTask(t, service, "auth-1", RefreshTaskStatusCompleted)
+	status, err := service.GetInspectionStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetInspectionStatus returned error: %v", err)
+	}
+
+	if len(status.Results) != 1 || status.Results[0].Name != "Claude Workspace" {
+		t.Fatalf("expected inspection result to use display name snapshot, got %+v", status.Results)
 	}
 }
 
