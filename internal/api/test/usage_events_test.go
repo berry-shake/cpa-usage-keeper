@@ -104,8 +104,9 @@ func (s *authCPAAPIKeyStub) UpdateCPAAPIKeyAlias(context.Context, int64, string)
 }
 
 type usageIdentitiesStub struct {
-	items []entities.UsageIdentity
-	err   error
+	items       []entities.UsageIdentity
+	activeItems []entities.UsageIdentity
+	err         error
 }
 
 func (s usageIdentitiesStub) ListUsageIdentities(context.Context) ([]entities.UsageIdentity, error) {
@@ -113,11 +114,18 @@ func (s usageIdentitiesStub) ListUsageIdentities(context.Context) ([]entities.Us
 }
 
 func (s usageIdentitiesStub) ListActiveUsageIdentities(context.Context) ([]entities.UsageIdentity, error) {
+	if s.activeItems != nil {
+		return s.activeItems, s.err
+	}
 	return s.items, s.err
 }
 
 func (s usageIdentitiesStub) ListActiveUsageIdentitiesPage(context.Context, service.ListUsageIdentitiesRequest) (service.ListUsageIdentitiesResponse, error) {
-	return service.ListUsageIdentitiesResponse{Items: s.items, Total: int64(len(s.items))}, s.err
+	active := s.activeItems
+	if active == nil {
+		active = s.items
+	}
+	return service.ListUsageIdentitiesResponse{Items: active, Total: int64(len(active))}, s.err
 }
 
 func (s usageIdentitiesStub) UpdateUsageIdentityAlias(context.Context, int64, string) (entities.UsageIdentity, error) {
