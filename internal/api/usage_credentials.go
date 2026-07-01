@@ -16,34 +16,38 @@ type usageCredentialsResponse struct {
 }
 
 type usageCredentialPayload struct {
-	Source          string                        `json:"source"`
-	SourceType      string                        `json:"source_type,omitempty"`
-	SourceKey       string                        `json:"source_key,omitempty"`
-	SuccessCount    int64                         `json:"success_count"`
-	FailureCount    int64                         `json:"failure_count"`
-	TotalCount      int64                         `json:"total_count"`
-	InputTokens     int64                         `json:"input_tokens"`
-	OutputTokens    int64                         `json:"output_tokens"`
-	ReasoningTokens int64                         `json:"reasoning_tokens"`
-	CachedTokens    int64                         `json:"cached_tokens"`
-	TotalTokens     int64                         `json:"total_tokens"`
-	TotalCost       float64                       `json:"total_cost"`
-	CostAvailable   bool                          `json:"cost_available"`
-	Models          []usageCredentialModelPayload `json:"models"`
+	Source              string                        `json:"source"`
+	SourceType          string                        `json:"source_type,omitempty"`
+	SourceKey           string                        `json:"source_key,omitempty"`
+	SuccessCount        int64                         `json:"success_count"`
+	FailureCount        int64                         `json:"failure_count"`
+	TotalCount          int64                         `json:"total_count"`
+	InputTokens         int64                         `json:"input_tokens"`
+	OutputTokens        int64                         `json:"output_tokens"`
+	ReasoningTokens     int64                         `json:"reasoning_tokens"`
+	CachedTokens        int64                         `json:"cached_tokens"`
+	CacheReadTokens     int64                         `json:"cache_read_tokens"`
+	CacheCreationTokens int64                         `json:"cache_creation_tokens"`
+	TotalTokens         int64                         `json:"total_tokens"`
+	TotalCost           float64                       `json:"total_cost"`
+	CostAvailable       bool                          `json:"cost_available"`
+	Models              []usageCredentialModelPayload `json:"models"`
 }
 
 type usageCredentialModelPayload struct {
-	Model           string  `json:"model"`
-	SuccessCount    int64   `json:"success_count"`
-	FailureCount    int64   `json:"failure_count"`
-	TotalCount      int64   `json:"total_count"`
-	InputTokens     int64   `json:"input_tokens"`
-	OutputTokens    int64   `json:"output_tokens"`
-	ReasoningTokens int64   `json:"reasoning_tokens"`
-	CachedTokens    int64   `json:"cached_tokens"`
-	TotalTokens     int64   `json:"total_tokens"`
-	TotalCost       float64 `json:"total_cost"`
-	CostAvailable   bool    `json:"cost_available"`
+	Model               string  `json:"model"`
+	SuccessCount        int64   `json:"success_count"`
+	FailureCount        int64   `json:"failure_count"`
+	TotalCount          int64   `json:"total_count"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	ReasoningTokens     int64   `json:"reasoning_tokens"`
+	CachedTokens        int64   `json:"cached_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	TotalCost           float64 `json:"total_cost"`
+	CostAvailable       bool    `json:"cost_available"`
 }
 
 type usageCredentialBucket struct {
@@ -158,6 +162,8 @@ func applyUsageCredentialPayloadRow(payload *usageCredentialPayload, row service
 	payload.OutputTokens += row.OutputTokens
 	payload.ReasoningTokens += row.ReasoningTokens
 	payload.CachedTokens += row.CachedTokens
+	payload.CacheReadTokens += row.CacheReadTokens
+	payload.CacheCreationTokens += row.CacheCreationTokens
 	payload.TotalTokens += row.TotalTokens
 	payload.TotalCost += row.TotalCost
 	if !row.CostAvailable {
@@ -176,6 +182,8 @@ func applyUsageCredentialModelPayloadRow(model *usageCredentialModelPayload, row
 	model.OutputTokens += row.OutputTokens
 	model.ReasoningTokens += row.ReasoningTokens
 	model.CachedTokens += row.CachedTokens
+	model.CacheReadTokens += row.CacheReadTokens
+	model.CacheCreationTokens += row.CacheCreationTokens
 	model.TotalTokens += row.TotalTokens
 	model.TotalCost += row.TotalCost
 	if !row.CostAvailable {

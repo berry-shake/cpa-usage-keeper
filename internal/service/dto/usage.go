@@ -75,18 +75,20 @@ type UsageEventRecord struct {
 
 // UsageCredentialStat 是按凭证和模型聚合的服务层 usage 统计结果。
 type UsageCredentialStat struct {
-	Source          string
-	AuthIndex       string
-	Model           string
-	Failed          bool
-	RequestCount    int64
-	InputTokens     int64
-	OutputTokens    int64
-	ReasoningTokens int64
-	CachedTokens    int64
-	TotalTokens     int64
-	TotalCost       float64
-	CostAvailable   bool
+	Source              string
+	AuthIndex           string
+	Model               string
+	Failed              bool
+	RequestCount        int64
+	InputTokens         int64
+	OutputTokens        int64
+	ReasoningTokens     int64
+	CachedTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	TotalTokens         int64
+	TotalCost           float64
+	CostAvailable       bool
 }
 
 // UsageOverviewSummary 是 overview summary 的服务层结果。

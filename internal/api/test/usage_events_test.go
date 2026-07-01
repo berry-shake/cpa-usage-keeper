@@ -1148,31 +1148,35 @@ func TestUsageCredentialsSkipsRowsWithoutActiveIdentity(t *testing.T) {
 
 func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	provider := &usageEventsStub{credentialStats: []servicedto.UsageCredentialStat{{
-		Source:          "sk-provider-key",
-		AuthIndex:       "2",
-		Model:           "claude-sonnet",
-		Failed:          false,
-		RequestCount:    3,
-		InputTokens:     300,
-		OutputTokens:    120,
-		ReasoningTokens: 15,
-		CachedTokens:    30,
-		TotalTokens:     465,
-		TotalCost:       1.5,
-		CostAvailable:   true,
+		Source:              "sk-provider-key",
+		AuthIndex:           "2",
+		Model:               "claude-sonnet",
+		Failed:              false,
+		RequestCount:        3,
+		InputTokens:         300,
+		OutputTokens:        120,
+		ReasoningTokens:     15,
+		CachedTokens:        30,
+		CacheReadTokens:     20,
+		CacheCreationTokens: 8,
+		TotalTokens:         465,
+		TotalCost:           1.5,
+		CostAvailable:       true,
 	}, {
-		Source:          "sk-provider-key",
-		AuthIndex:       "2",
-		Model:           "claude-sonnet",
-		Failed:          true,
-		RequestCount:    1,
-		InputTokens:     100,
-		OutputTokens:    40,
-		ReasoningTokens: 5,
-		CachedTokens:    10,
-		TotalTokens:     155,
-		TotalCost:       2.25,
-		CostAvailable:   true,
+		Source:              "sk-provider-key",
+		AuthIndex:           "2",
+		Model:               "claude-sonnet",
+		Failed:              true,
+		RequestCount:        1,
+		InputTokens:         100,
+		OutputTokens:        40,
+		ReasoningTokens:     5,
+		CachedTokens:        10,
+		CacheReadTokens:     6,
+		CacheCreationTokens: 2,
+		TotalTokens:         155,
+		TotalCost:           2.25,
+		CostAvailable:       true,
 	}}}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{UsageIdentity: usageIdentitiesStub{items: []entities.UsageIdentity{{ID: 1, Name: "sk-provider-prefix", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "sk-provider-key", Type: "openai", Provider: "OpenAI Mirror"}}}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?range=24h", nil)
@@ -1204,6 +1208,9 @@ func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	}
 	if !contains(body, `"input_tokens":400`) || !contains(body, `"output_tokens":160`) || !contains(body, `"cached_tokens":40`) || !contains(body, `"total_tokens":620`) {
 		t.Fatalf("expected aggregated token counts in response body: %s", body)
+	}
+	if !contains(body, `"cache_read_tokens":26`) || !contains(body, `"cache_creation_tokens":10`) {
+		t.Fatalf("expected aggregated cache detail tokens in response body: %s", body)
 	}
 	if !contains(body, `"total_cost":3.75`) || !contains(body, `"cost_available":true`) {
 		t.Fatalf("expected aggregated cost in response body: %s", body)

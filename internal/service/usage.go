@@ -529,18 +529,20 @@ func (s *usageService) ListUsageCredentialStats(_ context.Context, filter servic
 	result := make([]servicedto.UsageCredentialStat, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, servicedto.UsageCredentialStat{
-			Source:          row.Source,
-			AuthIndex:       row.AuthIndex,
-			Model:           row.Model,
-			Failed:          row.Failed,
-			RequestCount:    row.RequestCount,
-			InputTokens:     row.InputTokens,
-			OutputTokens:    row.OutputTokens,
-			ReasoningTokens: row.ReasoningTokens,
-			CachedTokens:    row.CachedTokens,
-			TotalTokens:     row.TotalTokens,
-			TotalCost:       row.TotalCost,
-			CostAvailable:   row.CostAvailable,
+			Source:              row.Source,
+			AuthIndex:           row.AuthIndex,
+			Model:               row.Model,
+			Failed:              row.Failed,
+			RequestCount:        row.RequestCount,
+			InputTokens:         row.InputTokens,
+			OutputTokens:        row.OutputTokens,
+			ReasoningTokens:     row.ReasoningTokens,
+			CachedTokens:        row.CachedTokens,
+			CacheReadTokens:     row.CacheReadTokens,
+			CacheCreationTokens: row.CacheCreationTokens,
+			TotalTokens:         row.TotalTokens,
+			TotalCost:           row.TotalCost,
+			CostAvailable:       row.CostAvailable,
 		})
 	}
 	return result, nil
