@@ -1,9 +1,10 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconChevronDown } from '@/components/ui/icons';
-import { formatCompactNumber, formatUsd } from '@/utils/usage';
+import { calculateCacheRate, formatCompactNumber, formatUsd } from '@/utils/usage';
 import type { UsageCredential } from '@/lib/types';
 import {
+  cacheRateTone,
   CredentialSectionShell,
   formatCredentialNumber,
   formatCredentialPercent,
@@ -25,6 +26,9 @@ export interface CredentialRow {
   total: number;
   successRate: number;
   tokens: number;
+  inputTokens: number;
+  cachedTokens: number;
+  cacheRate: number | null;
   cost: number;
   costAvailable: boolean;
   models: CredentialModelRow[];
@@ -37,6 +41,9 @@ export interface CredentialModelRow {
   total: number;
   successRate: number;
   tokens: number;
+  inputTokens: number;
+  cachedTokens: number;
+  cacheRate: number | null;
   cost: number;
   costAvailable: boolean;
 }
@@ -47,6 +54,8 @@ export function buildCredentialModelRows(models: UsageCredential['models'] = [])
       const success = Number(model.success_count) || 0;
       const failure = Number(model.failure_count) || 0;
       const total = Number(model.total_count) || success + failure;
+      const inputTokens = Number(model.input_tokens) || 0;
+      const cachedTokens = Number(model.cached_tokens) || 0;
       return {
         model: String(model.model ?? '').trim() || 'unknown',
         success,
@@ -54,6 +63,9 @@ export function buildCredentialModelRows(models: UsageCredential['models'] = [])
         total,
         successRate: total > 0 ? (success / total) * 100 : 100,
         tokens: Number(model.total_tokens) || 0,
+        inputTokens,
+        cachedTokens,
+        cacheRate: calculateCacheRate({ inputTokens, cachedTokens }),
         cost: Number(model.total_cost) || 0,
         costAvailable: model.cost_available === true,
       };
@@ -75,6 +87,8 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
       const total = Number(credential.total_count) || success + failure;
       const costAvailable = credential.cost_available === true;
       const cost = Number(credential.total_cost) || 0;
+      const inputTokens = Number(credential.input_tokens) || 0;
+      const cachedTokens = Number(credential.cached_tokens) || 0;
       return {
         key,
         displayName,
@@ -84,6 +98,9 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
         total,
         successRate: total > 0 ? (success / total) * 100 : 100,
         tokens: Number(credential.total_tokens) || 0,
+        inputTokens,
+        cachedTokens,
+        cacheRate: calculateCacheRate({ inputTokens, cachedTokens }),
         cost,
         costAvailable,
         models: buildCredentialModelRows(credential.models),
@@ -118,6 +135,20 @@ function MetricPill({ label, value, valueClassName }: { label: string; value: Re
 
 function successRateValueClass(rate: number): string {
   const tone = successRateTone(rate);
+  switch (tone) {
+    case 'success':
+      return styles.metricValueSuccess;
+    case 'warning':
+      return styles.metricValueWarning;
+    case 'danger':
+      return styles.metricValueDanger;
+    default:
+      return '';
+  }
+}
+
+function cacheRateValueClass(rate: number | null): string {
+  const tone = cacheRateTone(rate);
   switch (tone) {
     case 'success':
       return styles.metricValueSuccess;
@@ -206,6 +237,11 @@ export function CredentialStatsCard({ credentials, loading }: CredentialStatsCar
                   label={t('usage_stats.tokens_count')}
                   value={formatCompactNumber(row.tokens)}
                 />
+                <MetricPill
+                  label={t('usage_stats.cache_rate')}
+                  value={formatCredentialPercent(row.cacheRate)}
+                  valueClassName={cacheRateValueClass(row.cacheRate)}
+                />
                 {showCost && (
                   <MetricPill label={t('usage_stats.total_cost')} value={formatCredentialCost(row)} />
                 )}
@@ -235,6 +271,12 @@ export function CredentialStatsCard({ credentials, loading }: CredentialStatsCar
                       <span className={styles.modelMetric}>
                         <span className={styles.modelMetricLabel}>{t('usage_stats.tokens_count')}</span>
                         <span className={styles.modelMetricValue}>{formatCompactNumber(model.tokens)}</span>
+                      </span>
+                      <span className={styles.modelMetric}>
+                        <span className={styles.modelMetricLabel}>{t('usage_stats.cache_rate')}</span>
+                        <span className={`${styles.modelMetricValue} ${cacheRateValueClass(model.cacheRate)}`.trim()}>
+                          {formatCredentialPercent(model.cacheRate)}
+                        </span>
                       </span>
                       {showCost && (
                         <span className={styles.modelMetric}>
