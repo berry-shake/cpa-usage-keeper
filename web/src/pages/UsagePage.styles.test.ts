@@ -136,7 +136,7 @@ describe('UsagePage toolbar styles', () => {
   })
 
   it('keeps Sign out as the rightmost header action after Check Updates', () => {
-    expect(usagePageSource).toContain("import { ApiError, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias } from '@/lib/api';")
+    expect(usagePageSource).toContain("import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';")
     expect(usagePageSource).toContain('logout')
     expect(usagePageSource).toContain('fetchUpdateCheck')
     expect(usagePageSource.indexOf("t('usage_stats.check_updates')")).toBeLessThan(usagePageSource.indexOf("t('common.logout')"))

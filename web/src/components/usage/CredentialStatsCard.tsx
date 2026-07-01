@@ -150,7 +150,6 @@ export function CredentialStatsCard({ credentials, loading }: CredentialStatsCar
 
   return (
     <CredentialSectionShell
-      eyebrow={t('usage_stats.credential_stats_eyebrow')}
       title={t('usage_stats.credential_stats_title')}
       subtitle={t('usage_stats.credential_stats_subtitle')}
       countLabel={t('usage_stats.credentials_count', { count: rows.length })}
