@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -188,12 +190,14 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	if cfg.AuthEnabled {
 		sessionManager = auth.NewPersistentSessionManager(cfg.AuthSessionTTL, auth.NewGormSessionStore(db))
 	}
-	authHandler := api.NewAuthHandler(api.AuthConfig{
-		Enabled:       cfg.AuthEnabled,
-		LoginPassword: cfg.LoginPassword,
-		SessionTTL:    cfg.AuthSessionTTL,
-		BasePath:      cfg.AppBasePath,
-	}, sessionManager)
+	authConfig := api.AuthConfig{
+		Enabled:              cfg.AuthEnabled,
+		LoginPassword:        cfg.LoginPassword,
+		SessionTTL:           cfg.AuthSessionTTL,
+		BasePath:             cfg.AppBasePath,
+		FrameAncestorOrigins: frameAncestorOrigins(cfg),
+	}
+	authHandler := api.NewAuthHandler(authConfig, sessionManager)
 
 	return &App{
 		Config: &cfg,
@@ -214,12 +218,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 			backgroundPoller,
 			usageService,
 			pricingService,
-			api.AuthConfig{
-				Enabled:       cfg.AuthEnabled,
-				LoginPassword: cfg.LoginPassword,
-				SessionTTL:    cfg.AuthSessionTTL,
-				BasePath:      cfg.AppBasePath,
-			},
+			authConfig,
 			authHandler,
 			cfg.AppBasePath,
 			api.OptionalProviders{
@@ -231,6 +230,26 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 			},
 		),
 	}, nil
+}
+
+func frameAncestorOrigins(cfg config.Config) []string {
+	// 只信任显式浏览器公开地址；CPA_BASE_URL 可能是内网地址，不能进入 frame-ancestors。
+	if origin, ok := publicOrigin(cfg.CPAPublicURL); ok {
+		return []string{origin}
+	}
+	return nil
+}
+
+func publicOrigin(candidate string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(candidate))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	return scheme + "://" + parsed.Host, true
 }
 
 func quotaActiveRecorder(cfg config.Config, service *quota.Service) api.ActiveStatusRecorder {

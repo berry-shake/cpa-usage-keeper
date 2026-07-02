@@ -1,4 +1,5 @@
 import { type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsItem, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type KeyOverviewTimeRange, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingSyncPreviewResponse, type PricingSyncResponse, type StatusResponse, type UpdateCheckResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventSourceFilterOptionsResponse, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
+import { isCPAMCEmbed } from '@/embed/cpamcEmbed'
 
 export class ApiError extends Error {
   status: number
@@ -11,6 +12,8 @@ export class ApiError extends Error {
 }
 
 const APP_BASE_PATH_PLACEHOLDER = '__APP_BASE_PATH__'
+const EMBED_SESSION_STORAGE_KEY = 'cpa_usage_keeper_embed_session'
+const EMBED_SESSION_HEADER = 'X-CPA-Usage-Keeper-Embed-Session'
 
 declare global {
   interface Window {
@@ -91,6 +94,10 @@ export interface FetchUsageOverviewRealtimeOptions extends FetchKeyOverviewRealt
   apiKeyId?: string
 }
 
+interface EmbedLoginResponse {
+  session_token?: string
+}
+
 export function appPath(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
   return `${normalizeBasePath(window.__APP_BASE_PATH__)}${normalizedPath}`
@@ -114,11 +121,74 @@ async function parseApiError(response: Response, fallback: string): Promise<neve
   throw new ApiError(message, response.status)
 }
 
+function isMutatingMethod(method: string | undefined): boolean {
+  const normalized = (method ?? 'GET').toUpperCase()
+  return normalized !== 'GET' && normalized !== 'HEAD'
+}
+
+function embedSessionStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage ?? null
+  } catch {
+    return null
+  }
+}
+
+function readEmbedSessionToken(): string {
+  if (!isCPAMCEmbed()) return ''
+  const storage = embedSessionStorage()
+  if (!storage) return ''
+  try {
+    return storage.getItem(EMBED_SESSION_STORAGE_KEY)?.trim() ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function storeEmbedSessionToken(token: string): void {
+  const trimmed = token.trim()
+  if (!trimmed) return
+  const storage = embedSessionStorage()
+  if (!storage) return
+  try {
+    storage.setItem(EMBED_SESSION_STORAGE_KEY, trimmed)
+  } catch {
+    // 浏览器可能在隐私/嵌入场景禁用 sessionStorage；此时保持 cookie-first 行为即可。
+  }
+}
+
+export function clearEmbedSessionToken(): void {
+  const storage = embedSessionStorage()
+  if (!storage) return
+  try {
+    storage.removeItem(EMBED_SESSION_STORAGE_KEY)
+  } catch {
+    // 清理 fallback token 是 best-effort，不能阻断登录/登出流程。
+  }
+}
+
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, {
-    credentials: 'include',
+  const headers = new Headers(init?.headers)
+  if (isMutatingMethod(init?.method)) {
+    headers.set('X-CPA-Usage-Keeper-Request', 'fetch')
+  }
+  if (isCPAMCEmbed()) {
+    headers.set('X-CPA-Usage-Keeper-Embed', 'cpamc')
+    const embedSessionToken = readEmbedSessionToken()
+    if (embedSessionToken) {
+      headers.set(EMBED_SESSION_HEADER, embedSessionToken)
+    }
+  }
+  const response = await fetch(input, {
     ...init,
+    credentials: 'include',
+    headers,
   })
+  if (response.status === 401) {
+    clearEmbedSessionToken()
+  }
+  return response
 }
 
 export async function getSession(signal?: AbortSignal): Promise<AuthSessionResponse> {
@@ -126,10 +196,35 @@ export async function getSession(signal?: AbortSignal): Promise<AuthSessionRespo
   if (!response.ok) {
     await parseApiError(response, `Failed to load auth session: ${response.status}`)
   }
-  return response.json()
+  const session = await response.json()
+  if (isCPAMCEmbed() && !session.authenticated) {
+    clearEmbedSessionToken()
+  }
+  return session
+}
+
+async function readEmbedLoginResponse(response: Response): Promise<EmbedLoginResponse> {
+  if (!isCPAMCEmbed()) return {}
+  try {
+    return await response.json() as EmbedLoginResponse
+  } catch {
+    return {}
+  }
+}
+
+async function activateEmbedSessionFallback(response: Response): Promise<void> {
+  const payload = await readEmbedLoginResponse(response)
+  if (!payload.session_token) return
+  const session = await getSession()
+  if (!session.authenticated) {
+    storeEmbedSessionToken(payload.session_token)
+  }
 }
 
 export async function login(password: string): Promise<void> {
+  if (isCPAMCEmbed()) {
+    clearEmbedSessionToken()
+  }
   const response = await apiFetch(apiPath('/auth/login'), {
     method: 'POST',
     headers: {
@@ -140,9 +235,13 @@ export async function login(password: string): Promise<void> {
   if (!response.ok) {
     await parseApiError(response, `Failed to login: ${response.status}`)
   }
+  await activateEmbedSessionFallback(response)
 }
 
 export async function loginWithCPAAPIKey(apiKey: string): Promise<void> {
+  if (isCPAMCEmbed()) {
+    clearEmbedSessionToken()
+  }
   const response = await apiFetch(apiPath('/auth/api-key-login'), {
     method: 'POST',
     headers: {
@@ -153,14 +252,19 @@ export async function loginWithCPAAPIKey(apiKey: string): Promise<void> {
   if (!response.ok) {
     await parseApiError(response, `Failed to login with CPA API key: ${response.status}`)
   }
+  await activateEmbedSessionFallback(response)
 }
 
 export async function logout(): Promise<void> {
-  const response = await apiFetch(apiPath('/auth/logout'), {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    await parseApiError(response, `Failed to logout: ${response.status}`)
+  try {
+    const response = await apiFetch(apiPath('/auth/logout'), {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      await parseApiError(response, `Failed to logout: ${response.status}`)
+    }
+  } finally {
+    clearEmbedSessionToken()
   }
 }
 

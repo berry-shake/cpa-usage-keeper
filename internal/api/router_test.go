@@ -466,6 +466,7 @@ func TestVersionHidesUpdateCheckForDevVersion(t *testing.T) {
 func TestManualSyncRouteIsNotRegistered(t *testing.T) {
 	router := NewRouter(nil, statusStub{}, nil, nil, AuthConfig{}, nil, "")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", nil)
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	resp := httptest.NewRecorder()
 
 	router.ServeHTTP(resp, req)

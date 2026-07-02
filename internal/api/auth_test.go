@@ -95,6 +95,7 @@ func TestAuthLoginSetsCookieAndUnlocksProtectedRoute(t *testing.T) {
 
 	loginResp := httptest.NewRecorder()
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	loginReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	loginReq.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(loginResp, loginReq)
 
@@ -129,6 +130,7 @@ func TestAuthSessionReturnsAdminRoleAfterPasswordLogin(t *testing.T) {
 
 	loginResp := httptest.NewRecorder()
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	loginReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	loginReq.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(loginResp, loginReq)
 	if loginResp.Code != http.StatusNoContent {
@@ -153,6 +155,7 @@ func TestAuthAPIKeyLoginSetsViewerSessionCookieAndSessionSummary(t *testing.T) {
 
 	loginResp := httptest.NewRecorder()
 	loginReq := httptest.NewRequest(http.MethodPost, "/cpa/api/v1/auth/api-key-login", strings.NewReader(`{"apiKey":"sk-live123456"}`))
+	loginReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	loginReq.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(loginResp, loginReq)
 	if loginResp.Code != http.StatusNoContent {
@@ -189,6 +192,7 @@ func TestAuthAPIKeyLoginFailuresAreGenericUnauthorized(t *testing.T) {
 	for _, body := range []string{`{"apiKey":"missing"}`, `{bad json}`} {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/api-key-login", strings.NewReader(body))
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(resp, req)
 		if resp.Code != http.StatusUnauthorized || !contains(resp.Body.String(), "invalid credentials") {
@@ -206,6 +210,7 @@ func TestAuthAPIKeyLoginRateLimitsRepeatedFailures(t *testing.T) {
 	for i := 0; i < maxFailedLoginAttempts; i++ {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/api-key-login", strings.NewReader(`{"apiKey":"missing"}`))
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "198.51.100.10:1234"
 		router.ServeHTTP(resp, req)
@@ -216,6 +221,7 @@ func TestAuthAPIKeyLoginRateLimitsRepeatedFailures(t *testing.T) {
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/api-key-login", strings.NewReader(`{"apiKey":"missing"}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "198.51.100.10:1234"
 	router.ServeHTTP(resp, req)
@@ -234,6 +240,7 @@ func TestAuthAPIKeyLoginSuccessClearsFailedAttempts(t *testing.T) {
 	for i := 0; i < maxFailedLoginAttempts; i++ {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/api-key-login", strings.NewReader(`{"apiKey":"missing"}`))
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "198.51.100.11:1234"
 		router.ServeHTTP(resp, req)
@@ -246,6 +253,7 @@ func TestAuthAPIKeyLoginSuccessClearsFailedAttempts(t *testing.T) {
 	keyProvider.row = entities.CPAAPIKey{ID: 42, DisplayKey: "sk-*********live"}
 	successResp := httptest.NewRecorder()
 	successReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/api-key-login", strings.NewReader(`{"apiKey":"sk-live"}`))
+	successReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	successReq.Header.Set("Content-Type", "application/json")
 	successReq.RemoteAddr = "198.51.100.11:1234"
 	router.ServeHTTP(successResp, successReq)
@@ -256,6 +264,7 @@ func TestAuthAPIKeyLoginSuccessClearsFailedAttempts(t *testing.T) {
 	keyProvider.findErr = context.Canceled
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/api-key-login", strings.NewReader(`{"apiKey":"missing"}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "198.51.100.11:1234"
 	router.ServeHTTP(resp, req)
@@ -308,6 +317,7 @@ func TestAuthLogoutClearsKeyOverviewRateLimitForSession(t *testing.T) {
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	router.ServeHTTP(resp, req)
 	if resp.Code != http.StatusNoContent {
@@ -565,6 +575,7 @@ func TestAuthSessionManagementRevokesCurrentAdminSession(t *testing.T) {
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/sessions/"+parsed.Items[0].ID, nil)
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminToken1})
 	router.ServeHTTP(resp, req)
 
@@ -644,6 +655,7 @@ func TestAuthLoginRejectsWrongPassword(t *testing.T) {
 	router := NewRouter(nil, nil, nil, nil, config, NewAuthHandler(config, sessions), "")
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 
 	router.ServeHTTP(resp, req)
@@ -661,6 +673,7 @@ func TestAuthLoginRateLimitsRepeatedFailures(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "198.51.100.1:1234"
 		router.ServeHTTP(resp, req)
@@ -671,6 +684,7 @@ func TestAuthLoginRateLimitsRepeatedFailures(t *testing.T) {
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "198.51.100.1:1234"
 	router.ServeHTTP(resp, req)
@@ -688,6 +702,7 @@ func TestAuthLoginAllowsCorrectPasswordAfterRateLimitThreshold(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		resp := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+		req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "198.51.100.2:1234"
 		router.ServeHTTP(resp, req)
@@ -698,6 +713,7 @@ func TestAuthLoginAllowsCorrectPasswordAfterRateLimitThreshold(t *testing.T) {
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "198.51.100.2:1234"
 	router.ServeHTTP(resp, req)
@@ -715,6 +731,7 @@ func TestAuthLogoutDeletesSessionCookie(t *testing.T) {
 
 	loginResp := httptest.NewRecorder()
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	loginReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	loginReq.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(loginResp, loginReq)
 	if loginResp.Code != http.StatusNoContent {
@@ -727,6 +744,7 @@ func TestAuthLogoutDeletesSessionCookie(t *testing.T) {
 
 	logoutResp := httptest.NewRecorder()
 	logoutReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	logoutReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	logoutReq.AddCookie(cookies[0])
 	router.ServeHTTP(logoutResp, logoutReq)
 	if logoutResp.Code != http.StatusNoContent {
@@ -746,6 +764,40 @@ func TestAuthLogoutDeletesSessionCookie(t *testing.T) {
 	}
 }
 
+func TestAuthLogoutClearsSecureSessionCookieBehindHTTPSProxy(t *testing.T) {
+	sessions := auth.NewSessionManager(time.Hour)
+	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}
+	router := NewRouter(nil, nil, nil, nil, config, NewAuthHandler(config, sessions), "")
+
+	loginResp := httptest.NewRecorder()
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	loginReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Forwarded-Proto", "https")
+	router.ServeHTTP(loginResp, loginReq)
+	if loginResp.Code != http.StatusNoContent {
+		t.Fatalf("expected login status 204, got %d", loginResp.Code)
+	}
+	cookies := loginResp.Result().Cookies()
+	if len(cookies) == 0 || !cookies[0].Secure {
+		t.Fatalf("expected proxied HTTPS login to set a secure session cookie, got %+v", cookies)
+	}
+
+	logoutResp := httptest.NewRecorder()
+	logoutReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	logoutReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
+	logoutReq.Header.Set("X-Forwarded-Proto", "https")
+	logoutReq.AddCookie(cookies[0])
+	router.ServeHTTP(logoutResp, logoutReq)
+	if logoutResp.Code != http.StatusNoContent {
+		t.Fatalf("expected logout status 204, got %d", logoutResp.Code)
+	}
+	clearCookies := logoutResp.Result().Cookies()
+	if len(clearCookies) == 0 || clearCookies[0].Name != sessionCookieName || clearCookies[0].MaxAge >= 0 || !clearCookies[0].Secure {
+		t.Fatalf("expected proxied HTTPS logout to clear a secure session cookie, got %+v", clearCookies)
+	}
+}
+
 func TestSubpathAuthUsesPrefixedRoutesAndCookiePath(t *testing.T) {
 	sessions := auth.NewSessionManager(time.Hour)
 	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour, BasePath: "/cpa"}
@@ -761,6 +813,7 @@ func TestSubpathAuthUsesPrefixedRoutesAndCookiePath(t *testing.T) {
 
 	loginResp := httptest.NewRecorder()
 	loginReq := httptest.NewRequest(http.MethodPost, "/cpa/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	loginReq.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	loginReq.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(loginResp, loginReq)
 	if loginResp.Code != http.StatusNoContent {

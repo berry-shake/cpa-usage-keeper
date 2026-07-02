@@ -143,6 +143,8 @@ func TestUpdatePricingRoute(t *testing.T) {
 	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing/claude-sonnet", strings.NewReader(`{"pricing_style":"claude","prompt_price_per_1m":3,"completion_price_per_1m":15,"cache_price_per_1m":0.3,"cache_creation_price_per_1m":3.75}`))
+
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
@@ -167,6 +169,8 @@ func TestUpdatePricingRouteAcceptsModelInBody(t *testing.T) {
 	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/pricing", strings.NewReader(`{"model":"openai/gpt-4.1","prompt_price_per_1m":3,"completion_price_per_1m":15,"cache_price_per_1m":0.3}`))
+
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
@@ -184,6 +188,8 @@ func TestDeletePricingRoute(t *testing.T) {
 	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/pricing?model=openai%2Fgpt-4.1", nil)
+
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 

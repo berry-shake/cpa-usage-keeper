@@ -70,6 +70,9 @@ export function SessionSettingsCard({ sessions, loading = false, revokingId = nu
             {sessions.map((session) => {
               const isAdmin = session.kind === 'admin';
               const displayName = getSessionDisplayName(session, t);
+              const sourceLabel = session.source === 'embed'
+                ? t('usage_stats.session_settings_source_embed')
+                : t('usage_stats.session_settings_source_standard');
               const disabled = revokingId === session.id;
               return (
                 <div key={session.id} className={styles.sessionSettingsItem}>
@@ -82,7 +85,10 @@ export function SessionSettingsCard({ sessions, loading = false, revokingId = nu
                         <span className={styles.sessionSettingsCurrent}>{t('usage_stats.session_settings_current')}</span>
                       )}
                     </div>
-                    <span className={styles.sessionSettingsName} title={displayName}>{displayName}</span>
+                    <div className={styles.sessionSettingsNameRow}>
+                      <span className={styles.sessionSettingsName} title={displayName}>{displayName}</span>
+                      <span className={styles.sessionSettingsSource}>{sourceLabel}</span>
+                    </div>
                   </div>
                   <div className={styles.sessionSettingsDetails}>
                     <span>{t('usage_stats.session_settings_login_at', { value: session.loginAt ?? '-' })}</span>

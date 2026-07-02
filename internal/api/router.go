@@ -73,6 +73,7 @@ func NewRouter(
 	registerHealthRoutes(appGroup)
 
 	apiV1 := appGroup.Group("/api/v1")
+	apiV1.Use(requestIntentMiddleware())
 	if debugAPIRoutesEnabled() {
 		registerPingRoutes(apiV1)
 	}
@@ -130,7 +131,7 @@ func NewRouter(
 					c.Status(http.StatusNotFound)
 					return
 				}
-				setHTMLCacheHeaders(c)
+				setHTMLCacheHeaders(c, authConfig.FrameAncestorOrigins)
 				c.Data(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 			}
 			serveAsset := func(c *gin.Context) {
@@ -185,8 +186,9 @@ func registerPingRoutes(router gin.IRoutes) {
 	})
 }
 
-func setHTMLCacheHeaders(c *gin.Context) {
+func setHTMLCacheHeaders(c *gin.Context, frameAncestorOrigins []string) {
 	setNoStoreHeaders(c)
+	setFrameAncestorsCSP(c, frameAncestorOrigins)
 }
 
 func setNoStoreHeaders(c *gin.Context) {
@@ -197,6 +199,23 @@ func setNoStoreHeaders(c *gin.Context) {
 
 func setStaticAssetCacheHeaders(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+}
+
+func setFrameAncestorsCSP(c *gin.Context, origins []string) {
+	values := []string{"frame-ancestors", "'self'"}
+	seen := map[string]struct{}{"'self'": {}}
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		values = append(values, trimmed)
+	}
+	c.Header("Content-Security-Policy", strings.Join(values, " "))
 }
 
 func renderIndexHTML(staticFS fs.FS, basePath string) ([]byte, error) {

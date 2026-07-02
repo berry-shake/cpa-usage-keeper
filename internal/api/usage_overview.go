@@ -213,7 +213,7 @@ func registerKeyOverviewRoute(router gin.IRoutes, usageProvider service.UsagePro
 		if _, err := cpaAPIKeyProvider.FindActiveCPAAPIKeyByID(c.Request.Context(), session.CPAAPIKeyID); err != nil {
 			if authHandler != nil {
 				authHandler.deleteSession(fmt.Sprint(token))
-				clearSessionCookie(c, authHandler.config.BasePath)
+				clearSessionCookie(c, authHandler.config.BasePath, resolveSessionToken(c).CookieKind)
 			}
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
@@ -245,7 +245,7 @@ func registerKeyOverviewRoute(router gin.IRoutes, usageProvider service.UsagePro
 		if _, err := cpaAPIKeyProvider.FindActiveCPAAPIKeyByID(c.Request.Context(), session.CPAAPIKeyID); err != nil {
 			if authHandler != nil {
 				authHandler.deleteSession(fmt.Sprint(token))
-				clearSessionCookie(c, authHandler.config.BasePath)
+				clearSessionCookie(c, authHandler.config.BasePath, resolveSessionToken(c).CookieKind)
 			}
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return

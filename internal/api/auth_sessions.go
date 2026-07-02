@@ -29,6 +29,7 @@ type authSessionItemResponse struct {
 	ID         string    `json:"id"`
 	Kind       string    `json:"kind"`
 	Role       auth.Role `json:"role"`
+	Source     string    `json:"source"`
 	Current    bool      `json:"current,omitempty"`
 	LoginAt    string    `json:"loginAt,omitempty"`
 	ExpiresAt  string    `json:"expiresAt,omitempty"`
@@ -72,7 +73,7 @@ func (h *authHandler) revokeManagedSession(c *gin.Context) {
 	}
 	h.clearSessionStateForTokens(result.Tokens)
 	if sessionID == currentAuthSessionHash(c) {
-		clearSessionCookie(c, h.config.BasePath)
+		clearSessionCookie(c, h.config.BasePath, resolveSessionToken(c).CookieKind)
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -102,6 +103,7 @@ func buildAuthSessionItems(records []auth.SessionRecord, apiKeysByID map[int64]e
 				ID:        record.TokenHash,
 				Kind:      authSessionKindAdmin,
 				Role:      record.Role,
+				Source:    string(auth.NormalizeSessionSource(record.Source)),
 				Current:   record.TokenHash == currentTokenHash,
 				LoginAt:   formatAuthSessionTime(record.CreatedAt),
 				ExpiresAt: formatAuthSessionTime(record.ExpiresAt),
@@ -116,6 +118,7 @@ func buildAuthSessionItems(records []auth.SessionRecord, apiKeysByID map[int64]e
 			ID:         record.TokenHash,
 			Kind:       authSessionKindAPIKey,
 			Role:       record.Role,
+			Source:     string(auth.NormalizeSessionSource(record.Source)),
 			Current:    record.TokenHash == currentTokenHash,
 			LoginAt:    formatAuthSessionTime(record.CreatedAt),
 			ExpiresAt:  formatAuthSessionTime(record.ExpiresAt),
@@ -146,11 +149,11 @@ func currentAuthSessionHash(c *gin.Context) string {
 			return auth.SessionTokenHash(token)
 		}
 	}
-	token, err := c.Cookie(sessionCookieName)
-	if err != nil || token == "" {
+	resolved := resolveSessionToken(c)
+	if resolved.Token == "" {
 		return ""
 	}
-	return auth.SessionTokenHash(token)
+	return auth.SessionTokenHash(resolved.Token)
 }
 
 func sessionKindRank(kind string) int {

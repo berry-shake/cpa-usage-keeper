@@ -15,15 +15,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const sessionCookieName = "cpa_usage_keeper_session"
+const (
+	sessionCookieName      = "cpa_usage_keeper_session"
+	embedSessionCookieName = "cpa_usage_keeper_embed_session"
+
+	embedHeaderName               = "X-CPA-Usage-Keeper-Embed"
+	embedHeaderValueCPAMC         = "cpamc"
+	embedSessionHeaderName        = "X-CPA-Usage-Keeper-Embed-Session"
+	requestIntentHeaderName       = "X-CPA-Usage-Keeper-Request"
+	requestIntentHeaderValueFetch = "fetch"
+)
 
 const maxFailedLoginAttempts = 5
 
 type AuthConfig struct {
-	Enabled       bool
-	LoginPassword string
-	SessionTTL    time.Duration
-	BasePath      string
+	Enabled              bool
+	LoginPassword        string
+	SessionTTL           time.Duration
+	BasePath             string
+	FrameAncestorOrigins []string
 }
 
 type authHandler struct {
@@ -53,6 +63,31 @@ type sessionResponse struct {
 type sessionAPIKeyResponse struct {
 	DisplayKey string `json:"display_key"`
 	Alias      string `json:"alias,omitempty"`
+}
+
+type loginResponse struct {
+	SessionToken string `json:"session_token,omitempty"`
+}
+
+type sessionCookieKind string
+
+const (
+	sessionCookieKindStandard sessionCookieKind = "standard"
+	sessionCookieKindEmbed    sessionCookieKind = "embed"
+)
+
+type sessionTokenTransport string
+
+const (
+	sessionTokenTransportCookie sessionTokenTransport = "cookie"
+	sessionTokenTransportHeader sessionTokenTransport = "header"
+)
+
+type resolvedSessionToken struct {
+	Token      string
+	CookieKind sessionCookieKind
+	Source     auth.SessionSource
+	Transport  sessionTokenTransport
 }
 
 func NewAuthHandler(config AuthConfig, sessions *auth.SessionManager) *authHandler {
@@ -95,10 +130,8 @@ func (h *authHandler) roleMiddleware(allowedRoles ...auth.Role) gin.HandlerFunc 
 			return
 		}
 
-		token, err := c.Cookie(sessionCookieName)
-		session, ok := h.sessions.Get(token)
-		if err != nil || !ok {
-			h.deleteSession(token)
+		resolved, session, ok := h.resolveValidSession(c)
+		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
 		}
@@ -106,7 +139,7 @@ func (h *authHandler) roleMiddleware(allowedRoles ...auth.Role) gin.HandlerFunc 
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
-		c.Set("auth_token", token)
+		c.Set("auth_token", resolved.Token)
 		c.Set("auth_session", session)
 		c.Next()
 	}
@@ -121,6 +154,34 @@ func sessionRoleAllowed(role auth.Role, allowedRoles []auth.Role) bool {
 	return false
 }
 
+func sessionMatchesResolvedSource(session auth.Session, resolved resolvedSessionToken) bool {
+	return auth.NormalizeSessionSource(session.Source) == resolved.Source
+}
+
+func (h *authHandler) resolveValidSession(c *gin.Context) (resolvedSessionToken, auth.Session, bool) {
+	for _, resolved := range resolveSessionTokenCandidates(c) {
+		if resolved.Token == "" {
+			continue
+		}
+		session, ok := h.sessions.Get(resolved.Token)
+		if !ok {
+			h.deleteSession(resolved.Token)
+			if resolved.Transport == sessionTokenTransportCookie {
+				clearSessionCookie(c, h.config.BasePath, resolved.CookieKind)
+			}
+			continue
+		}
+		if !sessionMatchesResolvedSource(session, resolved) {
+			if resolved.Transport == sessionTokenTransportCookie {
+				clearSessionCookie(c, h.config.BasePath, resolved.CookieKind)
+			}
+			continue
+		}
+		return resolved, session, true
+	}
+	return resolveSessionToken(c), auth.Session{}, false
+}
+
 func (h *authHandler) getSession(c *gin.Context) {
 	if h == nil || !h.config.Enabled {
 		c.JSON(http.StatusOK, sessionResponse{Authenticated: true, Role: auth.RoleAdmin})
@@ -131,20 +192,14 @@ func (h *authHandler) getSession(c *gin.Context) {
 		return
 	}
 
-	token, err := c.Cookie(sessionCookieName)
-	if err != nil {
-		c.JSON(http.StatusOK, sessionResponse{Authenticated: false})
-		return
-	}
-	session, ok := h.sessions.Get(token)
+	resolved, session, ok := h.resolveValidSession(c)
 	if !ok {
-		h.deleteSession(token)
 		c.JSON(http.StatusOK, sessionResponse{Authenticated: false})
 		return
 	}
 	response := sessionResponse{Authenticated: true, Role: session.Role}
 	if session.Role == auth.RoleAPIKeyViewer {
-		row, ok := h.activeViewerAPIKey(c, token, session)
+		row, ok := h.activeViewerAPIKey(c, resolved, session)
 		if !ok {
 			c.JSON(http.StatusOK, sessionResponse{Authenticated: false})
 			return
@@ -184,14 +239,15 @@ func (h *authHandler) login(c *gin.Context) {
 	}
 	h.clearFailedAttempts(clientKey)
 
-	token, expiresAt, err := h.sessions.Create()
+	resolved := resolveSessionToken(c)
+	token, expiresAt, err := h.sessions.CreateWithSource(resolved.Source)
 	if err != nil {
 		writeInternalError(c, "create auth session failed", err)
 		return
 	}
 
-	setSessionCookie(c, h.config.BasePath, token, expiresAt)
-	c.Status(http.StatusNoContent)
+	setSessionCookie(c, h.config.BasePath, resolved.CookieKind, token, expiresAt)
+	writeLoginSuccess(c, resolved, token)
 }
 
 func (h *authHandler) apiKeyLogin(c *gin.Context) {
@@ -225,25 +281,26 @@ func (h *authHandler) apiKeyLogin(c *gin.Context) {
 		return
 	}
 	h.clearFailedAttempts(clientKey)
-	token, expiresAt, err := h.sessions.CreateAPIKeyViewer(row.ID)
+	resolved := resolveSessionToken(c)
+	token, expiresAt, err := h.sessions.CreateAPIKeyViewerWithSource(row.ID, resolved.Source)
 	if err != nil {
 		writeInternalError(c, "create api key viewer session failed", err)
 		return
 	}
-	setSessionCookie(c, h.config.BasePath, token, expiresAt)
-	c.Status(http.StatusNoContent)
+	setSessionCookie(c, h.config.BasePath, resolved.CookieKind, token, expiresAt)
+	writeLoginSuccess(c, resolved, token)
 }
 
-func (h *authHandler) activeViewerAPIKey(c *gin.Context, token string, session auth.Session) (entities.CPAAPIKey, bool) {
+func (h *authHandler) activeViewerAPIKey(c *gin.Context, resolved resolvedSessionToken, session auth.Session) (entities.CPAAPIKey, bool) {
 	if h.cpaAPIKeyProvider == nil || session.CPAAPIKeyID <= 0 {
-		h.deleteSession(token)
-		clearSessionCookie(c, h.config.BasePath)
+		h.deleteSession(resolved.Token)
+		clearSessionCookie(c, h.config.BasePath, resolved.CookieKind)
 		return entities.CPAAPIKey{}, false
 	}
 	row, err := h.cpaAPIKeyProvider.FindActiveCPAAPIKeyByID(c.Request.Context(), session.CPAAPIKeyID)
 	if err != nil {
-		h.deleteSession(token)
-		clearSessionCookie(c, h.config.BasePath)
+		h.deleteSession(resolved.Token)
+		clearSessionCookie(c, h.config.BasePath, resolved.CookieKind)
 		return entities.CPAAPIKey{}, false
 	}
 	return row, true
@@ -254,12 +311,14 @@ func (h *authHandler) logout(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 		return
 	}
-	if h.sessions != nil {
-		if token, err := c.Cookie(sessionCookieName); err == nil {
-			h.deleteSession(token)
-		}
+	resolved, _, ok := h.resolveValidSession(c)
+	if !ok {
+		resolved = resolveSessionToken(c)
 	}
-	clearSessionCookie(c, h.config.BasePath)
+	if h.sessions != nil {
+		h.deleteSession(resolved.Token)
+	}
+	clearSessionCookie(c, h.config.BasePath, resolved.CookieKind)
 	c.Status(http.StatusNoContent)
 }
 
@@ -342,18 +401,76 @@ func loginClientKey(c *gin.Context) string {
 	return c.ClientIP()
 }
 
-func setSessionCookie(c *gin.Context, basePath, token string, expiresAt time.Time) {
-	secure := c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    token,
-		Path:     sessionCookiePath(basePath),
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  expiresAt,
-		MaxAge:   int(time.Until(expiresAt).Seconds()),
-	})
+func isCPAMCEmbedRequest(c *gin.Context) bool {
+	return strings.EqualFold(strings.TrimSpace(c.GetHeader(embedHeaderName)), embedHeaderValueCPAMC)
+}
+
+func resolveSessionToken(c *gin.Context) resolvedSessionToken {
+	if candidates := resolveSessionTokenCandidates(c); len(candidates) > 0 {
+		return candidates[0]
+	}
+	if isCPAMCEmbedRequest(c) {
+		return resolvedSessionToken{CookieKind: sessionCookieKindEmbed, Source: auth.SessionSourceEmbed, Transport: sessionTokenTransportCookie}
+	}
+	return resolvedSessionToken{CookieKind: sessionCookieKindStandard, Source: auth.SessionSourceStandard, Transport: sessionTokenTransportCookie}
+}
+
+func resolveSessionTokenCandidates(c *gin.Context) []resolvedSessionToken {
+	if isCPAMCEmbedRequest(c) {
+		var candidates []resolvedSessionToken
+		cookieToken, _ := c.Cookie(embedSessionCookieName)
+		if cookieToken != "" {
+			candidates = append(candidates, resolvedSessionToken{Token: cookieToken, CookieKind: sessionCookieKindEmbed, Source: auth.SessionSourceEmbed, Transport: sessionTokenTransportCookie})
+		}
+		headerToken := strings.TrimSpace(c.GetHeader(embedSessionHeaderName))
+		if headerToken != "" && headerToken != cookieToken {
+			candidates = append(candidates, resolvedSessionToken{Token: headerToken, CookieKind: sessionCookieKindEmbed, Source: auth.SessionSourceEmbed, Transport: sessionTokenTransportHeader})
+		}
+		return candidates
+	}
+	token, _ := c.Cookie(sessionCookieName)
+	if token == "" {
+		return nil
+	}
+	return []resolvedSessionToken{{Token: token, CookieKind: sessionCookieKindStandard, Source: auth.SessionSourceStandard, Transport: sessionTokenTransportCookie}}
+}
+
+func writeLoginSuccess(c *gin.Context, resolved resolvedSessionToken, token string) {
+	if resolved.Source == auth.SessionSourceEmbed {
+		c.JSON(http.StatusOK, loginResponse{SessionToken: token})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func requiresRequestIntent(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func requestIntentMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if requiresRequestIntent(c.Request.Method) && c.GetHeader(requestIntentHeaderName) != requestIntentHeaderValueFetch {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "fetch request required"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func setSessionCookie(c *gin.Context, basePath string, kind sessionCookieKind, token string, expiresAt time.Time) {
+	cookie := sessionCookie(basePath, kind)
+	if kind == sessionCookieKindStandard {
+		cookie.Secure = c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+	}
+	cookie.Value = token
+	cookie.Expires = expiresAt
+	cookie.MaxAge = int(time.Until(expiresAt).Seconds())
+	http.SetCookie(c.Writer, cookie)
 }
 
 func sessionCookiePath(basePath string) string {
@@ -363,15 +480,30 @@ func sessionCookiePath(basePath string) string {
 	return basePath
 }
 
-func clearSessionCookie(c *gin.Context, basePath string) {
-	cookiePath := sessionCookiePath(basePath)
-	http.SetCookie(c.Writer, &http.Cookie{
+func clearSessionCookie(c *gin.Context, basePath string, kind sessionCookieKind) {
+	cookie := sessionCookie(basePath, kind)
+	if kind == sessionCookieKindStandard {
+		cookie.Secure = c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+	}
+	cookie.Value = ""
+	cookie.Expires = time.Unix(0, 0)
+	cookie.MaxAge = -1
+	http.SetCookie(c.Writer, cookie)
+}
+
+func sessionCookie(basePath string, kind sessionCookieKind) *http.Cookie {
+	cookie := &http.Cookie{
 		Name:     sessionCookieName,
-		Value:    "",
-		Path:     cookiePath,
+		Path:     sessionCookiePath(basePath),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-	})
+	}
+	if kind == sessionCookieKindEmbed {
+		cookie.Name = embedSessionCookieName
+		cookie.Secure = true
+		cookie.SameSite = http.SameSiteNoneMode
+		cookie.Partitioned = true
+		return cookie
+	}
+	return cookie
 }

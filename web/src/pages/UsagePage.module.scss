@@ -2392,6 +2392,14 @@
   line-height: 1;
 }
 
+.sessionSettingsNameRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
 .sessionSettingsName {
   min-width: 0;
   overflow: hidden;
@@ -2400,6 +2408,20 @@
   font-weight: 800;
   line-height: 1.25;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionSettingsSource {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
   white-space: nowrap;
 }
 

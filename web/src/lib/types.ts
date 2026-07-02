@@ -12,11 +12,13 @@ export interface AuthSessionResponse {
 }
 
 export type AuthManagedSessionKind = 'admin' | 'api_key'
+export type AuthManagedSessionSource = 'standard' | 'embed'
 
 export interface AuthManagedSessionItem {
   id: string
   kind: AuthManagedSessionKind
   role: AuthRole
+  source?: AuthManagedSessionSource
   current?: boolean
   loginAt?: string
   expiresAt?: string
@@ -217,6 +219,7 @@ export interface UsageEvent {
   timestamp: string
   api_key?: string
   model: string
+  model_alias?: string
   reasoning_effort?: string
   service_tier?: string
   executor_type?: string

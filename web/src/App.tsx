@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import './index.css';
 import './App.css';
 import './embed/cpamcEmbed.css';
-import { ApiError, appPath, getSession, login, loginWithCPAAPIKey } from './lib/api';
+import { ApiError, appPath, clearEmbedSessionToken, getSession, login, loginWithCPAAPIKey } from './lib/api';
 import type { AuthRole, AuthSessionAPIKeySummary } from './lib/types';
 import { AppFooter } from './components/AppFooter';
 import { KeyOverviewPage } from './pages/KeyOverviewPage';
@@ -40,6 +40,7 @@ function App() {
   const isEmbeddedInCPAMC = isCPAMCEmbed();
 
   const clearSession = useCallback(() => {
+    clearEmbedSessionToken();
     clearUsageStats();
     setAuthState('unauthenticated');
     setAuthRole(null);

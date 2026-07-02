@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { updateUsageIdentityAlias } from '../api'
 
+const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name)
+
 describe('updateUsageIdentityAlias', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -19,7 +21,7 @@ describe('updateUsageIdentityAlias', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(new URL(String(url), 'http://localhost').pathname).toBe('/api/v1/usage/identities/123')
     expect(init).toMatchObject({ credentials: 'include', method: 'PATCH' })
-    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(headerValue(init, 'Content-Type')).toBe('application/json')
     expect(init?.body).toBe(JSON.stringify({ alias: ' Friendly Auth ' }))
     expect(updated.displayName).toBe('Friendly Auth')
   })

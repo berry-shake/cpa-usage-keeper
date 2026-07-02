@@ -42,6 +42,7 @@ func (s *GormSessionStore) Save(token string, session Session) error {
 	row := entities.AuthSession{
 		TokenHash:   sessionTokenHash(token),
 		Role:        string(session.Role),
+		Source:      string(NormalizeSessionSource(session.Source)),
 		CPAAPIKeyID: session.CPAAPIKeyID,
 		ExpiresAt:   session.ExpiresAt,
 		CreatedAt:   session.CreatedAt,
@@ -121,11 +122,12 @@ func (s *GormSessionStore) DeleteExpired(now time.Time) error {
 }
 
 func authSessionFromRow(row entities.AuthSession) (Session, error) {
+	source := NormalizeSessionSource(SessionSource(row.Source))
 	switch Role(row.Role) {
 	case RoleAdmin:
-		return Session{Role: RoleAdmin, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt}, nil
+		return Session{Role: RoleAdmin, Source: source, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt}, nil
 	case RoleAPIKeyViewer:
-		return Session{Role: RoleAPIKeyViewer, CPAAPIKeyID: row.CPAAPIKeyID, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt}, nil
+		return Session{Role: RoleAPIKeyViewer, Source: source, CPAAPIKeyID: row.CPAAPIKeyID, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt}, nil
 	default:
 		return Session{}, fmt.Errorf("unknown auth session role %q", row.Role)
 	}
@@ -139,6 +141,7 @@ func authSessionRecordFromRow(row entities.AuthSession) (SessionRecord, error) {
 	return SessionRecord{
 		TokenHash:   row.TokenHash,
 		Role:        session.Role,
+		Source:      session.Source,
 		CPAAPIKeyID: session.CPAAPIKeyID,
 		ExpiresAt:   session.ExpiresAt,
 		CreatedAt:   session.CreatedAt,
@@ -161,8 +164,23 @@ const (
 	RoleAPIKeyViewer Role = "api_key_viewer"
 )
 
+type SessionSource string
+
+const (
+	SessionSourceStandard SessionSource = "standard"
+	SessionSourceEmbed    SessionSource = "embed"
+)
+
+func NormalizeSessionSource(source SessionSource) SessionSource {
+	if source == SessionSourceEmbed {
+		return SessionSourceEmbed
+	}
+	return SessionSourceStandard
+}
+
 type Session struct {
 	Role        Role
+	Source      SessionSource
 	CPAAPIKeyID int64
 	ExpiresAt   time.Time
 	CreatedAt   time.Time
@@ -171,6 +189,7 @@ type Session struct {
 type SessionRecord struct {
 	TokenHash   string
 	Role        Role
+	Source      SessionSource
 	CPAAPIKeyID int64
 	ExpiresAt   time.Time
 	CreatedAt   time.Time
@@ -207,11 +226,19 @@ func NewPersistentSessionManager(ttl time.Duration, store SessionStore) *Session
 }
 
 func (m *SessionManager) Create() (string, time.Time, error) {
-	return m.create(Session{Role: RoleAdmin})
+	return m.CreateWithSource(SessionSourceStandard)
+}
+
+func (m *SessionManager) CreateWithSource(source SessionSource) (string, time.Time, error) {
+	return m.create(Session{Role: RoleAdmin, Source: NormalizeSessionSource(source)})
 }
 
 func (m *SessionManager) CreateAPIKeyViewer(cpaAPIKeyID int64) (string, time.Time, error) {
-	return m.create(Session{Role: RoleAPIKeyViewer, CPAAPIKeyID: cpaAPIKeyID})
+	return m.CreateAPIKeyViewerWithSource(cpaAPIKeyID, SessionSourceStandard)
+}
+
+func (m *SessionManager) CreateAPIKeyViewerWithSource(cpaAPIKeyID int64, source SessionSource) (string, time.Time, error) {
+	return m.create(Session{Role: RoleAPIKeyViewer, Source: NormalizeSessionSource(source), CPAAPIKeyID: cpaAPIKeyID})
 }
 
 func (m *SessionManager) create(session Session) (string, time.Time, error) {
@@ -226,6 +253,7 @@ func (m *SessionManager) create(session Session) (string, time.Time, error) {
 	m.cleanupExpiredLocked()
 	now := m.now()
 	expiresAt := now.Add(m.ttl)
+	session.Source = NormalizeSessionSource(session.Source)
 	session.ExpiresAt = expiresAt
 	session.CreatedAt = now
 	if m.store != nil {
@@ -279,6 +307,7 @@ func (m *SessionManager) List() []SessionRecord {
 		records = append(records, SessionRecord{
 			TokenHash:   sessionTokenHash(token),
 			Role:        session.Role,
+			Source:      NormalizeSessionSource(session.Source),
 			CPAAPIKeyID: session.CPAAPIKeyID,
 			ExpiresAt:   session.ExpiresAt,
 			CreatedAt:   session.CreatedAt,

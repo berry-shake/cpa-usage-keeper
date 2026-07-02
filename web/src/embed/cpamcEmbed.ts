@@ -1,11 +1,15 @@
 const CPAMC_EMBED_QUERY_VALUE = 'cpamc';
 const CPAMC_READY_MESSAGE = 'cpa-usage-keeper:ready';
 
-const currentSearch = () => (typeof window === 'undefined' ? '' : window.location.search);
+const currentSearch = () => (typeof window === 'undefined' ? '' : window.location?.search ?? '');
+
+const hasCPAMCEmbedValue = (params: URLSearchParams, name: string) => (
+  params.getAll(name).includes(CPAMC_EMBED_QUERY_VALUE)
+);
 
 export const isCPAMCEmbed = (search = currentSearch()): boolean => {
   const params = new URLSearchParams(search);
-  return params.get('embed') === CPAMC_EMBED_QUERY_VALUE;
+  return hasCPAMCEmbedValue(params, 'embed') || hasCPAMCEmbedValue(params, 'mode');
 };
 
 export const cpamcEmbedSearch = (search = currentSearch()): '' | '?embed=cpamc' => (

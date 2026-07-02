@@ -23,6 +23,7 @@ It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) a
 - Request Events for per-request details, filtering, pagination, export, and customizable display
 - Analysis page for usage trends, cost analysis, model/API Key/AI Provider composition, and hourly heatmaps
 - Standalone API Key usage page for querying usage by CPA API Key
+- CPA plugin embedded mode support for using Keeper inside CPAMC
 - Credentials page for Auth File and AI Provider usage, with quota lookup, refresh, inspection, and sorting
 - Provider quota window usage and quota display across supported providers
 - Maintain model prices for cost estimation and reporting
@@ -262,13 +263,15 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 | --- | --- | --- | --- |
 | `APP_PORT` | No | `8080` | Keeper HTTP listen port |
 | `APP_BASE_PATH` | No | root path | Keeper subpath prefix, such as `/keeper`; empty means `/` |
-| `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link |
+| `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link and CPAMC frame trust |
 
 `APP_BASE_PATH` must be empty or start with `/`; for example `/cpa`. `/cpa/` is normalized to `/cpa`.
 
 `CPA_PUBLIC_URL` may be a domain, a full URL with scheme, or a relative path, such as `https://cpa.example.com`, `https://cpa.example.com/cpa/`, or `/cpa/`. The frontend appends `management.html` automatically and handles trailing `/` or values that already end in `management.html`. When unset, the "Back to CPA" link points to `/management.html` on the current browser origin. If CPA and Keeper use different public domains, ports, or paths, set `CPA_PUBLIC_URL` explicitly.
 
-`CPA_BASE_URL` is only used by the server to call CPA, so it can be a Docker service name or private network address. Do not use it as the browser navigation URL.
+For CPAMC frame trust, `CPA_PUBLIC_URL` must be an explicit `http://` or `https://` URL with a host. Relative paths only affect same-origin "Back to CPA" navigation and do not add an external `frame-ancestors` source.
+
+`CPA_BASE_URL` is only used by the server to call CPA, so it can be a Docker service name or private network address. It is not used for browser navigation or frame trust.
 
 ### Login Protection
 
@@ -331,6 +334,9 @@ Security and data notes:
 - Browser-facing APIs redact key-like source/lookup fields or map them to stable public identifiers, but raw database values are unchanged.
 - For public deployments, enable `AUTH_ENABLED=true` and terminate HTTPS at your reverse proxy.
 - Login session hashes are stored in SQLite and remain valid across service restarts until logout or `AUTH_SESSION_TTL` expiry.
+- CPAMC embedded mode uses a separate embed session. Keeper first tries the `HttpOnly` `cpa_usage_keeper_embed_session` cookie, then falls back to an embed-only request header when the browser cannot persist the embedded cookie. The normal dashboard session keeps `SameSite=Lax` and is not reused by the embedded view.
+- Same-origin CPAMC embedding works with the default `frame-ancestors 'self'`. For cross-origin CPAMC embedding, set `CPA_PUBLIC_URL` to the public CPA/CPAMC origin; Keeper uses only `CPA_PUBLIC_URL` for the external `frame-ancestors` source, never `CPA_BASE_URL`.
+- Cross-site embedded login works best over HTTPS with browser support for third-party or partitioned cookies. When that cookie path is unavailable, CPAMC embedded mode falls back to a per-tab header token stored in browser session storage.
 - Redis inbox raw messages are cleaned up automatically: successful rows are kept until the end of the current day, and failed rows are kept for 7 days.
 
 ## Nginx reverse proxy
