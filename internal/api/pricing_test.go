@@ -224,6 +224,7 @@ func TestSyncPricingRoute(t *testing.T) {
 	router := NewRouter(nil, nil, nil, provider, AuthConfig{}, nil, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/pricing/sync", nil)
+	req.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 

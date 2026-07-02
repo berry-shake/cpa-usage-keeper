@@ -426,21 +426,25 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 		return nil, fmt.Errorf("scan usage credential stats: %w", err)
 	}
 
-	pricingByModel, err := loadPriceSettingsByModel(db)
+	costResolver, err := newUsageCostResolverForDB(db)
 	if err != nil {
 		return nil, err
 	}
 	for index := range rows {
 		modelName := normalizeUsageOverviewDimension(rows[index].Model)
 		rows[index].Model = modelName
-		if pricing, ok := pricingByModel[modelName]; ok {
-			rows[index].TotalCost = helper.CalculateUsageTokenCost(helper.UsageTokenCostInput{
+		result := costResolver.Calculate(UsageCostSubject{
+			Model: modelName,
+			Tokens: helper.UsageTokenCostInput{
 				InputTokens:         rows[index].InputTokens,
 				OutputTokens:        rows[index].OutputTokens,
 				CachedTokens:        rows[index].CachedTokens,
 				CacheReadTokens:     rows[index].CacheReadTokens,
 				CacheCreationTokens: rows[index].CacheCreationTokens,
-			}, pricing)
+			},
+		})
+		if result.MatchedModel != "" {
+			rows[index].TotalCost = result.Cost.TotalCostUSD
 			rows[index].CostAvailable = true
 		}
 	}
