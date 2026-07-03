@@ -283,7 +283,9 @@ func TestRunLogsSchemaMigrationErrors(t *testing.T) {
 		"version=20260620_create_auth_sessions",
 		"level=error",
 		"msg=\"schema migration failed\"",
-		"error=\"forced record failure\"",
+		// pure-Go sqlite (glebarez/modernc) 会把 RAISE(ABORT, ...) 包装成
+		// `constraint failed: forced record failure (1811)`，不能断言完整等值。
+		"forced record failure",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected migration error logs to contain %q, got:\n%s", want, content)
