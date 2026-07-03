@@ -23,17 +23,18 @@ It relies on [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) a
 - Request Events for per-request details, filtering, pagination, export, and customizable display
 - Analysis page for usage trends, cost analysis, model/API Key/AI Provider composition, and hourly heatmaps
 - Standalone API Key usage page for querying usage by CPA API Key
-- CPA plugin embedded mode support for using Keeper inside CPAMC
 - Credentials page for Auth File and AI Provider usage, with quota lookup, refresh, inspection, and sorting
 - Provider quota window usage and quota display across supported providers
 - Maintain model prices for cost estimation and reporting
 - Automatically sync CPA Auth Files, API Keys, AI Providers, and other metadata changes
 - Optional password login protection, SQLite backups, Docker/Docker Compose, and systemd deployment
+- Embed the Keeper dashboard into CPAMC through the CPA plugin
 
 ## Sponsors and Special Thanks
 
 - Thanks to [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) for providing the upstream CPA foundation and data source this project builds on.
 - Thanks to [@YouShouldBetOnMe](https://github.com/YouShouldBetOnMe) for supporting CPA Usage Keeper.
+- Thanks to the CPA discussion group for their discussions and feedback.
 
 ## Quick Start
 
@@ -291,11 +292,11 @@ For CPAMC frame trust, `CPA_PUBLIC_URL` must be an explicit `http://` or `https:
 
 ### Auth Files Quota Refresh
 
+Scheduled Auth Files quota refresh is configured from the gear button in the Auth Files inspection dialog. The setting is stored in the local SQLite database and does not require the page to stay open.
+
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `QUOTA_AUTO_REFRESH_ENABLED` | No | `false` | Enable Auth Files quota auto-refresh; it runs only while a backend page is visible and sending heartbeats |
-| `QUOTA_AUTO_REFRESH_INTERVAL` | No | `5m` | Auth Files quota auto-refresh interval, minimum `60s`, active only while a backend page is active |
-| `QUOTA_REFRESH_WORKER_LIMIT` | No | `10` | Maximum Auth Files quota refresh concurrency, capped at `100` |
+| `QUOTA_REFRESH_WORKER_LIMIT` | No | `10` | Maximum Auth Files quota refresh concurrency for manual and scheduled refresh, capped at `100` |
 
 ### Redis Queue Advanced Settings
 
@@ -314,6 +315,7 @@ For CPAMC frame trust, `CPA_PUBLIC_URL` must be an explicit `http://` or `https:
 | `LOG_LEVEL` | No | `info` | Log level |
 | `LOG_FILE_ENABLED` | No | `true` | Write persistent log files |
 | `LOG_RETENTION_DAYS` | No | `7` | Log retention days; `0` disables cleanup |
+| `CLEANUP_USAGE_EVENTS_ENABLED` | No | `false` | Delete expired raw `usage_events` during daily maintenance; when enabled, rows before 00:00 on the first day of the previous month are deleted |
 | `BACKUP_ENABLED` | No | `true` | Enable SQLite database backups |
 | `BACKUP_INTERVAL` | No | `24h` | Database backup interval |
 | `BACKUP_RETENTION_DAYS` | No | `7` | Backup retention days |

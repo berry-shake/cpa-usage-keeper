@@ -151,16 +151,28 @@ func InsertUsageEvents(db *gorm.DB, events []entities.UsageEvent) (int, int, err
 	return inserted, 0, nil
 }
 
-// CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox 和过期 usage_events，再清 Overview health 细粒度统计，最后执行 VACUUM。
+type CleanupStorageOptions struct {
+	// CleanupUsageEvents 控制是否删除过期 usage_events 原始事件；默认 false 表示保留原始事件。
+	CleanupUsageEvents bool
+}
+
+// CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox，按配置清过期 usage_events，再清 Overview health 细粒度统计，最后执行 VACUUM。
 // VACUUM 必须在删除完成后单独执行，任何一步失败都会停止后续步骤并把已完成部分的结果返回给上层日志。
-func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error) {
+func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions) (dto.StorageCleanupResult, error) {
+	opts := CleanupStorageOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {
 		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
-	usageEventsDeleted, err := CleanupUsageEvents(db, now)
-	if err != nil {
-		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+	var usageEventsDeleted int64
+	if opts.CleanupUsageEvents {
+		usageEventsDeleted, err = cleanupUsageEvents(db, now)
+		if err != nil {
+			return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+		}
 	}
 	// Health stats 只服务最近窗口展示，过期数据在每日维护中清掉，避免表无限增长。
 	if err := CleanupUsageOverviewHealthStats(db, now); err != nil {
@@ -173,8 +185,8 @@ func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error
 	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, nil
 }
 
-// CleanupUsageEvents 删除当前页面查询窗口外的原始 usage_events，保留从上个月 1 日本地零点开始的数据。
-func CleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
+// cleanupUsageEvents 删除当前页面查询窗口外的原始 usage_events，保留从上个月 1 日本地零点开始的数据。
+func cleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("database is nil")
 	}

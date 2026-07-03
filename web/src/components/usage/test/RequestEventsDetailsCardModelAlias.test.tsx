@@ -97,4 +97,16 @@ describe('RequestEventsDetailsCard model alias column', () => {
     expect(modelAliasHeaderIndex).toBeGreaterThanOrEqual(0);
     expect(cells[modelAliasHeaderIndex]).toBe('-');
   });
+
+  it('renders a dash when model alias matches the model name', () => {
+    const html = renderCard({
+      events: [{ ...events[0], model_alias: 'claude-sonnet' }],
+    });
+    const headers = extractTableHeaders(html);
+    const cells = extractFirstTableRowCells(html);
+    const modelAliasHeaderIndex = headers.indexOf('Model Alias');
+
+    expect(modelAliasHeaderIndex).toBeGreaterThanOrEqual(0);
+    expect(cells[modelAliasHeaderIndex]).toBe('-');
+  });
 });

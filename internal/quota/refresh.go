@@ -19,7 +19,6 @@ type RefreshSource string
 
 const (
 	RefreshSourceManual        RefreshSource = "manual"
-	RefreshSourceAuto          RefreshSource = "auto"
 	RefreshSourceInspection    RefreshSource = "inspection"
 	RefreshSourceScheduled     RefreshSource = "scheduled"
 	RefreshSourceCacheBackfill RefreshSource = "cache_backfill"

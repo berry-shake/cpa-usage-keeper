@@ -23,17 +23,18 @@
 - Request Events 提供请求级明细查看、筛选、分页、导出和自定义显示
 - 分析页面提供用量趋势、成本分析、模型/API Key/AI Provider 构成和时段热力图
 - API Key 独立查询页，可按 CPA API Key 查看专属用量
-- 支持 CPA 插件嵌入模式，可在 CPAMC 中使用 Keeper
 - 凭证页面展示 Auth File 与 AI Provider 使用情况，支持限额查询、刷新、巡检和排序
 - 支持多 Provider quota 窗口用量与限额展示
 - 可维护模型价格，用于成本估算和统计展示
 - 自动同步 CPA Auth Files、API Keys、AI Providers 等 metadata 变化
 - 可选密码登录保护、SQLite 备份、Docker/Docker Compose 和 systemd 部署
+- 可通过 CPA 插件将 Keeper Dashboard 内嵌到 CPAMC 中使用
 
 ## 赞助与特别感谢
 
 - 感谢 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 提供本项目所依赖的上游 CPA 基础与数据来源。
 - 感谢 [@YouShouldBetOnMe](https://github.com/YouShouldBetOnMe) 对 CPA Usage Keeper 的支持。
+- 感谢 CPA 讨论组（QQ群组）的讨论与反馈。
 
 ## 快速开始
 
@@ -291,11 +292,11 @@ cp .env.example .env
 
 ### Auth Files 限额刷新
 
+Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。设置保存在本地 SQLite，不依赖页面保持打开。
+
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `QUOTA_AUTO_REFRESH_ENABLED` | 否 | `false` | 是否启用 Auth Files 限额自动刷新；仅在后台页面可见并持续心跳时执行 |
-| `QUOTA_AUTO_REFRESH_INTERVAL` | 否 | `5m` | Auth Files 限额自动刷新间隔，最低 `60s`，仅在后台页面活跃时生效 |
-| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | Auth Files 限额刷新队列最大并发数，最大 `100` |
+| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | 手动刷新和定时刷新共用的 Auth Files 限额刷新队列最大并发数，最大 `100` |
 
 ### Redis 队列高级配置
 
@@ -314,6 +315,7 @@ cp .env.example .env
 | `LOG_LEVEL` | 否 | `info` | 日志级别 |
 | `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
 | `LOG_RETENTION_DAYS` | 否 | `7` | 日志保留天数；`0` 表示不自动清理 |
+| `CLEANUP_USAGE_EVENTS_ENABLED` | 否 | `false` | 是否在每日维护中删除过期 `usage_events` 原始事件；启用后会删除上个月 1 日 00:00 之前的数据 |
 | `BACKUP_ENABLED` | 否 | `true` | 是否启用 SQLite 数据库备份 |
 | `BACKUP_INTERVAL` | 否 | `24h` | 数据库备份间隔 |
 | `BACKUP_RETENTION_DAYS` | 否 | `7` | 备份保留天数 |

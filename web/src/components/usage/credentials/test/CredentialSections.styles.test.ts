@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const credentialStyles = readFileSync(new URL('./CredentialSections.module.scss', import.meta.url), 'utf8')
-const themeStyles = readFileSync(new URL('../../../styles/themes.scss', import.meta.url), 'utf8')
-const credentialShellSource = readFileSync(new URL('./CredentialSectionShell.tsx', import.meta.url), 'utf8')
-const credentialHealthSource = readFileSync(new URL('./CredentialHealthPanel.tsx', import.meta.url), 'utf8')
-const aiProviderSectionSource = readFileSync(new URL('./AiProviderCredentialsSection.tsx', import.meta.url), 'utf8')
-const authFileSectionSource = readFileSync(new URL('./AuthFileCredentialsSection.tsx', import.meta.url), 'utf8')
+const credentialStyles = readFileSync(new URL('../CredentialSections.module.scss', import.meta.url), 'utf8')
+const themeStyles = readFileSync(new URL('../../../../styles/themes.scss', import.meta.url), 'utf8')
+const credentialShellSource = readFileSync(new URL('../CredentialSectionShell.tsx', import.meta.url), 'utf8')
+const credentialHealthSource = readFileSync(new URL('../CredentialHealthPanel.tsx', import.meta.url), 'utf8')
+const aiProviderSectionSource = readFileSync(new URL('../AiProviderCredentialsSection.tsx', import.meta.url), 'utf8')
+const authFileSectionSource = readFileSync(new URL('../AuthFileCredentialsSection.tsx', import.meta.url), 'utf8')
 
 const cssBlock = (selector: string) => {
   const start = credentialStyles.indexOf(selector)
@@ -118,6 +118,26 @@ describe('Credential section styles', () => {
     expect(cssBlock('.credentialActiveOnlySwitch')).not.toContain('var(--primary-color)')
     expect(cssBlock('.credentialActiveOnlySwitch')).not.toContain('var(--accent-color)')
     expect(credentialStyles).not.toContain('#34c759')
+  })
+
+  it('keeps scheduled refresh controls stable, clear, and compact', () => {
+    expect(authFileSectionSource).toContain('credentialAutoRefreshScheduleArea')
+    expect(authFileSectionSource).toContain('credentialAutoRefreshScheduleAreaActive')
+    expect(authFileSectionSource).toContain('credentialAutoRefreshIntervalField')
+    expect(authFileSectionSource).toContain('credentialAutoRefreshUnitSuffix')
+    expect(authFileSectionSource).not.toContain('credentialAutoRefreshField')
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshScheduleArea\s*\{[\s\S]*?grid-template-rows:\s*0fr;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshScheduleArea\s*\{[\s\S]*?transition:\s*grid-template-rows 0\.18s ease, opacity 0\.16s ease;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshScheduleAreaActive\s*\{[\s\S]*?grid-template-rows:\s*1fr;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshUnitButtonActive\s*\{[\s\S]*?background:\s*linear-gradient\(135deg, var\(--primary-color\), var\(--primary-hover\)\) !important;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshUnitButtonActive\s*\{[\s\S]*?color:\s*var\(--primary-contrast, #fff\) !important;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshIntervalField\s*\{[\s\S]*?grid-template-columns:\s*max-content minmax\(72px, 96px\) max-content;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshIntervalField\s*\{[\s\S]*?align-items:\s*center;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshIntervalField\s*\{[\s\S]*?input,\s*select\s*\{[\s\S]*?min-height:\s*32px;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshIntervalField\s*\{[\s\S]*?input,\s*select\s*\{[\s\S]*?text-align:\s*center;/)
+    expect(authFileSectionSource).toContain('credentialAutoRefreshScheduleTip')
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshScheduleTip\s*\{[\s\S]*?font-size:\s*12px;/)
+    expect(credentialStyles).toMatch(/\.credentialAutoRefreshScheduleTip\s*\{[\s\S]*?line-height:\s*1\.45;/)
   })
 
   it('renders Auth Files health buckets as compact hover detail targets', () => {

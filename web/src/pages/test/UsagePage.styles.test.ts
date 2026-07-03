@@ -3,23 +3,23 @@ import { describe, expect, it } from 'vitest'
 
 const readSource = (url: URL) => readFileSync(url, 'utf8').replace(/\r\n/g, '\n')
 
-const globalStyles = readSource(new URL('../styles/global.scss', import.meta.url))
-const usagePageStyles = readSource(new URL('./UsagePage.module.scss', import.meta.url))
-const usagePageSource = readSource(new URL('./UsagePage.tsx', import.meta.url))
-const keyOverviewPageSource = readSource(new URL('./KeyOverviewPage.tsx', import.meta.url))
-const requestEventsSource = readSource(new URL('../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
-const priceSettingsSource = readSource(new URL('../components/usage/PriceSettingsCard.tsx', import.meta.url))
-const selectSource = readSource(new URL('../components/ui/Select.tsx', import.meta.url))
-const apiIndexSource = readSource(new URL('../components/usage/index.ts', import.meta.url))
-const apiClientSource = readSource(new URL('../lib/api.ts', import.meta.url))
-const i18nSource = readSource(new URL('../i18n/index.ts', import.meta.url))
-const apiKeySettingsSource = readSource(new URL('../components/usage/ApiKeySettingsCard.tsx', import.meta.url))
-const sessionSettingsSource = readSource(new URL('../components/usage/SessionSettingsCard.tsx', import.meta.url))
-const analysisPanelSource = readSource(new URL('../components/usage/analysis/AnalysisPanel.tsx', import.meta.url))
-const analysisPanelStyles = readSource(new URL('../components/usage/analysis/AnalysisPanel.module.scss', import.meta.url))
-const overviewRealtimePanelSource = readSource(new URL('../components/usage/OverviewRealtimePanel.tsx', import.meta.url))
-const statCardsSource = readSource(new URL('../components/usage/StatCards.tsx', import.meta.url))
-const dailyAveragePanelSource = readSource(new URL('../components/usage/DailyAveragePanel.tsx', import.meta.url))
+const globalStyles = readSource(new URL('../../styles/global.scss', import.meta.url))
+const usagePageStyles = readSource(new URL('../UsagePage.module.scss', import.meta.url))
+const usagePageSource = readSource(new URL('../UsagePage.tsx', import.meta.url))
+const keyOverviewPageSource = readSource(new URL('../KeyOverviewPage.tsx', import.meta.url))
+const requestEventsSource = readSource(new URL('../../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
+const priceSettingsSource = readSource(new URL('../../components/usage/PriceSettingsCard.tsx', import.meta.url))
+const selectSource = readSource(new URL('../../components/ui/Select.tsx', import.meta.url))
+const apiIndexSource = readSource(new URL('../../components/usage/index.ts', import.meta.url))
+const apiClientSource = readSource(new URL('../../lib/api.ts', import.meta.url))
+const i18nSource = readSource(new URL('../../i18n/index.ts', import.meta.url))
+const apiKeySettingsSource = readSource(new URL('../../components/usage/ApiKeySettingsCard.tsx', import.meta.url))
+const sessionSettingsSource = readSource(new URL('../../components/usage/SessionSettingsCard.tsx', import.meta.url))
+const analysisPanelSource = readSource(new URL('../../components/usage/analysis/AnalysisPanel.tsx', import.meta.url))
+const analysisPanelStyles = readSource(new URL('../../components/usage/analysis/AnalysisPanel.module.scss', import.meta.url))
+const overviewRealtimePanelSource = readSource(new URL('../../components/usage/OverviewRealtimePanel.tsx', import.meta.url))
+const statCardsSource = readSource(new URL('../../components/usage/StatCards.tsx', import.meta.url))
+const dailyAveragePanelSource = readSource(new URL('../../components/usage/DailyAveragePanel.tsx', import.meta.url))
 
 const requestEventColumnDefinitionBlock = (columnId: string) => {
   const start = requestEventsSource.indexOf(`id: '${columnId}',`)
@@ -30,6 +30,14 @@ const requestEventColumnDefinitionBlock = (columnId: string) => {
 }
 
 describe('UsagePage toolbar styles', () => {
+  it('pins top notices to the viewport instead of the scrolled page body', () => {
+    const noticeBlock = usagePageStyles.match(/\.updateCheckToast\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+
+    expect(noticeBlock).toContain('position: fixed;')
+    expect(noticeBlock).toContain('z-index: $z-notification;')
+    expect(noticeBlock).not.toContain('position: absolute;')
+  })
+
   it('keeps visible range controls content-sized in narrow layouts', () => {
     expect(usagePageStyles).toMatch(/\.timeRangeGroup\s*\{[\s\S]*?width:\s*fit-content;/)
     expect(usagePageStyles).toMatch(/\.timeRangeSelectControl\s*\{[\s\S]*?flex:\s*0 0 164px;/)
@@ -136,7 +144,7 @@ describe('UsagePage toolbar styles', () => {
   })
 
   it('keeps Sign out as the rightmost header action after Check Updates', () => {
-    expect(usagePageSource).toContain("import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';")
+    expect(usagePageSource).toContain("import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';")
     expect(usagePageSource).toContain('logout')
     expect(usagePageSource).toContain('fetchUpdateCheck')
     expect(usagePageSource.indexOf("t('usage_stats.check_updates')")).toBeLessThan(usagePageSource.indexOf("t('common.logout')"))

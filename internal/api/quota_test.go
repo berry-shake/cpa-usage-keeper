@@ -82,6 +82,14 @@ func (s *quotaProviderStub) StartInspection(ctx context.Context) (quota.Inspecti
 	return s.inspectionStartResponse, nil
 }
 
+func (s *quotaProviderStub) GetAutoRefreshSettings(ctx context.Context) (quota.AutoRefreshSettings, error) {
+	return quota.AutoRefreshSettings{}, nil
+}
+
+func (s *quotaProviderStub) UpdateAutoRefreshSettings(ctx context.Context, settings quota.AutoRefreshSettings) (quota.AutoRefreshSettings, error) {
+	return settings, nil
+}
+
 func TestQuotaCacheReturnsCachedCurrentPageQuota(t *testing.T) {
 	refreshedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	provider := &quotaProviderStub{cacheResponse: quota.CacheResponse{

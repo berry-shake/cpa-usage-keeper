@@ -32,14 +32,6 @@ func (s statusStub) Status() poller.Status {
 	return s.status
 }
 
-type activeStatusRecorderStub struct {
-	calls int
-}
-
-func (s *activeStatusRecorderStub) RecordActiveStatus(time.Time) {
-	s.calls++
-}
-
 func TestHealthzReturnsOK(t *testing.T) {
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "")
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -390,23 +382,6 @@ func TestStatusReturnsCPAPublicURL(t *testing.T) {
 	}
 }
 
-func TestStatusReturnsQuotaAutoRefreshEnabled(t *testing.T) {
-	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", OptionalProviders{
-		Status: StatusRouteConfig{QuotaAutoRefreshEnabled: true},
-	})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
-	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", resp.Code)
-	}
-	body := resp.Body.String()
-	if !contains(body, `"quotaAutoRefreshEnabled":true`) {
-		t.Fatalf("expected quota auto refresh flag in status response, got %s", body)
-	}
-}
-
 func TestStatusOmitsCPAPublicURLWhenUnset(t *testing.T) {
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", OptionalProviders{
 		Status: StatusRouteConfig{},
@@ -420,24 +395,6 @@ func TestStatusOmitsCPAPublicURLWhenUnset(t *testing.T) {
 	}
 	if body := resp.Body.String(); contains(body, "cpa_public_url") || contains(body, "cpa_management_url") {
 		t.Fatalf("expected status response to omit CPA browser URL fields when unset, got %s", body)
-	}
-}
-
-func TestStatusActiveRecordsBackendActivity(t *testing.T) {
-	recorder := &activeStatusRecorderStub{}
-	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", OptionalProviders{
-		Status: StatusRouteConfig{ActiveRecorder: recorder},
-	})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status/active", nil)
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusNoContent {
-		t.Fatalf("expected status 204, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if recorder.calls != 1 {
-		t.Fatalf("expected active recorder to be called once, got %d", recorder.calls)
 	}
 }
 

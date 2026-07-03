@@ -111,11 +111,12 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	}
 
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
-	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit, AutoRefreshInterval: cfg.QuotaAutoRefreshInterval})
+	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit})
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
-		BaseURL: cfg.CPABaseURL,
-		Client:  cpaClient,
+		BaseURL:                   cfg.CPABaseURL,
+		Client:                    cpaClient,
+		CleanupUsageEventsEnabled: cfg.CleanupUsageEventsEnabled,
 		// usage_events 事务提交后通过这个缓存做非阻塞增量追加，供 Overview realtime 和右边界补偿复用。
 		RecentUsageEvents: recentUsageCache,
 		// Redis usage response_headers 提交后异步 patch quota cache，不参与 usage_events 入库事务。
@@ -209,7 +210,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		Maintenance:       NewStorageCleanupRunner(syncService),
 		MetadataSync:      metadataSyncRunner,
 		QuotaService:      quotaService,
-		QuotaAutoRefresh:  quotaAutoRefreshService(cfg, quotaService),
+		QuotaAutoRefresh:  quotaService,
 		BackupMaintenance: backupMaintenance,
 		RecentUsageCache:  recentUsageCache,
 		LogCloser:         logCloser,
@@ -226,7 +227,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 				Quota:         quotaService,
 				CPAAPIKeys:    cpaAPIKeyService,
 				AuthFiles:     authFilesManagementService,
-				Status:        api.StatusRouteConfig{CPAPublicURL: cfg.CPAPublicURL, ActiveRecorder: quotaActiveRecorder(cfg, quotaService), QuotaAutoRefreshEnabled: cfg.QuotaAutoRefreshEnabled},
+				Status:        api.StatusRouteConfig{CPAPublicURL: cfg.CPAPublicURL},
 			},
 		),
 	}, nil
@@ -250,20 +251,6 @@ func publicOrigin(candidate string) (string, bool) {
 		return "", false
 	}
 	return scheme + "://" + parsed.Host, true
-}
-
-func quotaActiveRecorder(cfg config.Config, service *quota.Service) api.ActiveStatusRecorder {
-	if !cfg.QuotaAutoRefreshEnabled {
-		return nil
-	}
-	return service
-}
-
-func quotaAutoRefreshService(cfg config.Config, service *quota.Service) QuotaRunner {
-	if !cfg.QuotaAutoRefreshEnabled {
-		return nil
-	}
-	return service
 }
 
 func closeGormDB(db *gorm.DB) error {

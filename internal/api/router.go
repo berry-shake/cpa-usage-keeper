@@ -28,23 +28,19 @@ type StatusProvider interface {
 	Status() poller.Status
 }
 
-type ActiveStatusRecorder interface {
-	RecordActiveStatus(time.Time)
-}
-
 type QuotaProvider interface {
 	GetCachedQuota(context.Context, quota.CacheRequest) (quota.CacheResponse, error)
 	Refresh(context.Context, quota.RefreshRequest) (quota.RefreshResponse, error)
 	GetRefreshTaskByAuthIndex(context.Context, string) (quota.RefreshTaskResponse, error)
 	GetInspectionStatus(context.Context) (quota.InspectionStatus, error)
 	StartInspection(context.Context) (quota.InspectionStatus, error)
+	GetAutoRefreshSettings(context.Context) (quota.AutoRefreshSettings, error)
+	UpdateAutoRefreshSettings(context.Context, quota.AutoRefreshSettings) (quota.AutoRefreshSettings, error)
 	Reset(context.Context, quota.ResetRequest) (quota.ResetResponse, error)
 }
 
 type StatusRouteConfig struct {
-	CPAPublicURL            string
-	ActiveRecorder          ActiveStatusRecorder
-	QuotaAutoRefreshEnabled bool
+	CPAPublicURL string
 }
 
 type OptionalProviders struct {
@@ -278,15 +274,14 @@ func stripBasePath(basePath, requestPath string) (string, bool) {
 }
 
 type statusResponse struct {
-	Running                 bool       `json:"running"`
-	SyncRunning             bool       `json:"sync_running"`
-	Timezone                string     `json:"timezone"`
-	QuotaAutoRefreshEnabled bool       `json:"quotaAutoRefreshEnabled"`
-	CPAPublicURL            string     `json:"cpa_public_url,omitempty"`
-	LastRunAt               *time.Time `json:"last_run_at,omitempty"`
-	LastError               string     `json:"last_error,omitempty"`
-	LastWarning             string     `json:"last_warning,omitempty"`
-	LastStatus              string     `json:"last_status,omitempty"`
+	Running      bool       `json:"running"`
+	SyncRunning  bool       `json:"sync_running"`
+	Timezone     string     `json:"timezone"`
+	CPAPublicURL string     `json:"cpa_public_url,omitempty"`
+	LastRunAt    *time.Time `json:"last_run_at,omitempty"`
+	LastError    string     `json:"last_error,omitempty"`
+	LastWarning  string     `json:"last_warning,omitempty"`
+	LastStatus   string     `json:"last_status,omitempty"`
 }
 
 type versionResponse struct {
@@ -317,25 +312,17 @@ func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider, con
 
 		c.JSON(http.StatusOK, buildStatusResponse(statusProvider.Status(), config))
 	})
-	router.GET("/status/active", func(c *gin.Context) {
-		if config.ActiveRecorder != nil {
-			// 前端可见页面用这个轻量心跳续约，避免限额自动刷新在无人查看后台时持续扫库和请求上游。
-			config.ActiveRecorder.RecordActiveStatus(time.Now())
-		}
-		c.Status(http.StatusNoContent)
-	})
 }
 
 func buildStatusResponse(status poller.Status, config StatusRouteConfig) statusResponse {
 	response := statusResponse{
-		Running:                 status.Running,
-		SyncRunning:             status.SyncRunning,
-		Timezone:                time.Local.String(),
-		QuotaAutoRefreshEnabled: config.QuotaAutoRefreshEnabled,
-		CPAPublicURL:            config.CPAPublicURL,
-		LastError:               status.LastError,
-		LastWarning:             status.LastWarning,
-		LastStatus:              status.LastStatus,
+		Running:      status.Running,
+		SyncRunning:  status.SyncRunning,
+		Timezone:     time.Local.String(),
+		CPAPublicURL: config.CPAPublicURL,
+		LastError:    status.LastError,
+		LastWarning:  status.LastWarning,
+		LastStatus:   status.LastStatus,
 	}
 	if !status.LastRunAt.IsZero() {
 		lastRunAt := timeutil.NormalizeStorageTime(status.LastRunAt)

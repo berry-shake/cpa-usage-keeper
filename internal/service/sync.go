@@ -54,31 +54,34 @@ const (
 
 // SyncService 负责同步 CPA metadata，并处理已经落入本地 inbox 的 usage 原始消息。
 type SyncService struct {
-	db               *gorm.DB
-	client           CPAClientFetcher
-	metadataFetcher  MetadataFetcher
-	baseURL          string
-	now              func() time.Time
-	recentUsage      RecentUsageEventAppender
-	usageHeaderQuota quota.UsageHeaderSnapshotAppender
+	db                        *gorm.DB
+	client                    CPAClientFetcher
+	metadataFetcher           MetadataFetcher
+	baseURL                   string
+	now                       func() time.Time
+	recentUsage               RecentUsageEventAppender
+	usageHeaderQuota          quota.UsageHeaderSnapshotAppender
+	cleanupUsageEventsEnabled bool
 }
 
 // NewSyncService 按生产配置组装 CPA metadata client；远端 usage 拉取由 poller 独立负责。
 func NewSyncService(db *gorm.DB, cfg config.Config) *SyncService {
 	return NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: cfg.CPABaseURL,
-		Client:  cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify),
+		BaseURL:                   cfg.CPABaseURL,
+		Client:                    cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify),
+		CleanupUsageEventsEnabled: cfg.CleanupUsageEventsEnabled,
 	})
 }
 
 // SyncServiceOptions 提供测试和局部调用需要替换的依赖。
 type SyncServiceOptions struct {
-	BaseURL           string
-	Client            CPAClientFetcher
-	MetadataFetcher   MetadataFetcher
-	Now               func() time.Time
-	RecentUsageEvents RecentUsageEventAppender
-	UsageHeaderQuota  quota.UsageHeaderSnapshotAppender
+	BaseURL                   string
+	Client                    CPAClientFetcher
+	MetadataFetcher           MetadataFetcher
+	Now                       func() time.Time
+	RecentUsageEvents         RecentUsageEventAppender
+	UsageHeaderQuota          quota.UsageHeaderSnapshotAppender
+	CleanupUsageEventsEnabled bool
 }
 
 // NewSyncServiceWithOptions 是统一构造入口，负责填充默认时钟和 metadata fetcher。
@@ -92,13 +95,14 @@ func NewSyncServiceWithOptions(db *gorm.DB, opts SyncServiceOptions) *SyncServic
 		metadataFetcher = opts.Client
 	}
 	return &SyncService{
-		db:               db,
-		client:           opts.Client,
-		metadataFetcher:  metadataFetcher,
-		baseURL:          strings.TrimSpace(opts.BaseURL),
-		now:              now,
-		recentUsage:      opts.RecentUsageEvents,
-		usageHeaderQuota: opts.UsageHeaderQuota,
+		db:                        db,
+		client:                    opts.Client,
+		metadataFetcher:           metadataFetcher,
+		baseURL:                   strings.TrimSpace(opts.BaseURL),
+		now:                       now,
+		recentUsage:               opts.RecentUsageEvents,
+		usageHeaderQuota:          opts.UsageHeaderQuota,
+		cleanupUsageEventsEnabled: opts.CleanupUsageEventsEnabled,
 	}
 }
 
@@ -201,12 +205,14 @@ func (s *SyncService) CleanupRedisUsageInbox(ctx context.Context) error {
 	return err
 }
 
-// CleanupStorage 是每日 04:30 维护任务调用的统一入口：先清 Redis inbox 和过期 usage_events，最后 VACUUM 收缩 SQLite。
+// CleanupStorage 是每日 04:30 维护任务调用的统一入口：先清 Redis inbox，按配置清 usage_events，最后 VACUUM 收缩 SQLite。
 func (s *SyncService) CleanupStorage(ctx context.Context) error {
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return err
 	}
-	result, err := repository.CleanupStorage(s.db, s.now())
+	result, err := repository.CleanupStorage(s.db, s.now(), repository.CleanupStorageOptions{
+		CleanupUsageEvents: s.cleanupUsageEventsEnabled,
+	})
 	logrus.WithFields(logrus.Fields{
 		"redis_processed_deleted": result.RedisInbox.ProcessedDeleted,
 		"redis_failed_deleted":    result.RedisInbox.FailedDeleted,

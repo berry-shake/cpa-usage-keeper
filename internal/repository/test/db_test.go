@@ -1,8 +1,9 @@
-package repository
+package test
 
 import (
 	"bytes"
 	"context"
+	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/repository/dto"
 	"fmt"
 	"path/filepath"
@@ -16,13 +17,18 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	testRedisInboxSource               = "redis_pull:usage"
+	usageOverviewAggregationCheckpoint = "overview"
+)
+
 func TestOpenDatabaseAutoMigratesCoreTables(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "app.db")
 	cfg := config.Config{
 		SQLitePath: dbPath,
 	}
 
-	db, err := OpenDatabase(cfg)
+	db, err := repository.OpenDatabase(cfg)
 	if err != nil {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
@@ -46,18 +52,25 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 	logs := captureRepositoryLogs(t)
 	dbPath := filepath.Join(t.TempDir(), "app.db")
 
-	db, err := OpenDatabase(config.Config{SQLitePath: dbPath})
+	db, err := repository.OpenDatabase(config.Config{SQLitePath: dbPath})
 	if err != nil {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}
 	closeTestDatabase(t, db)
 
-	var count int64
-	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
-		t.Fatalf("count schema migrations: %v", err)
+	var latestMigrationCount int64
+	if err := db.Table("schema_migrations").Where("version = ?", "20260702_model_price_multiplier").Count(&latestMigrationCount).Error; err != nil {
+		t.Fatalf("count latest schema migration: %v", err)
 	}
-	if count != 41 {
-		t.Fatalf("expected fresh database to mark 41 migrations applied, got %d", count)
+	if latestMigrationCount != 1 {
+		t.Fatalf("expected fresh database to mark latest migration applied, got %d", latestMigrationCount)
+	}
+	var appSettingsMigrationCount int64
+	if err := db.Table("schema_migrations").Where("version = ?", "20260702_create_app_settings").Count(&appSettingsMigrationCount).Error; err != nil {
+		t.Fatalf("count app settings schema migration: %v", err)
+	}
+	if appSettingsMigrationCount != 1 {
+		t.Fatalf("expected fresh database to mark app settings migration applied, got %d", appSettingsMigrationCount)
 	}
 	if strings.Contains(logs.String(), "schema migration started") {
 		t.Fatalf("expected fresh database creation not to run version migrations, got logs:\n%s", logs.String())
@@ -82,6 +95,12 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 	}
 	if !db.Migrator().HasColumn(&entities.UsageIdentity{}, "alias") {
 		t.Fatal("expected usage_identities.alias column to exist")
+	}
+	if !db.Migrator().HasColumn(&entities.ModelPriceSetting{}, "price_multiplier") {
+		t.Fatal("expected model_price_settings.price_multiplier column to exist")
+	}
+	if !db.Migrator().HasTable(&entities.AppSetting{}) {
+		t.Fatal("expected app_settings table to exist")
 	}
 	for _, indexName := range []string{
 		"idx_usage_events_api_group_key",
@@ -174,7 +193,7 @@ func TestInsertUsageEventsPersistsDuplicateEventKeys(t *testing.T) {
 		{EventKey: "event-2", APIGroupKey: "provider-a", Model: "claude-haiku", Timestamp: time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC), TotalTokens: 30},
 	}
 
-	inserted, deduped, err := InsertUsageEvents(db, events)
+	inserted, deduped, err := repository.InsertUsageEvents(db, events)
 	if err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
@@ -210,7 +229,7 @@ func TestInsertUsageEventsBatchesLargeInsertSet(t *testing.T) {
 		})
 	}
 
-	inserted, deduped, err := InsertUsageEvents(db, events)
+	inserted, deduped, err := repository.InsertUsageEvents(db, events)
 	if err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
@@ -241,7 +260,7 @@ func TestInsertUsageEventsPersistsModelAlias(t *testing.T) {
 		TotalTokens: 10,
 	}}
 
-	inserted, deduped, err := InsertUsageEvents(db, events)
+	inserted, deduped, err := repository.InsertUsageEvents(db, events)
 	if err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
@@ -272,7 +291,7 @@ func TestInsertUsageEventsPersistsTTFTMS(t *testing.T) {
 		TotalTokens: 10,
 	}}
 
-	inserted, deduped, err := InsertUsageEvents(db, events)
+	inserted, deduped, err := repository.InsertUsageEvents(db, events)
 	if err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
@@ -304,7 +323,7 @@ func TestInsertUsageEventsPersistsServiceTier(t *testing.T) {
 		TotalTokens: 10,
 	}}
 
-	inserted, deduped, err := InsertUsageEvents(db, events)
+	inserted, deduped, err := repository.InsertUsageEvents(db, events)
 	if err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
@@ -336,7 +355,7 @@ func TestInsertUsageEventsPersistsExecutorType(t *testing.T) {
 		TotalTokens:  10,
 	}}
 
-	inserted, deduped, err := InsertUsageEvents(db, events)
+	inserted, deduped, err := repository.InsertUsageEvents(db, events)
 	if err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
@@ -366,7 +385,7 @@ func TestDatabaseTimeFieldsUseProjectTimezoneRFC3339Nano(t *testing.T) {
 	db := openTestDatabase(t)
 
 	storageTime := time.Date(2026, 5, 12, 21, 59, 18, 353569620, location)
-	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey:    "event-storage-time",
 		APIGroupKey: "provider-a",
 		Model:       "claude-sonnet",
@@ -377,19 +396,19 @@ func TestDatabaseTimeFieldsUseProjectTimezoneRFC3339Nano(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-sonnet", PromptPricePer1M: 1}); err != nil {
+	if _, err := repository.UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-sonnet", PromptPricePer1M: 1}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
-	inboxRows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{Source: testRedisInboxSource, RawMessage: `{"request_id":"event-storage-time"}`, PoppedAt: storageTime}})
+	inboxRows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{Source: testRedisInboxSource, RawMessage: `{"request_id":"event-storage-time"}`, PoppedAt: storageTime}})
 	if err != nil {
 		t.Fatalf("InsertRedisUsageInboxMessages returned error: %v", err)
 	}
-	if err := MarkRedisUsageInboxProcessed(db, inboxRows[0].ID, "event-storage-time", storageTime); err != nil {
+	if err := repository.MarkRedisUsageInboxProcessed(db, inboxRows[0].ID, "event-storage-time", storageTime); err != nil {
 		t.Fatalf("MarkRedisUsageInboxProcessed returned error: %v", err)
 	}
 	activeStart := storageTime
 	activeUntil := storageTime.Add(time.Hour)
-	if err := ReplaceUsageIdentitiesForAuthType(context.Background(), db, []entities.UsageIdentity{{
+	if err := repository.ReplaceUsageIdentitiesForAuthType(context.Background(), db, []entities.UsageIdentity{{
 		Name:        "Auth 1",
 		Identity:    "auth-1",
 		ActiveStart: &activeStart,
@@ -397,10 +416,10 @@ func TestDatabaseTimeFieldsUseProjectTimezoneRFC3339Nano(t *testing.T) {
 	}}, entities.UsageIdentityAuthTypeAuthFile, storageTime); err != nil {
 		t.Fatalf("ReplaceUsageIdentitiesForAuthType returned error: %v", err)
 	}
-	if err := AggregateUsageIdentityStats(context.Background(), db, storageTime); err != nil {
+	if err := repository.AggregateUsageIdentityStats(context.Background(), db, storageTime); err != nil {
 		t.Fatalf("AggregateUsageIdentityStats returned error: %v", err)
 	}
-	if err := ReplaceUsageIdentitiesForAuthType(context.Background(), db, nil, entities.UsageIdentityAuthTypeAuthFile, storageTime); err != nil {
+	if err := repository.ReplaceUsageIdentitiesForAuthType(context.Background(), db, nil, entities.UsageIdentityAuthTypeAuthFile, storageTime); err != nil {
 		t.Fatalf("ReplaceUsageIdentitiesForAuthType delete returned error: %v", err)
 	}
 
@@ -442,14 +461,14 @@ func TestCleanupStorageCleansRedisInboxAndVacuums(t *testing.T) {
 	db := openTestDatabase(t)
 	now := time.Date(2026, 4, 27, 2, 30, 0, 0, time.UTC)
 
-	inboxRows, err := InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
+	inboxRows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{
 		{Source: testRedisInboxSource, RawMessage: `{"request_id":"processed-old"}`, PoppedAt: now.AddDate(0, 0, -2)},
 		{Source: testRedisInboxSource, RawMessage: `{"request_id":"pending"}`, PoppedAt: now.AddDate(0, 0, -2)},
 	})
 	if err != nil {
 		t.Fatalf("InsertRedisUsageInboxMessages returned error: %v", err)
 	}
-	if err := db.Model(&entities.RedisUsageInbox{}).Where("id = ?", inboxRows[0].ID).Updates(map[string]any{"status": RedisUsageInboxStatusProcessed, "processed_at": time.Date(2026, 4, 26, 15, 59, 59, 0, time.UTC)}).Error; err != nil {
+	if err := db.Model(&entities.RedisUsageInbox{}).Where("id = ?", inboxRows[0].ID).Updates(map[string]any{"status": repository.RedisUsageInboxStatusProcessed, "processed_at": time.Date(2026, 4, 26, 15, 59, 59, 0, time.UTC)}).Error; err != nil {
 		t.Fatalf("seed processed inbox row: %v", err)
 	}
 	if err := db.Create(&[]entities.UsageOverviewHealthStat{
@@ -459,7 +478,7 @@ func TestCleanupStorageCleansRedisInboxAndVacuums(t *testing.T) {
 		t.Fatalf("seed health stats: %v", err)
 	}
 
-	result, err := CleanupStorage(db, now)
+	result, err := repository.CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
@@ -494,14 +513,14 @@ func TestCleanupStorageCleansUsageEventsBeforePreviousMonthStart(t *testing.T) {
 	db := openTestDatabase(t)
 	now := time.Date(2026, 6, 16, 9, 0, 0, 0, time.Local)
 
-	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "old", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 30, 23, 59, 59, 0, time.Local), TotalTokens: 1},
 		{EventKey: "boundary", Model: "claude-sonnet", Timestamp: time.Date(2026, 5, 1, 0, 0, 0, 0, time.Local), TotalTokens: 2},
 		{EventKey: "recent", Model: "claude-sonnet", Timestamp: time.Date(2026, 6, 16, 8, 0, 0, 0, time.Local), TotalTokens: 3},
 	}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	result, err := CleanupStorage(db, now)
+	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
@@ -523,7 +542,7 @@ func TestCleanupStorageCleansUsageEventsWithoutOverviewCheckpointGuard(t *testin
 	db := openTestDatabase(t)
 	now := time.Date(2026, 6, 16, 9, 0, 0, 0, time.Local)
 
-	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "old-without-checkpoint", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 29, 10, 0, 0, 0, time.Local), TotalTokens: 1},
 		{EventKey: "old-beyond-checkpoint", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 30, 10, 0, 0, 0, time.Local), TotalTokens: 2},
 	}); err != nil {
@@ -533,11 +552,11 @@ func TestCleanupStorageCleansUsageEventsWithoutOverviewCheckpointGuard(t *testin
 	if err := db.Where("event_key = ?", "old-without-checkpoint").First(&first).Error; err != nil {
 		t.Fatalf("load first event: %v", err)
 	}
-	if err := db.Create(&entities.UsageOverviewAggregationCheckpoint{Name: usageOverviewAggregationCheckpointName, LastAggregatedUsageEventID: first.ID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+	if err := db.Create(&entities.UsageOverviewAggregationCheckpoint{Name: usageOverviewAggregationCheckpoint, LastAggregatedUsageEventID: first.ID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatalf("seed overview checkpoint: %v", err)
 	}
 
-	result, err := CleanupStorage(db, now)
+	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
@@ -558,7 +577,7 @@ func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testin
 	db := openTestDatabase(t)
 	now := time.Date(2026, 6, 16, 9, 0, 0, 0, time.Local)
 
-	if _, _, err := InsertUsageEvents(db, []entities.UsageEvent{
+	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{
 		{EventKey: "identity-aggregated-old", AuthType: "oauth", AuthIndex: "auth-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 29, 10, 0, 0, 0, time.Local), TotalTokens: 1},
 		{EventKey: "identity-pending-old", AuthType: "oauth", AuthIndex: "auth-1", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 30, 10, 0, 0, 0, time.Local), TotalTokens: 2},
 	}); err != nil {
@@ -568,7 +587,7 @@ func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testin
 	if err := db.Order("id asc").Find(&events).Error; err != nil {
 		t.Fatalf("load usage events: %v", err)
 	}
-	if err := db.Create(&entities.UsageOverviewAggregationCheckpoint{Name: usageOverviewAggregationCheckpointName, LastAggregatedUsageEventID: events[1].ID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+	if err := db.Create(&entities.UsageOverviewAggregationCheckpoint{Name: usageOverviewAggregationCheckpoint, LastAggregatedUsageEventID: events[1].ID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatalf("seed overview checkpoint: %v", err)
 	}
 	if err := db.Create(&entities.UsageIdentity{
@@ -582,7 +601,7 @@ func TestCleanupStorageCleansUsageEventsWithoutIdentityCheckpointGuard(t *testin
 		t.Fatalf("seed usage identity: %v", err)
 	}
 
-	result, err := CleanupStorage(db, now)
+	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
@@ -603,7 +622,7 @@ func openTestDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "app.db")
-	db, err := OpenDatabase(config.Config{SQLitePath: dbPath})
+	db, err := repository.OpenDatabase(config.Config{SQLitePath: dbPath})
 	if err != nil {
 		t.Fatalf("OpenDatabase returned error: %v", err)
 	}

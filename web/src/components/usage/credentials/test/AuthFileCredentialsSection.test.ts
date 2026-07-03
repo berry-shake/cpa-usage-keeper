@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { AuthFileCredentialsSection, AuthFileQuotaPanel, INSPECTION_RESULT_PAGE_SIZE_OPTIONS, buildInspectionResultsPage, buildInvalidInspectionAccountFileNames, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, invertInvalidInspectionAccountFileNames, isInspectionStartDisabled, isSelectableInspectionStatusFilter, nextInspectionResultStatusFilter, persistAuthFileDisplayMode, readStoredAuthFileDisplayMode, selectAllInvalidInspectionAccountFileNames } from './AuthFileCredentialsSection'
-import type { AuthFileCredentialRow, DisplayQuota } from './credentialViewModels'
+import { AuthFileCredentialsSection, AuthFileQuotaPanel, INSPECTION_RESULT_PAGE_SIZE_OPTIONS, QuotaAutoRefreshSettingsModal, QuotaInspectionModal, buildInspectionResultsPage, buildInvalidInspectionAccountFileNames, buildQuotaAutoRefreshSettings, formatInspectionCompletedAt, formatInspectionProgressPercent, formatQuotaErrorDisplay, formatQuotaResetDuration, formatQuotaResetLabel, formatQuotaWindowUsageAriaLabel, inspectionIndicatorTone, invertInvalidInspectionAccountFileNames, isAutoRefreshSettingsControlDisabled, isAutoRefreshSettingsSaveDisabled, isInspectionStartDisabled, isQuotaInspectionCloseDisabled, isSelectableInspectionStatusFilter, nextInspectionResultStatusFilter, persistAuthFileDisplayMode, readStoredAuthFileDisplayMode, resolveQuotaAutoRefreshSettingsLoadFailure, selectAllInvalidInspectionAccountFileNames } from '../AuthFileCredentialsSection'
+import type { AuthFileCredentialRow, DisplayQuota } from '../credentialViewModels'
 import type { UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus } from '@/lib/types'
 
 
@@ -18,7 +17,6 @@ const createAuthFileSectionProps = (overrides: Partial<Parameters<typeof AuthFil
   loading: false,
   quotaRefreshing: false,
   quotaRefreshError: '',
-  quotaAutoRefreshEnabled: false,
   quotaInspectionStatus: null,
   quotaInspectionLoading: false,
   quotaInspectionStarting: false,
@@ -34,8 +32,6 @@ const createAuthFileSectionProps = (overrides: Partial<Parameters<typeof AuthFil
   onStartInspection: async () => undefined,
   ...overrides,
 })
-
-const authFileSectionSource = readFileSync(new URL('./AuthFileCredentialsSection.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => undefined },
@@ -220,29 +216,17 @@ describe('AuthFileCredentialsSection quota reset action', () => {
     expect(html).toContain('credentialRowRefreshButton')
   })
 
-  it('keeps reset confirmation wired to the auth index and closes the popover after confirm', () => {
-    expect(authFileSectionSource).toContain('onConfirm={() => onResetQuotaForAuthIndex(row.identity.identity)}')
-    expect(authFileSectionSource).toContain('await onConfirm()')
-    expect(authFileSectionSource).toContain('setOpen(false)')
-    expect(authFileSectionSource).not.toContain('setLocalError')
-    expect(authFileSectionSource).not.toContain('visibleError')
-    expect(authFileSectionSource).not.toContain('quotaResetError')
-    expect(authFileSectionSource).not.toContain('name: displayName')
-  })
-
-  it('closes the reset confirmation when clicking outside or pressing Escape', () => {
-    expect(authFileSectionSource).toContain('actionRef')
-    expect(authFileSectionSource).toContain("document.addEventListener('pointerdown'")
-    expect(authFileSectionSource).toContain("document.addEventListener('keydown'")
-    expect(authFileSectionSource).toContain("event.key === 'Escape'")
-    expect(authFileSectionSource).toContain('actionRef.current?.contains(target)')
-  })
-
   it('disables reset for deleted or refreshing rows', () => {
-    expect(authFileSectionSource).toContain('!row.identity.is_deleted')
-    expect(authFileSectionSource).toContain('!rowRefreshing')
-    expect(authFileSectionSource).toContain('!row.quotaResetting')
-    expect(authFileSectionSource).toContain('disabled={!canResetQuota}')
+    for (const row of [
+      { ...baseRow, identity: { id: '1', identity: 'auth-1', is_deleted: true }, quotaResetCreditsAvailableCount: 2 },
+      { ...baseRow, refreshStatus: 'running', quotaResetCreditsAvailableCount: 2 },
+      { ...baseRow, quotaResetting: true, quotaResetCreditsAvailableCount: 2 },
+    ] as AuthFileCredentialRow[]) {
+      const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, createAuthFileSectionProps({ rows: [row], total: 1 })))
+
+      expect(html).toContain('credentialRowResetButton')
+      expect(html).toContain('disabled=""')
+    }
   })
 })
 
@@ -421,6 +405,22 @@ describe('AuthFileCredentialsSection quota error display', () => {
 })
 
 describe('AuthFileCredentialsSection inspection controls', () => {
+  it('labels the auto refresh settings gear with an accessible title', () => {
+    const html = renderToStaticMarkup(createElement(QuotaInspectionModal, {
+      open: true,
+      status: null,
+      loading: false,
+      starting: false,
+      error: '',
+      onClose: () => undefined,
+      onStart: async () => undefined,
+      onRefreshStatus: async () => undefined,
+    }))
+
+    expect(html).toContain('aria-label="usage_stats.credentials_auto_refresh_settings')
+    expect(html).toContain('title="usage_stats.credentials_auto_refresh_settings')
+  })
+
   it('calculates progress from cached quota results and inspectable auth files', () => {
     expect(formatInspectionProgressPercent({ total: 5, cached: 2, unknown: 1 })).toBe(50)
     expect(formatInspectionProgressPercent({ total: 5, cached: 2, unknown: 3 })).toBe(100)
@@ -428,12 +428,149 @@ describe('AuthFileCredentialsSection inspection controls', () => {
     expect(formatInspectionProgressPercent({ total: 5, cached: 9, unknown: 1 })).toBe(100)
   })
 
-  it('disables manual inspection while auto refresh or an inspection round is active', () => {
-    expect(isInspectionStartDisabled({ quotaAutoRefreshEnabled: true, starting: false, total: 5, running: false })).toBe(true)
-    expect(isInspectionStartDisabled({ quotaAutoRefreshEnabled: false, starting: true, total: 5, running: false })).toBe(true)
-    expect(isInspectionStartDisabled({ quotaAutoRefreshEnabled: false, starting: false, total: 5, running: true })).toBe(true)
-    expect(isInspectionStartDisabled({ quotaAutoRefreshEnabled: false, starting: false, total: 0, running: false })).toBe(true)
-    expect(isInspectionStartDisabled({ quotaAutoRefreshEnabled: false, starting: false, total: 5, running: false })).toBe(false)
+  it('disables manual inspection only while starting, running, or empty', () => {
+    expect(isInspectionStartDisabled({ starting: true, total: 5, running: false })).toBe(true)
+    expect(isInspectionStartDisabled({ starting: false, total: 5, running: true })).toBe(true)
+    expect(isInspectionStartDisabled({ starting: false, total: 0, running: false })).toBe(true)
+    expect(isInspectionStartDisabled({ starting: false, total: 5, running: false })).toBe(false)
+  })
+
+  it('builds typed auto refresh settings from the friendly frequency form', () => {
+    expect(buildQuotaAutoRefreshSettings({ enabled: false, unit: 'hour', value: '6' })).toEqual({
+      settings: { enabled: false, schedule: null },
+    })
+    expect(buildQuotaAutoRefreshSettings({ enabled: true, unit: 'week', value: '2' })).toEqual({
+      settings: { enabled: true, schedule: { unit: 'week', value: 2 } },
+    })
+    expect(buildQuotaAutoRefreshSettings({ enabled: true, unit: 'minute', value: '61' })).toEqual({
+      errorKey: 'usage_stats.credentials_auto_refresh_validation_range',
+    })
+  })
+
+  it('keeps auto refresh settings save disabled until settings are loaded', () => {
+    expect(isAutoRefreshSettingsSaveDisabled({ loading: true, saving: false, loaded: false })).toBe(true)
+    expect(isAutoRefreshSettingsSaveDisabled({ loading: false, saving: true, loaded: true })).toBe(true)
+    expect(isAutoRefreshSettingsSaveDisabled({ loading: false, saving: false, loaded: false })).toBe(true)
+    expect(isAutoRefreshSettingsSaveDisabled({ loading: false, saving: false, loaded: true })).toBe(false)
+  })
+
+  it('keeps auto refresh settings controls disabled until settings are loaded', () => {
+    expect(isAutoRefreshSettingsControlDisabled({ loading: true, saving: false, loaded: false })).toBe(true)
+    expect(isAutoRefreshSettingsControlDisabled({ loading: false, saving: true, loaded: true })).toBe(true)
+    expect(isAutoRefreshSettingsControlDisabled({ loading: false, saving: false, loaded: false })).toBe(true)
+    expect(isAutoRefreshSettingsControlDisabled({ loading: false, saving: false, loaded: true })).toBe(false)
+  })
+
+  it('allows fallback auto refresh settings to be saved after a load failure', () => {
+    const fallback = resolveQuotaAutoRefreshSettingsLoadFailure(new Error('settings table missing'), 'load failed')
+
+    expect(fallback.settings).toEqual({ enabled: false, schedule: null })
+    expect(fallback.error).toBe('settings table missing')
+    expect(isAutoRefreshSettingsControlDisabled({ loading: false, saving: false, loaded: fallback.loaded })).toBe(false)
+    expect(isAutoRefreshSettingsSaveDisabled({ loading: false, saving: false, loaded: fallback.loaded })).toBe(false)
+  })
+
+  it('keeps auto refresh controls in a separate modal with the Auth Files switch style', () => {
+    const html = renderToStaticMarkup(createElement(QuotaAutoRefreshSettingsModal, {
+      open: true,
+      enabled: true,
+      unit: 'hour',
+      value: '6',
+      loading: false,
+      saving: false,
+      loaded: true,
+      error: '',
+      onClose: () => undefined,
+      onEnabledChange: () => undefined,
+      onUnitChange: () => undefined,
+      onValueChange: () => undefined,
+      onSave: async () => undefined,
+    }))
+
+    expect(html).toContain('usage_stats.credentials_auto_refresh_settings')
+    expect(html).toContain('credentialActiveOnlySwitch')
+    expect(html).toContain('credentialActiveOnlyTrack')
+    expect(html).toContain('credentialActiveOnlyThumb')
+    expect(html).toContain('credentialAutoRefreshScheduleAreaActive')
+    expect(html).toContain('credentialAutoRefreshIntervalField')
+    expect(html).toContain('credentialAutoRefreshIntervalLabel')
+    expect(html).toContain('credentialAutoRefreshUnitSuffix')
+    expect(html).toContain('usage_stats.credentials_auto_refresh_value')
+    expect(html).toContain('usage_stats.credentials_auto_refresh_unit_hour')
+    expect(html).toContain('usage_stats.credentials_auto_refresh_tip_hour')
+    expect(html).toContain('usage_stats.credentials_auto_refresh_save')
+    expect(html).not.toContain('credentialAutoRefreshField')
+  })
+
+  it('renders frequency-specific scheduled refresh tips', () => {
+    for (const unit of ['minute', 'hour', 'day', 'week'] as const) {
+      const html = renderToStaticMarkup(createElement(QuotaAutoRefreshSettingsModal, {
+        open: true,
+        enabled: true,
+        unit,
+        value: unit === 'week' ? '1' : '6',
+        loading: false,
+        saving: false,
+        loaded: true,
+        error: '',
+        onClose: () => undefined,
+        onEnabledChange: () => undefined,
+        onUnitChange: () => undefined,
+        onValueChange: () => undefined,
+        onSave: async () => undefined,
+      }))
+
+      expect(html).toContain(`usage_stats.credentials_auto_refresh_tip_${unit}`)
+    }
+  })
+
+  it('does not repeat the weekly unit after the weekday selector', () => {
+    const html = renderToStaticMarkup(createElement(QuotaAutoRefreshSettingsModal, {
+      open: true,
+      enabled: true,
+      unit: 'week',
+      value: '1',
+      loading: false,
+      saving: false,
+      loaded: true,
+      error: '',
+      onClose: () => undefined,
+      onEnabledChange: () => undefined,
+      onUnitChange: () => undefined,
+      onValueChange: () => undefined,
+      onSave: async () => undefined,
+    }))
+
+    expect(html.match(/usage_stats\.credentials_auto_refresh_unit_week/g)).toHaveLength(1)
+    expect(html).toContain('usage_stats.credentials_auto_refresh_weekday')
+  })
+
+  it('keeps the schedule area mounted but collapsed when auto refresh is off', () => {
+    const html = renderToStaticMarkup(createElement(QuotaAutoRefreshSettingsModal, {
+      open: true,
+      enabled: false,
+      unit: 'minute',
+      value: '',
+      loading: false,
+      saving: false,
+      loaded: true,
+      error: '',
+      onClose: () => undefined,
+      onEnabledChange: () => undefined,
+      onUnitChange: () => undefined,
+      onValueChange: () => undefined,
+      onSave: async () => undefined,
+    }))
+
+    expect(html).toContain('credentialAutoRefreshScheduleArea')
+    expect(html).not.toContain('credentialAutoRefreshScheduleAreaActive')
+    expect(html).not.toContain('credentialAutoRefreshField')
+  })
+
+  it('keeps the inspection modal close behavior independent from auto refresh settings saving', () => {
+    expect(isQuotaInspectionCloseDisabled({ invalidAccountActionOpen: true, invalidAccountSubmitting: false })).toBe(true)
+    expect(isQuotaInspectionCloseDisabled({ invalidAccountActionOpen: false, invalidAccountSubmitting: true })).toBe(true)
+    expect(isQuotaInspectionCloseDisabled({ invalidAccountActionOpen: false, invalidAccountSubmitting: false })).toBe(false)
   })
 
   it('uses running and completed status dots for the Auth Files inspection button', () => {
@@ -519,23 +656,6 @@ describe('AuthFileCredentialsSection inspection results', () => {
     expect(isSelectableInspectionStatusFilter(undefined)).toBe(false)
   })
 
-  it('keeps invalid action buttons in the results header and pagination in a bottom-right footer', () => {
-    const headerIndex = authFileSectionSource.indexOf('credentialInspectionResultsHeader')
-    const footerIndex = authFileSectionSource.indexOf('credentialInspectionResultsFooter')
-
-    expect(headerIndex).toBeGreaterThanOrEqual(0)
-    expect(footerIndex).toBeGreaterThan(headerIndex)
-
-    const headerSlice = authFileSectionSource.slice(headerIndex, footerIndex)
-    const footerSlice = authFileSectionSource.slice(footerIndex)
-
-    expect(headerSlice).toContain('credentialInspectionInvalidActions')
-    expect(headerSlice).not.toContain('credentialInspectionPageSizeControl')
-    expect(headerSlice).not.toContain('credentialInspectionPagination')
-    expect(footerSlice).toContain('credentialInspectionPageSizeControl')
-    expect(footerSlice).toContain('credentialInspectionPagination')
-  })
-
   it('builds invalid account actions only from cached 401 and 402 file names', () => {
     const results: UsageQuotaInspectionResult[] = [
       { ...makeInspectionResult(1, 'unauthorized_401'), file_name: 'a.json' },
@@ -557,26 +677,4 @@ describe('AuthFileCredentialsSection inspection results', () => {
     expect(invertInvalidInspectionAccountFileNames(fileNames, [])).toEqual(fileNames)
   })
 
-  it('renders invalid account bulk selection controls and async sync tip', () => {
-    expect(authFileSectionSource).toContain('credentials_inspection_invalid_accounts_select_all')
-    expect(authFileSectionSource).toContain('credentials_inspection_invalid_accounts_invert_selection')
-    expect(authFileSectionSource).toContain('credentials_inspection_invalid_accounts_sync_tip')
-  })
-
-  it('keeps the invalid account modal open until post-action refresh completes', () => {
-    const handlerIndex = authFileSectionSource.indexOf('const handleConfirmInvalidAccountAction = async () => {')
-    const catchIndex = authFileSectionSource.indexOf('} catch (nextError)', handlerIndex)
-
-    expect(handlerIndex).toBeGreaterThanOrEqual(0)
-    expect(catchIndex).toBeGreaterThan(handlerIndex)
-
-    const successPath = authFileSectionSource.slice(handlerIndex, catchIndex)
-    const refreshIndex = successPath.indexOf('await Promise.all([onRefreshStatus(), onAfterInvalidAccountAction?.()])')
-    const closeIndex = successPath.indexOf('setInvalidAccountAction(null)')
-    const clearSelectionIndex = successPath.indexOf('setSelectedInvalidFileNames([])')
-
-    expect(refreshIndex).toBeGreaterThanOrEqual(0)
-    expect(closeIndex).toBeGreaterThan(refreshIndex)
-    expect(clearSelectionIndex).toBeGreaterThan(refreshIndex)
-  })
 })

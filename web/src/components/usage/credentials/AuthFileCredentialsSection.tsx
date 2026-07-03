@@ -2,13 +2,13 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { Modal } from '@/components/ui/Modal'
-import { IconChartLine, IconGaugeReset, IconRefreshCw, IconSearch, IconShield, IconTrash2 } from '@/components/ui/icons'
+import { IconChartLine, IconGaugeReset, IconRefreshCw, IconSearch, IconSettings, IconShield, IconTrash2 } from '@/components/ui/icons'
 import quotaCostIcon from '@/assets/icons/quota-cost.svg'
 import quotaTokenIcon from '@/assets/icons/quota-token.svg'
 import styles from './CredentialSections.module.scss'
 import type { AuthFileCredentialRow, DisplayQuota, PlanTypeTone } from './credentialViewModels'
-import { deleteAuthFiles, setAuthFilesDisabled, type UsageIdentityPageSort } from '@/lib/api'
-import type { UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus, UsageQuotaInspectionStatusResponse } from '@/lib/types'
+import { deleteAuthFiles, fetchQuotaAutoRefreshSettings, setAuthFilesDisabled, updateQuotaAutoRefreshSettings, type UsageIdentityPageSort } from '@/lib/api'
+import type { QuotaAutoRefreshScheduleUnit, QuotaAutoRefreshSettings, UsageQuotaInspectionResult, UsageQuotaInspectionResultStatus, UsageQuotaInspectionStatusResponse } from '@/lib/types'
 import { CredentialAliasEditor, isCredentialAliasEditorDisabled } from './CredentialAliasEditor'
 import { CredentialHealthPanel } from './CredentialHealthPanel'
 import { CredentialProviderFilterIcon } from './CredentialProviderFilterBar'
@@ -51,6 +51,14 @@ const INVALID_INSPECTION_ACCOUNT_STATUSES = new Set<UsageQuotaInspectionResultSt
   'unauthorized_401',
   'payment_required_402',
 ])
+const AUTO_REFRESH_SCHEDULE_LIMITS: Record<QuotaAutoRefreshScheduleUnit, number> = {
+  minute: 60,
+  hour: 24,
+  day: 30,
+  week: 7,
+}
+const AUTO_REFRESH_SCHEDULE_UNITS: QuotaAutoRefreshScheduleUnit[] = ['minute', 'hour', 'day', 'week']
+const AUTO_REFRESH_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const
 
 interface AuthFileCredentialsSectionProps {
   rows: AuthFileCredentialRow[]
@@ -63,7 +71,6 @@ interface AuthFileCredentialsSectionProps {
   loading: boolean
   quotaRefreshing: boolean
   quotaRefreshError: string
-  quotaAutoRefreshEnabled: boolean
   quotaInspectionStatus: UsageQuotaInspectionStatusResponse | null
   quotaInspectionLoading: boolean
   quotaInspectionStarting: boolean
@@ -82,7 +89,7 @@ interface AuthFileCredentialsSectionProps {
   onAfterInvalidAccountAction?: () => Promise<void>
 }
 
-export function AuthFileCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, quotaRefreshing, quotaRefreshError, quotaAutoRefreshEnabled, quotaInspectionStatus, quotaInspectionLoading, quotaInspectionStarting, quotaInspectionError, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange, onRefreshQuota, onRefreshQuotaForAuthIndex, onResetQuotaForAuthIndex, aliasSavingId, onSaveAlias, onRefreshInspectionStatus, onStartInspection, onAfterInvalidAccountAction }: AuthFileCredentialsSectionProps) {
+export function AuthFileCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, quotaRefreshing, quotaRefreshError, quotaInspectionStatus, quotaInspectionLoading, quotaInspectionStarting, quotaInspectionError, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange, onRefreshQuota, onRefreshQuotaForAuthIndex, onResetQuotaForAuthIndex, aliasSavingId, onSaveAlias, onRefreshInspectionStatus, onStartInspection, onAfterInvalidAccountAction }: AuthFileCredentialsSectionProps) {
   const { t } = useTranslation()
   const [inspectionOpen, setInspectionOpen] = useState(false)
   const [quotaUsageMode, setQuotaUsageMode] = useState<QuotaUsageMode>('current')
@@ -259,7 +266,6 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
         loading={quotaInspectionLoading}
         starting={quotaInspectionStarting}
         error={quotaInspectionError}
-        quotaAutoRefreshEnabled={quotaAutoRefreshEnabled}
         onClose={() => setInspectionOpen(false)}
         onStart={onStartInspection}
         onRefreshStatus={onRefreshInspectionStatus}
@@ -437,9 +443,9 @@ export function formatInspectionProgressPercent(status: Pick<UsageQuotaInspectio
   return Math.max(0, Math.min(100, Math.round((status.cached / progressTotal) * 100)))
 }
 
-export function isInspectionStartDisabled({ quotaAutoRefreshEnabled, starting, total, running }: { quotaAutoRefreshEnabled: boolean; starting: boolean; total: number; running: boolean }): boolean {
-  // 自动刷新开启时共用刷新结果，按钮不可手动启动巡检；running 只代表显式巡检轮次。
-  return quotaAutoRefreshEnabled || starting || running || total <= 0
+export function isInspectionStartDisabled({ starting, total, running }: { starting: boolean; total: number; running: boolean }): boolean {
+  // running 只代表显式巡检轮次；定时刷新和手动刷新共用队列但不禁用手动巡检入口。
+  return starting || running || total <= 0
 }
 
 export function inspectionIndicatorTone(status: Pick<UsageQuotaInspectionStatusResponse, 'running' | 'completed' | 'completed_at'> | null): InspectionIndicatorTone {
@@ -488,6 +494,101 @@ function matchesInspectionResultStatusFilter(status: UsageQuotaInspectionResultS
   return status === filter
 }
 
+type AutoRefreshSettingsFormSetters = {
+  setEnabled: (enabled: boolean) => void
+  setUnit: (unit: QuotaAutoRefreshScheduleUnit) => void
+  setValue: (value: string) => void
+}
+
+type AutoRefreshSettingsBuildResult =
+  | { settings: QuotaAutoRefreshSettings; errorKey?: never }
+  | { settings?: never; errorKey: string }
+
+function applyQuotaAutoRefreshSettingsForm(settings: QuotaAutoRefreshSettings, setters: AutoRefreshSettingsFormSetters) {
+  setters.setEnabled(settings.enabled)
+  if (settings.schedule) {
+    setters.setUnit(settings.schedule.unit)
+    setters.setValue(String(settings.schedule.value))
+    return
+  }
+  setters.setUnit('minute')
+  setters.setValue('')
+}
+
+export function buildQuotaAutoRefreshSettings({
+  enabled,
+  unit,
+  value,
+}: {
+  enabled: boolean
+  unit: QuotaAutoRefreshScheduleUnit
+  value: string
+}): AutoRefreshSettingsBuildResult {
+  if (!enabled) {
+    return { settings: { enabled: false, schedule: null } }
+  }
+  const trimmedValue = value.trim()
+  if (trimmedValue === '') {
+    return { errorKey: 'usage_stats.credentials_auto_refresh_validation_required' }
+  }
+  const numericValue = Number(trimmedValue)
+  const max = AUTO_REFRESH_SCHEDULE_LIMITS[unit]
+  if (!Number.isInteger(numericValue) || numericValue < 1 || numericValue > max) {
+    return { errorKey: 'usage_stats.credentials_auto_refresh_validation_range' }
+  }
+  return {
+    settings: {
+      enabled: true,
+      schedule: {
+        unit,
+        value: numericValue,
+      },
+    },
+  }
+}
+
+export function isAutoRefreshSettingsSaveDisabled({
+  loading,
+  saving,
+  loaded,
+}: {
+  loading: boolean
+  saving: boolean
+  loaded: boolean
+}): boolean {
+  return loading || saving || !loaded
+}
+
+export function isAutoRefreshSettingsControlDisabled({
+  loading,
+  saving,
+  loaded,
+}: {
+  loading: boolean
+  saving: boolean
+  loaded: boolean
+}): boolean {
+  return loading || saving || !loaded
+}
+
+export function resolveQuotaAutoRefreshSettingsLoadFailure(nextError: unknown, fallbackMessage: string): { settings: QuotaAutoRefreshSettings; error: string; loaded: true } {
+  return {
+    settings: { enabled: false, schedule: null },
+    error: nextError instanceof Error && nextError.message ? nextError.message : fallbackMessage,
+    loaded: true,
+  }
+}
+
+export function isQuotaInspectionCloseDisabled({
+	invalidAccountActionOpen,
+	invalidAccountSubmitting,
+}: {
+	invalidAccountActionOpen: boolean
+	invalidAccountSubmitting: boolean
+}): boolean {
+	return invalidAccountActionOpen || invalidAccountSubmitting
+}
+
 export function buildInvalidInspectionAccountFileNames(results: UsageQuotaInspectionResult[]): string[] {
   const seen = new Set<string>()
   const names: string[] = []
@@ -514,13 +615,12 @@ export function invertInvalidInspectionAccountFileNames(fileNames: string[], sel
   return fileNames.filter((fileName) => !selected.has(fileName))
 }
 
-function QuotaInspectionModal({
+export function QuotaInspectionModal({
   open,
   status,
   loading,
   starting,
   error,
-  quotaAutoRefreshEnabled,
   onClose,
   onStart,
   onRefreshStatus,
@@ -531,7 +631,6 @@ function QuotaInspectionModal({
   loading: boolean
   starting: boolean
   error: string
-  quotaAutoRefreshEnabled: boolean
   onClose: () => void
   onStart: () => Promise<void>
   onRefreshStatus: () => Promise<void>
@@ -545,6 +644,14 @@ function QuotaInspectionModal({
   const [selectedInvalidFileNames, setSelectedInvalidFileNames] = useState<string[]>([])
   const [invalidAccountSubmitting, setInvalidAccountSubmitting] = useState(false)
   const [invalidAccountError, setInvalidAccountError] = useState('')
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsEnabled, setSettingsEnabled] = useState(false)
+  const [scheduleUnit, setScheduleUnit] = useState<QuotaAutoRefreshScheduleUnit>('minute')
+  const [scheduleValue, setScheduleValue] = useState('')
   // total 由后端 Auth Files 身份统计提供，不用页面分页总数替代。
   const total = status?.total ?? 0
   // cached 是已经能解析出最近巡检结果的账号数。
@@ -552,18 +659,15 @@ function QuotaInspectionModal({
   // progressTotal 排除 unknown，使进度条只描述实际刷新任务完成度。
   const progressTotal = inspectionProgressTotal(status)
   const progress = formatInspectionProgressPercent(status)
-  // startDisabled 只依赖后端巡检 running 和自动刷新开关，不被普通行刷新状态牵连。
+  // startDisabled 只依赖显式巡检状态和可巡检总数，不被定时刷新或普通行刷新状态牵连。
   const startDisabled = isInspectionStartDisabled({
-    quotaAutoRefreshEnabled,
     starting,
     total,
     running: status?.running ?? false,
   })
-  const startLabel = quotaAutoRefreshEnabled
-    ? t('usage_stats.credentials_inspection_auto_enabled')
-    : (starting || status?.running)
-        ? t('usage_stats.credentials_inspection_running')
-        : t('usage_stats.credentials_inspection_start')
+  const startLabel = (starting || status?.running)
+    ? t('usage_stats.credentials_inspection_running')
+    : t('usage_stats.credentials_inspection_start')
   const results = status?.results ?? []
   const invalidFileNames = buildInvalidInspectionAccountFileNames(results)
   const resultPageData = buildInspectionResultsPage(results, resultStatusFilter, resultPage, resultPageSize)
@@ -624,11 +728,110 @@ function QuotaInspectionModal({
       setInvalidAccountSubmitting(false)
     }
   }
-  const inspectionCloseDisabled = invalidAccountAction !== null || invalidAccountSubmitting
+  const inspectionCloseDisabled = isQuotaInspectionCloseDisabled({
+    invalidAccountActionOpen: invalidAccountAction !== null,
+    invalidAccountSubmitting,
+  })
+  const scheduleMax = AUTO_REFRESH_SCHEDULE_LIMITS[scheduleUnit]
+
+  useEffect(() => {
+    if (!settingsModalOpen) {
+      setSettingsError('')
+      setSettingsLoaded(false)
+      return
+    }
+    const controller = new AbortController()
+    setSettingsLoading(true)
+    setSettingsLoaded(false)
+    setSettingsError('')
+    void fetchQuotaAutoRefreshSettings(controller.signal)
+      .then((settings) => {
+        if (controller.signal.aborted) return
+        applyQuotaAutoRefreshSettingsForm(settings, {
+          setEnabled: setSettingsEnabled,
+          setUnit: setScheduleUnit,
+          setValue: setScheduleValue,
+        })
+        setSettingsLoaded(true)
+      })
+      .catch((nextError: unknown) => {
+        if (controller.signal.aborted) return
+        const fallback = resolveQuotaAutoRefreshSettingsLoadFailure(nextError, t('usage_stats.credentials_auto_refresh_load_failed'))
+        applyQuotaAutoRefreshSettingsForm(fallback.settings, {
+          setEnabled: setSettingsEnabled,
+          setUnit: setScheduleUnit,
+          setValue: setScheduleValue,
+        })
+        setSettingsLoaded(fallback.loaded)
+        setSettingsError(fallback.error)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setSettingsLoading(false)
+        }
+      })
+    return () => controller.abort()
+  }, [settingsModalOpen, t])
+
+  const handleSaveAutoRefreshSettings = async () => {
+    if (isAutoRefreshSettingsSaveDisabled({ loading: settingsLoading, saving: settingsSaving, loaded: settingsLoaded })) {
+      return
+    }
+    const nextSettings = buildQuotaAutoRefreshSettings({
+      enabled: settingsEnabled,
+      unit: scheduleUnit,
+      value: scheduleValue,
+    })
+    const errorKey = 'errorKey' in nextSettings ? nextSettings.errorKey : ''
+    if (errorKey) {
+      setSettingsError(t(errorKey, { max: String(scheduleMax) }))
+      return
+    }
+    const settingsToSave = nextSettings.settings
+    if (!settingsToSave) {
+      return
+    }
+    setSettingsSaving(true)
+    setSettingsError('')
+    try {
+      const saved = await updateQuotaAutoRefreshSettings(settingsToSave)
+      applyQuotaAutoRefreshSettingsForm(saved, {
+        setEnabled: setSettingsEnabled,
+        setUnit: setScheduleUnit,
+        setValue: setScheduleValue,
+      })
+    } catch (nextError) {
+      setSettingsError(nextError instanceof Error ? nextError.message : t('usage_stats.credentials_auto_refresh_save_failed'))
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
 
   return (
-    <Modal open={open} title={t('usage_stats.credentials_inspection_title')} onClose={inspectionCloseDisabled ? () => undefined : onClose} width={820} className={styles.credentialInspectionModal} closeDisabled={inspectionCloseDisabled}>
+    <Modal
+      open={open}
+      title={t('usage_stats.credentials_inspection_title')}
+      onClose={(inspectionCloseDisabled || settingsModalOpen) ? () => undefined : () => {
+        setSettingsModalOpen(false)
+        onClose()
+      }}
+      width={820}
+      className={styles.credentialInspectionModal}
+      closeDisabled={inspectionCloseDisabled || settingsModalOpen}
+    >
       <div className={styles.credentialInspectionPanel}>
+        <div className={styles.credentialInspectionTitleBar}>
+          <button
+            type="button"
+            className={`${styles.credentialInspectionSettingsButton} ${settingsModalOpen ? styles.credentialInspectionSettingsButtonActive : ''}`.trim()}
+            onClick={() => setSettingsModalOpen(true)}
+            aria-label={t('usage_stats.credentials_auto_refresh_settings')}
+            title={t('usage_stats.credentials_auto_refresh_settings')}
+            aria-haspopup="dialog"
+          >
+            <IconSettings size={15} />
+          </button>
+        </div>
         <div className={styles.credentialInspectionSummary}>
           <div className={styles.credentialInspectionMetric}>
             <span>{t('usage_stats.credentials_inspection_total')}</span>
@@ -742,6 +945,147 @@ function QuotaInspectionModal({
         onCancel={closeInvalidAccountAction}
         onConfirm={handleConfirmInvalidAccountAction}
       />
+      <QuotaAutoRefreshSettingsModal
+        open={settingsModalOpen}
+        enabled={settingsEnabled}
+        unit={scheduleUnit}
+        value={scheduleValue}
+        loading={settingsLoading}
+        saving={settingsSaving}
+        loaded={settingsLoaded}
+        error={settingsError}
+        onClose={() => {
+          if (!settingsSaving) {
+            setSettingsModalOpen(false)
+          }
+        }}
+        onEnabledChange={setSettingsEnabled}
+        onUnitChange={(unit) => {
+          setScheduleUnit(unit)
+          setScheduleValue('')
+        }}
+        onValueChange={setScheduleValue}
+        onSave={handleSaveAutoRefreshSettings}
+      />
+    </Modal>
+  )
+}
+
+export function QuotaAutoRefreshSettingsModal({
+  open,
+  enabled,
+  unit,
+  value,
+  loading,
+  saving,
+  loaded,
+  error,
+  onClose,
+  onEnabledChange,
+  onUnitChange,
+  onValueChange,
+  onSave,
+}: {
+  open: boolean
+  enabled: boolean
+  unit: QuotaAutoRefreshScheduleUnit
+  value: string
+  loading: boolean
+  saving: boolean
+  loaded: boolean
+  error: string
+  onClose: () => void
+  onEnabledChange: (enabled: boolean) => void
+  onUnitChange: (unit: QuotaAutoRefreshScheduleUnit) => void
+  onValueChange: (value: string) => void
+  onSave: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const scheduleMax = AUTO_REFRESH_SCHEDULE_LIMITS[unit]
+  const controlsDisabled = isAutoRefreshSettingsControlDisabled({ loading, saving, loaded })
+  const scheduleControlsDisabled = controlsDisabled || !enabled
+  const saveDisabled = isAutoRefreshSettingsSaveDisabled({ loading, saving, loaded })
+  const scheduleAreaClassName = `${styles.credentialAutoRefreshScheduleArea} ${enabled ? styles.credentialAutoRefreshScheduleAreaActive : ''}`.trim()
+
+  return (
+    <Modal
+      open={open}
+      title={t('usage_stats.credentials_auto_refresh_settings')}
+      onClose={saving ? () => undefined : onClose}
+      width={520}
+      className={styles.credentialAutoRefreshSettingsModal}
+      closeDisabled={saving}
+    >
+      <div className={styles.credentialAutoRefreshSettingsPanel}>
+        <div className={styles.credentialAutoRefreshSettingsRow}>
+          <label className={`${styles.credentialActiveOnlySwitch} ${controlsDisabled ? styles.credentialActiveOnlySwitchDisabled : ''}`.trim()}>
+            <span className={styles.credentialActiveOnlyLabel}>{t('usage_stats.credentials_auto_refresh_enabled')}</span>
+            <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} disabled={controlsDisabled} />
+            <span className={styles.credentialActiveOnlyTrack} aria-hidden="true">
+              <span className={styles.credentialActiveOnlyThumb} />
+            </span>
+          </label>
+          <button
+            type="button"
+            className={styles.credentialAutoRefreshSaveButton}
+            onClick={() => void onSave()}
+            disabled={saveDisabled}
+            aria-busy={saving}
+            aria-label={saving ? t('usage_stats.credentials_auto_refresh_saving') : t('usage_stats.credentials_auto_refresh_save')}
+            title={saving ? t('usage_stats.credentials_auto_refresh_saving') : t('usage_stats.credentials_auto_refresh_save')}
+          >
+            {saving ? <LoadingSpinner size={12} /> : t('usage_stats.credentials_auto_refresh_save')}
+          </button>
+        </div>
+        <div className={scheduleAreaClassName} aria-hidden={!enabled}>
+          <div className={styles.credentialAutoRefreshScheduleGrid}>
+            <div className={styles.credentialAutoRefreshUnitSwitcher} role="group" aria-label={t('usage_stats.credentials_auto_refresh_unit')}>
+              {AUTO_REFRESH_SCHEDULE_UNITS.map((nextUnit) => (
+                <button
+                  key={nextUnit}
+                  type="button"
+                  className={nextUnit === unit ? styles.credentialAutoRefreshUnitButtonActive : undefined}
+                  onClick={() => onUnitChange(nextUnit)}
+                  aria-pressed={nextUnit === unit}
+                  disabled={scheduleControlsDisabled}
+                >
+                  {t(`usage_stats.credentials_auto_refresh_unit_${nextUnit}`)}
+                </button>
+              ))}
+            </div>
+            {unit === 'week' ? (
+              <label className={styles.credentialAutoRefreshIntervalField}>
+                <span className={styles.credentialAutoRefreshIntervalLabel}>{t('usage_stats.credentials_auto_refresh_weekday')}</span>
+                <select value={value} onChange={(event) => onValueChange(event.target.value)} disabled={scheduleControlsDisabled}>
+                  <option value="">{t('usage_stats.credentials_auto_refresh_select')}</option>
+                  {AUTO_REFRESH_WEEKDAYS.map((weekday) => (
+                    <option key={weekday} value={weekday}>{t(`usage_stats.credentials_auto_refresh_weekday_${weekday}`)}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className={styles.credentialAutoRefreshIntervalField}>
+                <span className={styles.credentialAutoRefreshIntervalLabel}>{t('usage_stats.credentials_auto_refresh_value')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={scheduleMax}
+                  step={1}
+                  value={value}
+                  onChange={(event) => onValueChange(event.target.value)}
+                  disabled={scheduleControlsDisabled}
+                />
+                <span className={styles.credentialAutoRefreshUnitSuffix}>{t(`usage_stats.credentials_auto_refresh_unit_${unit}`)}</span>
+              </label>
+            )}
+          </div>
+          <div className={styles.credentialAutoRefreshScheduleTip}>
+            {t(`usage_stats.credentials_auto_refresh_tip_${unit}`)}
+          </div>
+        </div>
+        {loading && <div className={styles.credentialEmptyState}>{t('common.loading')}</div>}
+        {error && <div className={styles.credentialInlineError} role="alert">{error}</div>}
+      </div>
     </Modal>
   )
 }

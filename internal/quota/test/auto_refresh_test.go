@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	. "cpa-usage-keeper/internal/quota"
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
+	"gorm.io/gorm"
 )
 
 func TestStartAutoRefreshWithNilServiceReturns(t *testing.T) {
@@ -22,77 +24,256 @@ func TestStartAutoRefreshWithNilServiceReturns(t *testing.T) {
 	}
 }
 
-func TestRunAutoRefreshSkipsWhenNoActiveStatus(t *testing.T) {
-	db := openQuotaTestDatabase(t)
-	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
-	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
-	setRefreshCooldown(service, func(time.Duration) {})
+func TestSleepAutoRefreshDelayAllowsNilService(t *testing.T) {
+	var service *Service
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
-	if err := service.RunAutoRefresh(context.Background()); err != nil {
-		t.Fatalf("RunAutoRefresh returned error: %v", err)
-	}
-	if handler.callCount() != 0 {
-		t.Fatalf("expected inactive backend page to skip provider calls, got %d", handler.callCount())
-	}
-	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "auth-1"); !errors.Is(err, ErrTaskNotFound) {
-		t.Fatalf("expected inactive backend page to leave auth-1 out of queue, got %v", err)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("expected nil service sleep to return safely, recovered %v", recovered)
+		}
+	}()
+
+	sleepAutoRefreshDelay(service, ctx, time.Millisecond)
+}
+
+func TestNextAutoRefreshDelayAllowsNilService(t *testing.T) {
+	var service *Service
+
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{
+		Enabled:  true,
+		Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitMinute, Value: 1},
+	}, time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local))
+
+	if delay != time.Minute {
+		t.Fatalf("expected nil service scheduler delay to recheck after 1m, got %s", delay)
 	}
 }
 
-func TestRecordActiveStatusStartsAutoRefreshWhenBecomingActive(t *testing.T) {
+func TestStartAutoRefreshSuppressesSettingsLookupCancellationLog(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	callbackName := "test:cancel_auto_refresh_settings_lookup"
+	cancelledDuringLookup := false
+	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if cancelledDuringLookup || !statementIncludesSettingKey(tx, "quota.auto_refresh.enabled") {
+			return
+		}
+		cancelledDuringLookup = true
+		cancel()
+		tx.AddError(context.Canceled)
+	}); err != nil {
+		t.Fatalf("register query callback returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
+	setAutoRefreshDelay(service, func(context.Context, time.Duration) bool {
+		return false
+	})
+	hook := logrustest.NewGlobal()
+	t.Cleanup(func() {
+		hook.Reset()
+	})
+
+	if err := service.StartAutoRefresh(ctx); err != nil {
+		t.Fatalf("StartAutoRefresh returned error: %v", err)
+	}
+
+	if !cancelledDuringLookup {
+		t.Fatal("expected test hook to cancel the context during settings lookup")
+	}
+	assertNoAutoRefreshErrorLog(t, hook, "quota auto refresh settings lookup failed")
+}
+
+func TestStartAutoRefreshSuppressesRunCancellationLog(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
+	setAutoRefreshDelay(service, func(context.Context, time.Duration) bool {
+		cancel()
+		return true
+	})
+	if _, err := service.UpdateAutoRefreshSettings(context.Background(), AutoRefreshSettings{
+		Enabled:  true,
+		Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitMinute, Value: 1},
+	}); err != nil {
+		t.Fatalf("UpdateAutoRefreshSettings returned error: %v", err)
+	}
+	hook := logrustest.NewGlobal()
+	t.Cleanup(func() {
+		hook.Reset()
+	})
+
+	if err := service.StartAutoRefresh(ctx); err != nil {
+		t.Fatalf("StartAutoRefresh returned error: %v", err)
+	}
+
+	assertNoAutoRefreshErrorLog(t, hook, "quota auto refresh failed")
+}
+
+func TestStartAutoRefreshRunsAfterInitialConfiguredDelay(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	called := make(chan struct{}, 1)
+	handler := &refreshHandlerStub{
+		output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}},
+		onCheck: func() {
+			select {
+			case called <- struct{}{}:
+			default:
+			}
+			cancel()
+		},
+	}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
+	service.SetRefreshContext(ctx)
 	setRefreshCooldown(service, func(time.Duration) {})
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local)
+	setAutoRefreshNow(service, func() time.Time { return now })
+	var delays []time.Duration
+	setAutoRefreshDelay(service, func(ctx context.Context, delay time.Duration) bool {
+		delays = append(delays, delay)
+		now = now.Add(delay)
+		return true
+	})
+	if _, err := service.UpdateAutoRefreshSettings(context.Background(), AutoRefreshSettings{
+		Enabled:  true,
+		Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitMinute, Value: 1},
+	}); err != nil {
+		t.Fatalf("UpdateAutoRefreshSettings returned error: %v", err)
+	}
+	select {
+	case <-autoRefreshSettingsChanged(service):
+	default:
+	}
 
-	service.RecordActiveStatus(time.Now())
-
-	waitForRefreshTask(t, service, "auth-1", RefreshTaskStatusCompleted)
+	err := service.StartAutoRefresh(ctx)
 	service.WaitRefreshTasks()
-	if handler.callCount() != 1 {
-		t.Fatalf("expected first active heartbeat to start one auto refresh round, got %d calls", handler.callCount())
+	if err != nil {
+		t.Fatalf("StartAutoRefresh returned error: %v", err)
+	}
+	select {
+	case <-called:
+	default:
+		t.Fatal("expected scheduler to run refresh after the initial configured delay")
+	}
+	if len(delays) == 0 || delays[0] != time.Minute {
+		t.Fatalf("expected first scheduler delay to be 1m, got %v", delays)
 	}
 }
 
-func TestRecordActiveStatusDoesNotRestartAutoRefreshWhileAlreadyActive(t *testing.T) {
+func TestStartAutoRefreshSkipsWhenScheduleIsMissing(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	called := make(chan struct{}, 1)
+	handler := &refreshHandlerStub{
+		output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}},
+		onCheck: func() {
+			select {
+			case called <- struct{}{}:
+			default:
+			}
+			cancel()
+		},
+	}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
+	service.SetRefreshContext(ctx)
 	setRefreshCooldown(service, func(time.Duration) {})
-	now := time.Now()
+	delayCalls := 0
+	setAutoRefreshDelay(service, func(context.Context, time.Duration) bool {
+		delayCalls++
+		if delayCalls == 1 {
+			return true
+		}
+		cancel()
+		return false
+	})
 
-	service.RecordActiveStatus(now)
-	waitForRefreshTask(t, service, "auth-1", RefreshTaskStatusCompleted)
+	if err := service.StartAutoRefresh(ctx); err != nil {
+		t.Fatalf("StartAutoRefresh returned error: %v", err)
+	}
 	service.WaitRefreshTasks()
-	service.RecordActiveStatus(now.Add(30 * time.Second))
-	service.WaitRefreshTasks()
-
-	if handler.callCount() != 1 {
-		t.Fatalf("expected repeated active heartbeat to avoid starting another auto refresh round, got %d calls", handler.callCount())
+	select {
+	case <-called:
+		t.Fatal("expected missing auto refresh schedule to skip the scheduled refresh task")
+	default:
+	}
+	if delayCalls != 2 {
+		t.Fatalf("expected scheduler to re-check settings after missing schedule, got %d delay calls", delayCalls)
+	}
+	if lastRoundAt := lastAutoRefreshRoundAt(service); !lastRoundAt.IsZero() {
+		t.Fatalf("expected missing auto refresh schedule not to start a round, got last round at %s", lastRoundAt)
 	}
 }
 
-func TestRecordActiveStatusDoesNotStartAutoRefreshWhenLastRoundIsRecent(t *testing.T) {
+func TestStartAutoRefreshWakesWhenSettingsChange(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
-	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
-	setRefreshCooldown(service, func(time.Duration) {})
-	now := time.Now()
-	markBackendPageActiveForAutoRefreshTest(service, now.Add(-AutoRefreshActiveTTL-time.Second))
-	setLastAutoRefreshRoundAt(service, now.Add(-time.Minute))
-
-	service.RecordActiveStatus(now)
-	service.WaitRefreshTasks()
-
-	if handler.callCount() != 0 {
-		t.Fatalf("expected recent auto refresh round to suppress heartbeat wakeup, got %d calls", handler.callCount())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	called := make(chan struct{}, 1)
+	handler := &refreshHandlerStub{
+		output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}},
+		onCheck: func() {
+			select {
+			case called <- struct{}{}:
+			default:
+			}
+			cancel()
+		},
 	}
-	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "auth-1"); !errors.Is(err, ErrTaskNotFound) {
-		t.Fatalf("expected recent round suppression to avoid queueing auth-1, got %v", err)
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
+	service.SetRefreshContext(ctx)
+	setRefreshCooldown(service, func(time.Duration) {})
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local)
+	setAutoRefreshNow(service, func() time.Time { return now })
+	if _, err := service.UpdateAutoRefreshSettings(context.Background(), AutoRefreshSettings{
+		Enabled:  true,
+		Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitHour, Value: 24},
+	}); err != nil {
+		t.Fatalf("UpdateAutoRefreshSettings initial returned error: %v", err)
+	}
+	select {
+	case <-autoRefreshSettingsChanged(service):
+	default:
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.StartAutoRefresh(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-errCh:
+		case <-time.After(time.Second):
+			t.Fatal("expected auto refresh scheduler to exit after cleanup cancel")
+		}
+		service.WaitRefreshTasks()
+	})
+
+	select {
+	case <-called:
+		t.Fatal("expected long day schedule not to run before settings change")
+	case <-time.After(50 * time.Millisecond):
+	}
+	now = time.Date(2026, 5, 26, 23, 59, 59, int(999*time.Millisecond), time.Local)
+	if _, err := service.UpdateAutoRefreshSettings(context.Background(), AutoRefreshSettings{
+		Enabled:  true,
+		Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitDay, Value: 1},
+	}); err != nil {
+		t.Fatalf("UpdateAutoRefreshSettings shortened returned error: %v", err)
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("expected settings change to wake scheduler before the old long delay")
 	}
 }
 
@@ -108,7 +289,6 @@ func TestRunAutoRefreshQueuesOnlyActiveAuthFiles(t *testing.T) {
 	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
 	setRefreshCooldown(service, func(time.Duration) {})
-	markBackendPageActiveForAutoRefreshTest(service, time.Now())
 
 	if err := service.RunAutoRefresh(context.Background()); err != nil {
 		t.Fatalf("RunAutoRefresh returned error: %v", err)
@@ -129,14 +309,13 @@ func TestRunAutoRefreshQueuesOnlyActiveAuthFiles(t *testing.T) {
 	}
 }
 
-func TestRunAutoRefreshRunsWhenStatusIsActive(t *testing.T) {
+func TestRunAutoRefreshRunsWithoutFrontendActivation(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-2", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
 	setRefreshCooldown(service, func(time.Duration) {})
-	markBackendPageActiveForAutoRefreshTest(service, time.Now())
 
 	if err := service.RunAutoRefresh(context.Background()); err != nil {
 		t.Fatalf("RunAutoRefresh returned error: %v", err)
@@ -145,7 +324,7 @@ func TestRunAutoRefreshRunsWhenStatusIsActive(t *testing.T) {
 	waitForRefreshTask(t, service, "auth-2", RefreshTaskStatusCompleted)
 	service.WaitRefreshTasks()
 	if handler.callCount() != 2 {
-		t.Fatalf("expected active backend page to refresh all auth files, got %d calls", handler.callCount())
+		t.Fatalf("expected backend scheduled refresh to refresh all auth files, got %d calls", handler.callCount())
 	}
 }
 
@@ -156,7 +335,6 @@ func TestRunAutoRefreshStoresAliasDisplayName(t *testing.T) {
 	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
 	setRefreshCooldown(service, func(time.Duration) {})
-	markBackendPageActiveForAutoRefreshTest(service, time.Now())
 
 	if err := service.RunAutoRefresh(context.Background()); err != nil {
 		t.Fatalf("RunAutoRefresh returned error: %v", err)
@@ -177,7 +355,6 @@ func TestRunAutoRefreshSkipsWhenPreviousAutoRoundIsActive(t *testing.T) {
 	handler := &refreshHandlerStub{block: block, output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
 	setRefreshCooldown(service, func(time.Duration) {})
-	markBackendPageActiveForAutoRefreshTest(service, time.Now())
 	hook := logrustest.NewGlobal()
 	t.Cleanup(func() {
 		hook.Reset()
@@ -213,7 +390,6 @@ func TestRunAutoRefreshSkipsCachedHTTPFailures(t *testing.T) {
 	if handler.callCount() != 1 {
 		t.Fatalf("expected one manual provider call, got %d", handler.callCount())
 	}
-	markBackendPageActiveForAutoRefreshTest(service, time.Now())
 	if err := service.RunAutoRefresh(context.Background()); err != nil {
 		t.Fatalf("RunAutoRefresh returned error: %v", err)
 	}
@@ -228,7 +404,6 @@ func TestRunAutoRefreshLogsRoundStartAndEndOnce(t *testing.T) {
 	handler := &refreshHandlerStub{output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
 	setRefreshCooldown(service, func(time.Duration) {})
-	markBackendPageActiveForAutoRefreshTest(service, time.Now())
 	hook := logrustest.NewGlobal()
 	t.Cleanup(func() {
 		hook.Reset()
@@ -253,7 +428,6 @@ func TestRunAutoRefreshLogsRoundEndWhenIdentityScanFails(t *testing.T) {
 		t.Fatalf("close db returned error: %v", err)
 	}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
-	markBackendPageActiveForAutoRefreshTest(service, time.Now())
 	hook := logrustest.NewGlobal()
 	t.Cleanup(func() {
 		hook.Reset()
@@ -294,74 +468,119 @@ func assertAutoRefreshRoundLogs(t *testing.T, hook *logrustest.Hook, wantStart i
 	}
 }
 
-func markBackendPageActiveForAutoRefreshTest(service *Service, at time.Time) {
-	setBackendPageActiveForAutoRefreshTest(service, at)
-}
-
-func TestNewServiceWithRegistryAndOptionsUsesConfiguredAutoRefreshInterval(t *testing.T) {
-	db := openQuotaTestDatabase(t)
-	service := newQuotaServiceWithRegistryAndOptions(t, db, NewProviderRegistry(nil), ServiceOptions{AutoRefreshInterval: 2 * time.Minute})
-	if autoRefreshInterval(service) != 2*time.Minute {
-		t.Fatalf("expected configured auto refresh interval 2m, got %s", autoRefreshInterval(service))
-	}
-}
-
-func TestAutoRefreshActiveTTLStaysShortWhenIntervalIsLong(t *testing.T) {
-	db := openQuotaTestDatabase(t)
-	service := newQuotaServiceWithRegistryAndOptions(t, db, NewProviderRegistry(nil), ServiceOptions{AutoRefreshInterval: 5 * time.Minute})
-	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local)
-
-	service.RecordActiveStatus(now)
-	service.WaitRefreshTasks()
-
-	if !service.HasRecentActiveStatus(now.Add(AutoRefreshActiveTTL - time.Second)) {
-		t.Fatal("expected status heartbeat to stay active inside the fixed TTL")
-	}
-	if service.HasRecentActiveStatus(now.Add(AutoRefreshActiveTTL + time.Second)) {
-		t.Fatal("expected status heartbeat to expire soon after the fixed TTL even when auto refresh interval is long")
+func assertNoAutoRefreshErrorLog(t *testing.T, hook *logrustest.Hook, messagePrefix string) {
+	t.Helper()
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.ErrorLevel && strings.HasPrefix(entry.Message, messagePrefix) {
+			t.Fatalf("expected no %q error log, got entries=%+v", messagePrefix, hook.AllEntries())
+		}
 	}
 }
 
 func TestNextAutoRefreshDelayUsesLastRoundTime(t *testing.T) {
 	db := openQuotaTestDatabase(t)
-	service := newQuotaServiceWithRegistryAndOptions(t, db, NewProviderRegistry(nil), ServiceOptions{AutoRefreshInterval: 5 * time.Minute})
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local)
-	markBackendPageActiveForAutoRefreshTest(service, now)
 	setLastAutoRefreshRoundAt(service, now.Add(-4*time.Minute))
 
-	delay := nextAutoRefreshDelay(service, now)
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{Enabled: true, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitMinute, Value: 5}}, now)
 
 	if delay != time.Minute {
-		t.Fatalf("expected next auto refresh delay 1m after recent heartbeat round, got %s", delay)
+		t.Fatalf("expected next auto refresh delay 1m after recent scheduled round, got %s", delay)
 	}
 }
 
 func TestNextAutoRefreshDelayUsesLastAttemptAfterScanFailure(t *testing.T) {
 	db := openQuotaTestDatabase(t)
-	service := newQuotaServiceWithRegistryAndOptions(t, db, NewProviderRegistry(nil), ServiceOptions{AutoRefreshInterval: 5 * time.Minute})
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local)
-	markBackendPageActiveForAutoRefreshTest(service, now)
 	setLastAutoRefreshAttemptAt(service, now.Add(-4*time.Minute))
 
-	delay := nextAutoRefreshDelay(service, now)
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{Enabled: true, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitMinute, Value: 5}}, now)
 
 	if delay != time.Minute {
 		t.Fatalf("expected next auto refresh delay 1m after failed attempt, got %s", delay)
 	}
 }
 
+func TestNextAutoRefreshDelayRetriesSoonAfterScanFailureForDaySchedule(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
+	now := time.Date(2026, 5, 26, 10, 30, 0, 0, time.Local)
+	setLastAutoRefreshAttemptAt(service, now)
+
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{Enabled: true, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitDay, Value: 1}}, now)
+
+	if delay != time.Minute {
+		t.Fatalf("expected day schedule to retry soon after failed scan, got %s", delay)
+	}
+}
+
 func TestNextAutoRefreshDelayWaitsForNextTriggerWhenRoundIsRunning(t *testing.T) {
 	db := openQuotaTestDatabase(t)
-	service := newQuotaServiceWithRegistryAndOptions(t, db, NewProviderRegistry(nil), ServiceOptions{AutoRefreshInterval: 5 * time.Minute})
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local)
-	markBackendPageActiveForAutoRefreshTest(service, now)
 	setAutoRefreshRunning(service, true)
 	setLastAutoRefreshRoundAt(service, now.Add(-5*time.Minute))
 
-	delay := nextAutoRefreshDelay(service, now)
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{Enabled: true, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitMinute, Value: 5}}, now)
 
-	if delay != 5*time.Minute {
-		t.Fatalf("expected running round to wait for the next scheduled trigger, got %s", delay)
+	if delay != time.Minute {
+		t.Fatalf("expected running round at due time to recheck soon, got %s", delay)
+	}
+}
+
+func TestNextAutoRefreshDelaySkipsWhenSettingsDisabledOrEmpty(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.Local)
+
+	for _, settings := range []AutoRefreshSettings{
+		{Enabled: false, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitMinute, Value: 5}},
+		{Enabled: true, Schedule: nil},
+	} {
+		if delay := nextAutoRefreshDelay(service, settings, now); delay <= 0 {
+			t.Fatalf("expected disabled or empty settings to wait before rechecking, got %s for %+v", delay, settings)
+		}
+	}
+}
+
+func TestNextAutoRefreshDelayUsesProjectTimezoneMidnightForDaySchedule(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
+	now := time.Date(2026, 5, 26, 10, 30, 0, 0, time.Local)
+
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{Enabled: true, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitDay, Value: 1}}, now)
+
+	want := time.Date(2026, 5, 27, 0, 0, 0, 0, time.Local).Sub(now)
+	if delay != want {
+		t.Fatalf("expected day schedule to wait until next local midnight, got %s want %s", delay, want)
+	}
+}
+
+func TestNextAutoRefreshDelayUsesNextMidnightForFirstDayScheduleRun(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
+	now := time.Date(2026, 5, 26, 23, 55, 0, 0, time.Local)
+
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{Enabled: true, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitDay, Value: 30}}, now)
+
+	want := time.Date(2026, 5, 27, 0, 0, 0, 0, time.Local).Sub(now)
+	if delay != want {
+		t.Fatalf("expected first day schedule run to happen at next local midnight, got %s want %s", delay, want)
+	}
+}
+
+func TestNextAutoRefreshDelayUsesWeekdayAtProjectTimezoneMidnight(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(nil))
+	now := time.Date(2026, 5, 25, 10, 30, 0, 0, time.Local)
+
+	delay := nextAutoRefreshDelay(service, AutoRefreshSettings{Enabled: true, Schedule: &AutoRefreshSchedule{Unit: AutoRefreshScheduleUnitWeek, Value: 2}}, now)
+
+	want := time.Date(2026, 5, 26, 0, 0, 0, 0, time.Local).Sub(now)
+	if delay != want {
+		t.Fatalf("expected weekly schedule value 2 to mean Tuesday local midnight, got %s want %s", delay, want)
 	}
 }
 

@@ -36,7 +36,10 @@ func applyUsageHeaderSnapshots(service *quota.Service, ctx context.Context, snap
 func cleanupExpiredRefreshTasks(service *quota.Service, now time.Time)
 
 //go:linkname nextAutoRefreshDelay cpa-usage-keeper/internal/quota.(*Service).nextAutoRefreshDelay
-func nextAutoRefreshDelay(service *quota.Service, now time.Time) time.Duration
+func nextAutoRefreshDelay(service *quota.Service, settings quota.AutoRefreshSettings, now time.Time) time.Duration
+
+//go:linkname sleepAutoRefreshDelay cpa-usage-keeper/internal/quota.(*Service).sleepAutoRefreshDelay
+func sleepAutoRefreshDelay(service *quota.Service, ctx context.Context, delay time.Duration) int
 
 //go:linkname resetInspectionCompletedAt cpa-usage-keeper/internal/quota.(*Service).resetInspectionCompletedAt
 func resetInspectionCompletedAt(service *quota.Service)
@@ -87,10 +90,6 @@ func refreshTaskRecord(service *quota.Service, authIndex string) *quota.RefreshT
 	return refreshTasks(service)[authIndex]
 }
 
-func setBackendPageActiveForAutoRefreshTest(service *quota.Service, at time.Time) {
-	quotaServiceField(service, "lastActiveStatusAt").Set(reflect.ValueOf(at))
-}
-
 func setLastAutoRefreshRoundAt(service *quota.Service, at time.Time) {
 	quotaServiceField(service, "lastAutoRefreshRoundAt").Set(reflect.ValueOf(at))
 }
@@ -103,16 +102,24 @@ func setAutoRefreshRunning(service *quota.Service, running bool) {
 	quotaServiceField(service, "autoRefreshRunning").SetBool(running)
 }
 
+func setAutoRefreshNow(service *quota.Service, now func() time.Time) {
+	quotaServiceField(service, "autoRefreshNow").Set(reflect.ValueOf(now))
+}
+
+func setAutoRefreshDelay(service *quota.Service, delay func(context.Context, time.Duration) bool) {
+	quotaServiceField(service, "autoRefreshDelay").Set(reflect.ValueOf(delay))
+}
+
+func autoRefreshSettingsChanged(service *quota.Service) chan struct{} {
+	return quotaServiceField(service, "autoRefreshSettingsChanged").Interface().(chan struct{})
+}
+
 func lastAutoRefreshRoundAt(service *quota.Service) time.Time {
 	return quotaServiceField(service, "lastAutoRefreshRoundAt").Interface().(time.Time)
 }
 
 func lastAutoRefreshAttemptAt(service *quota.Service) time.Time {
 	return quotaServiceField(service, "lastAutoRefreshAttemptAt").Interface().(time.Time)
-}
-
-func autoRefreshInterval(service *quota.Service) time.Duration {
-	return quotaServiceField(service, "autoRefreshInterval").Interface().(time.Duration)
 }
 
 func usageHeaderFlushInterval(service *quota.Service) time.Duration {

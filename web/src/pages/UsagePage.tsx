@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, markStatusActive, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
 import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageEvent, UsageSourceFilterOption, VersionResponse } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
@@ -88,7 +88,6 @@ const REQUEST_EVENTS_PREFERENCES_VERSION = 3;
 const ALL_REQUEST_EVENTS_FILTER = '__all__';
 const OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
 export const CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS = 60_000;
-export const STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS = 30_000;
 const CPA_MANAGEMENT_PAGE = 'management.html';
 const ABSOLUTE_HTTP_URL_PATTERN = /^https?:\/\//i;
 const EXPLICIT_URL_SCHEME_PATTERN = /^[a-z][a-z\d+.-]*:/i;
@@ -340,24 +339,6 @@ type CustomDateRangeBoundsRefreshOptions = {
   intervalMs?: number;
 };
 
-type StatusActiveHeartbeatDocument = Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>;
-
-type StatusActiveHeartbeatTimerTarget = {
-  setInterval: (handler: () => void, timeout: number) => number;
-  clearInterval: (handle: number) => void;
-};
-
-type StatusActiveHeartbeatOptions = {
-  loadStatus: (signal: AbortSignal) => Promise<StatusResponse>;
-  markActive: (signal: AbortSignal) => Promise<void>;
-  setStatus: (status: StatusResponse) => void;
-  setStatusError: (error: string) => void;
-  onAuthRequired?: () => void;
-  documentRef?: StatusActiveHeartbeatDocument;
-  timerTarget?: StatusActiveHeartbeatTimerTarget;
-  intervalMs?: number;
-};
-
 type VersionInfoLoader = (signal: AbortSignal) => Promise<VersionResponse>;
 
 type UsagePageVersionInfoOptions = {
@@ -489,97 +470,6 @@ export const scheduleCustomDateRangeBoundsRefresh = ({
     active = false;
     timers.clearInterval(timer);
     targetDocument?.removeEventListener('visibilitychange', handleVisibilityChange);
-  };
-};
-
-export const scheduleStatusActiveHeartbeat = ({
-  loadStatus,
-  markActive,
-  setStatus,
-  setStatusError,
-  onAuthRequired,
-  documentRef,
-  timerTarget,
-  intervalMs = STATUS_ACTIVE_HEARTBEAT_INTERVAL_MS,
-}: StatusActiveHeartbeatOptions) => {
-  const targetDocument = documentRef ?? (typeof document === 'undefined' ? undefined : document);
-  const timers = timerTarget ?? (typeof window === 'undefined' ? undefined : {
-    setInterval: window.setInterval.bind(window),
-    clearInterval: window.clearInterval.bind(window),
-  });
-  if (!timers) {
-    return () => undefined;
-  }
-
-  let controller: AbortController | null = null;
-  let timer: number | null = null;
-  const isVisible = () => isUsagePageVisible(targetDocument);
-  const stopTimer = () => {
-    if (timer !== null) {
-      timers.clearInterval(timer);
-      timer = null;
-    }
-  };
-  const stopPolling = () => {
-    controller?.abort();
-    controller = null;
-    stopTimer();
-  };
-  const loadAndMaybeMarkActive = async () => {
-    controller?.abort();
-    const requestController = new AbortController();
-    controller = requestController;
-    try {
-      // status 成功后才发送 active 心跳，避免异常页面状态把后端误标记为活跃。
-      const status = await loadStatus(requestController.signal);
-      setStatus(status);
-      setStatusError(status.last_error || '');
-      if (status.quotaAutoRefreshEnabled !== true) {
-        stopTimer();
-        return false;
-      }
-      await markActive(requestController.signal);
-      return true;
-    } catch (error) {
-      if (requestController.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 401) {
-        onAuthRequired?.();
-      }
-      return false;
-    } finally {
-      if (controller === requestController) {
-        controller = null;
-      }
-    }
-  };
-  const startPolling = () => {
-    if (!isVisible()) {
-      stopPolling();
-      return;
-    }
-    void loadAndMaybeMarkActive().then((shouldHeartbeat) => {
-      if (!shouldHeartbeat || !isVisible() || timer !== null) {
-        return;
-      }
-      timer = timers.setInterval(() => {
-        void loadAndMaybeMarkActive();
-      }, intervalMs);
-    });
-  };
-  const handleVisibilityChange = () => {
-    stopPolling();
-    startPolling();
-  };
-
-  startPolling();
-  if (targetDocument) {
-    targetDocument.addEventListener('visibilitychange', handleVisibilityChange);
-  }
-  return () => {
-    if (targetDocument) {
-      targetDocument.removeEventListener('visibilitychange', handleVisibilityChange);
-    }
-    stopPolling();
   };
 };
 
@@ -871,7 +761,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     loading: pricingLoading,
     error: pricingError,
     loadPricing,
-    setModelPrices,
+    saveModelPrice,
+    deleteModelPrice,
     syncingPrices,
     syncMeta,
     syncRemoteModelPrices,
@@ -933,7 +824,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const credentialsData = useCredentialsTabData({
     enabledAuthFiles: credentialSectionVisibility.showAuthFiles && pageVisible,
     enabledAiProviders: credentialSectionVisibility.showAiProvider && pageVisible,
-    quotaAutoRefreshEnabled: status?.quotaAutoRefreshEnabled === true,
     onAuthRequired,
     onNotice: showTopNotice,
   });
@@ -1345,7 +1235,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }), [timeRange]);
 
   useEffect(() => {
-    // Credentials 列表、quota cache 和 task polling 都跟页面可见性绑定，隐藏页不保持续约或轮询。
+    // Credentials 列表、quota cache 和 task polling 都跟页面可见性绑定，隐藏页不保持刷新或轮询。
     const syncPageVisible = () => setPageVisible(isUsagePageVisible());
     syncPageVisible();
     if (typeof document === 'undefined') {
@@ -1358,14 +1248,22 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, []);
 
   useEffect(() => {
-    // 页面级心跳独立于 Credentials tab；调度函数内部负责可见性、abort 和 timer 清理。
-    return scheduleStatusActiveHeartbeat({
-      loadStatus: fetchStatus,
-      markActive: markStatusActive,
-      setStatus,
-      setStatusError,
-      onAuthRequired,
-    });
+    const requestController = new AbortController();
+    void fetchStatus(requestController.signal)
+      .then((nextStatus) => {
+        if (requestController.signal.aborted) return;
+        setStatus(nextStatus);
+        setStatusError(nextStatus.last_error || '');
+      })
+      .catch((error: unknown) => {
+        if (requestController.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 401) {
+          onAuthRequired?.();
+        }
+      });
+    return () => {
+      requestController.abort();
+    };
   }, [onAuthRequired]);
 
   useEffect(() => {
@@ -2174,7 +2072,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                       loading={credentialsData.loading}
                       quotaRefreshing={credentialsData.quotaRefreshing}
                       quotaRefreshError={credentialsData.quotaRefreshError}
-                      quotaAutoRefreshEnabled={status?.quotaAutoRefreshEnabled === true}
                       quotaInspectionStatus={credentialsData.quotaInspectionStatus}
                       quotaInspectionLoading={credentialsData.quotaInspectionLoading}
                       quotaInspectionStarting={credentialsData.quotaInspectionStarting}
@@ -2231,7 +2128,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 <PriceSettingsCard
                   modelNames={modelNames}
                   modelPrices={modelPrices}
-                  onPricesChange={setModelPrices}
+                  onPriceSave={saveModelPrice}
+                  onPriceDelete={deleteModelPrice}
                   onSyncPrices={syncRemoteModelPrices}
                   syncingPrices={syncingPrices}
                   syncMeta={syncMeta}

@@ -42,7 +42,8 @@ export interface UsePricingDataReturn {
   syncMeta: PricingSyncMeta | null;
   lastRefreshedAt: Date | null;
   loadPricing: () => Promise<void>;
-  setModelPrices: (prices: Record<string, ModelPrice>) => Promise<void>;
+  saveModelPrice: (model: string, price: ModelPrice) => Promise<void>;
+  deleteModelPrice: (model: string) => Promise<void>;
   syncRemoteModelPrices: () => Promise<void>;
   syncModelPrices: (prices: Record<string, ModelPrice>) => Promise<PricingSaveResult>;
   previewPricingSync: () => Promise<PricingSyncPreviewResponse>;
@@ -51,12 +52,13 @@ export interface UsePricingDataReturn {
 const normalizePricingStyle = (style: PricingStyle | string | undefined): PricingStyle =>
   style === 'claude' ? 'claude' : 'openai';
 
-const pricingToModelPrice = (entry: PricingEntry): ModelPrice => ({
+export const pricingToModelPrice = (entry: PricingEntry): ModelPrice => ({
   style: normalizePricingStyle(entry.pricing_style),
   prompt: entry.prompt_price_per_1m,
   completion: entry.completion_price_per_1m,
   cache: entry.cache_price_per_1m,
   cacheCreation: entry.cache_creation_price_per_1m ?? 0,
+  multiplier: Number.isFinite(entry.price_multiplier) && entry.price_multiplier >= 0 ? entry.price_multiplier : 1,
 });
 
 const modelPriceToPricingEntry = (pricing: ModelPrice): Omit<PricingEntry, 'model'> => ({
@@ -64,6 +66,7 @@ const modelPriceToPricingEntry = (pricing: ModelPrice): Omit<PricingEntry, 'mode
   completion_price_per_1m: pricing.completion,
   cache_price_per_1m: pricing.cache,
   cache_creation_price_per_1m: pricing.cacheCreation,
+  price_multiplier: pricing.multiplier,
   pricing_style: pricing.style,
 });
 
@@ -178,35 +181,50 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
     };
   }, [enabled, loadPricing]);
 
-  const setModelPrices = useCallback(async (prices: Record<string, ModelPrice>) => {
-    const previousPrices = modelPrices;
-    setModelPricesState(prices);
-
+  const saveModelPrice = useCallback(async (model: string, price: ModelPrice) => {
     try {
-      const previousModels = new Set(Object.keys(previousPrices));
-      const nextModels = new Set(Object.keys(prices));
-      await Promise.all([
-        ...Object.entries(prices).map(([model, pricing]) =>
-          updatePricing(model, modelPriceToPricingEntry(pricing))
-        ),
-        ...Array.from(previousModels)
-          .filter((model) => !nextModels.has(model))
-          .map((model) => deletePricing(model)),
-      ]);
+      await updatePricing(model, modelPriceToPricingEntry(price));
+      setModelPricesState((current) => ({
+        ...current,
+        [model]: price,
+      }));
       setLastRefreshedAt(new Date());
     } catch (error) {
-      setModelPricesState(previousPrices);
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequiredRef.current?.();
-        return;
+        throw error;
       }
       const message = error instanceof Error ? error.message : '';
       showNotification(
         `${t('notification.upload_failed')}${message ? `: ${message}` : ''}`,
         'error'
       );
+      throw error;
     }
-  }, [modelPrices, showNotification, t]);
+  }, [showNotification, t]);
+
+  const deleteModelPrice = useCallback(async (model: string) => {
+    try {
+      await deletePricing(model);
+      setModelPricesState((current) => {
+        const nextPrices = { ...current };
+        delete nextPrices[model];
+        return nextPrices;
+      });
+      setLastRefreshedAt(new Date());
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequiredRef.current?.();
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : '';
+      showNotification(
+        `${t('notification.upload_failed')}${message ? `: ${message}` : ''}`,
+        'error'
+      );
+      throw error;
+    }
+  }, [showNotification, t]);
 
   const syncRemoteModelPrices = useCallback(async () => {
     if (syncingPrices) {
@@ -221,11 +239,11 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
       const syncedPrices = Object.fromEntries(
         response.pricing.map((entry) => [entry.model, pricingToModelPrice(entry)])
       );
-      const nextPrices = {
-        ...modelPrices,
+      // POST /pricing/sync 已在服务端持久化匹配到的价格，这里只需刷新本地 state
+      setModelPricesState((current) => ({
+        ...current,
         ...syncedPrices,
-      };
-      await setModelPrices(nextPrices);
+      }));
       setSyncMeta({
         sourceUrl: response.source_url,
         sourceUrls: response.source_urls,
@@ -256,7 +274,7 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
     } finally {
       setSyncingPrices(false);
     }
-  }, [modelPrices, setModelPrices, showNotification, syncingPrices, t]);
+  }, [showNotification, syncingPrices, t]);
 
   const syncModelPrices = useCallback(async (prices: Record<string, ModelPrice>) => {
     const result = await persistModelPriceEntries(prices);
@@ -296,7 +314,8 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
     syncMeta,
     lastRefreshedAt,
     loadPricing,
-    setModelPrices,
+    saveModelPrice,
+    deleteModelPrice,
     syncRemoteModelPrices,
     syncModelPrices,
     previewPricingSync,

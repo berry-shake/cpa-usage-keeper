@@ -42,41 +42,17 @@ func TestAppCloseClosesDatabase(t *testing.T) {
 	}
 }
 
-func TestNewWithConfigBuildsQuotaAutoRefreshWhenEnabled(t *testing.T) {
+func TestNewWithConfigBuildsQuotaAutoRefreshRunner(t *testing.T) {
 	app, err := NewWithConfig(testAppConfig(t))
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
 	defer app.Close()
 	if app.QuotaAutoRefresh == nil {
-		t.Fatal("expected quota auto refresh runner when enabled")
+		t.Fatal("expected quota scheduled refresh runner to be initialized")
 	}
 	if app.QuotaService == nil {
 		t.Fatal("expected quota service to remain available for manual refresh")
-	}
-}
-
-func TestNewWithConfigSkipsQuotaAutoRefreshWhenDisabled(t *testing.T) {
-	cfg := testAppConfig(t)
-	cfg.QuotaAutoRefreshEnabled = false
-	app, err := NewWithConfig(cfg)
-	if err != nil {
-		t.Fatalf("NewWithConfig returned error: %v", err)
-	}
-	defer app.Close()
-	if app.QuotaAutoRefresh != nil {
-		t.Fatal("expected quota auto refresh runner to be skipped when disabled")
-	}
-	if app.QuotaService == nil {
-		t.Fatal("expected quota service to remain available for manual refresh when auto refresh is disabled")
-	}
-}
-
-func TestQuotaActiveRecorderIsDisabledWithAutoRefresh(t *testing.T) {
-	cfg := testAppConfig(t)
-	cfg.QuotaAutoRefreshEnabled = false
-	if recorder := quotaActiveRecorder(cfg, nil); recorder != nil {
-		t.Fatalf("expected disabled quota auto refresh to avoid active recorder, got %T", recorder)
 	}
 }
 
@@ -425,10 +401,9 @@ func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
 		t.Fatal("expected database backup runner to start")
 	}
 }
-func TestRunSetsQuotaServiceContextEvenWhenAutoRefreshDisabled(t *testing.T) {
+func TestRunSetsQuotaServiceContext(t *testing.T) {
 	cfg := testAppConfig(t)
 	cfg.AppPort = "invalid-port"
-	cfg.QuotaAutoRefreshEnabled = false
 	quotaService := &quotaContextRecorder{contextSet: make(chan context.Context, 1)}
 	app := &App{
 		Config:       &cfg,
@@ -582,19 +557,18 @@ func readAppLogFile(t *testing.T, logDir string) string {
 func testAppConfig(t *testing.T) config.Config {
 	t.Helper()
 	return config.Config{
-		AppPort:                 "8080",
-		CPABaseURL:              "https://cpa.example.com",
-		CPAManagementKey:        "secret",
-		RedisQueueIdleInterval:  time.Second,
-		MetadataSyncInterval:    30 * time.Second,
-		SQLitePath:              t.TempDir() + "/app.db",
-		BackupEnabled:           true,
-		BackupDir:               t.TempDir() + "/backups",
-		BackupRetentionDays:     7,
-		RequestTimeout:          5 * time.Second,
-		QuotaAutoRefreshEnabled: true,
-		LogLevel:                "info",
-		LogFileEnabled:          false,
-		LogRetentionDays:        7,
+		AppPort:                "8080",
+		CPABaseURL:             "https://cpa.example.com",
+		CPAManagementKey:       "secret",
+		RedisQueueIdleInterval: time.Second,
+		MetadataSyncInterval:   30 * time.Second,
+		SQLitePath:             t.TempDir() + "/app.db",
+		BackupEnabled:          true,
+		BackupDir:              t.TempDir() + "/backups",
+		BackupRetentionDays:    7,
+		RequestTimeout:         5 * time.Second,
+		LogLevel:               "info",
+		LogFileEnabled:         false,
+		LogRetentionDays:       7,
 	}
 }

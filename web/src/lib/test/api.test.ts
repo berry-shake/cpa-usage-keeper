@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appPath, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchKeyOverviewRealtime, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, markStatusActive, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias } from './api';
+import { appPath, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -159,18 +159,37 @@ describe('fetchUsageEvents', () => {
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ credentials: 'include', method: 'DELETE' });
   });
 
-  it('marks backend page activity with the status active endpoint', async () => {
+  it('loads quota auto refresh settings from the typed quota endpoint', async () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
+      json: async () => ({ enabled: true, schedule: { unit: 'hour', value: 6 } }),
     } as Response);
     const signal = new AbortController().signal;
 
-    await markStatusActive(signal);
+    const response = await fetchQuotaAutoRefreshSettings(signal);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(new URL(String(url), 'http://localhost').pathname).toBe('/api/v1/status/active');
-    expect(init).toMatchObject({ credentials: 'include', signal });
+    expect(response.schedule).toEqual({ unit: 'hour', value: 6 });
+    expect(new URL(String(url), 'http://localhost').pathname).toBe('/api/v1/quota/auto-refresh/settings');
+    expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
+  });
+
+  it('updates quota auto refresh settings through the typed quota endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ enabled: true, schedule: { unit: 'week', value: 2 } }),
+    } as Response);
+
+    const response = await updateQuotaAutoRefreshSettings({ enabled: true, schedule: { unit: 'week', value: 2 } });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(response.schedule).toEqual({ unit: 'week', value: 2 });
+    expect(new URL(String(url), 'http://localhost').pathname).toBe('/api/v1/quota/auto-refresh/settings');
+    expect(init).toMatchObject({ credentials: 'include', method: 'PUT' });
+    expect(headerValue(init, 'Content-Type')).toBe('application/json');
+    expect(init?.body).toBe(JSON.stringify({ enabled: true, schedule: { unit: 'week', value: 2 } }));
   });
 
   it('loads app version from the dedicated version endpoint', async () => {

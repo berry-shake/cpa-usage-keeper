@@ -15,12 +15,6 @@ const (
 	// RefreshTransientTaskTTL 是普通失败在内存中的短期保留时间，只用于当前页面轮询读取失败结果。
 	RefreshTransientTaskTTL = 20 * time.Minute
 
-	// AutoRefreshInterval 是后台自动刷新 Auth Files 限额的默认调度间隔。
-	AutoRefreshInterval = 5 * time.Minute
-
-	// AutoRefreshActiveTTL 是后台页面心跳的内存租约，前端 30s 心跳停止后会在短时间内失效。
-	AutoRefreshActiveTTL = 90 * time.Second
-
 	// RefreshErrorCacheTTL 是可恢复展示的 HTTP 错误缓存时间，过期后自动刷新可以重新尝试。
 	RefreshErrorCacheTTL = 4 * time.Hour
 

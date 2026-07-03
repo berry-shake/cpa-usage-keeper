@@ -3,6 +3,7 @@ package migration
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -60,15 +61,10 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260620_create_auth_sessions",
 		"20260629_add_usage_identity_alias",
 		"20260701_add_auth_session_source",
+		"20260702_model_price_multiplier",
+		"20260702_create_app_settings",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("expected ordered migrations %v, got %v", want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("expected ordered migrations %v, got %v", want, got)
-		}
-	}
+	assertStringSlicesEqual(t, want, got)
 }
 
 func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing.T) {
@@ -104,6 +100,9 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 	if !db.Migrator().HasColumn(&entities.AuthSession{}, "source") {
 		t.Fatal("expected auth_sessions.source column to exist")
 	}
+	if !db.Migrator().HasTable(&entities.AppSetting{}) {
+		t.Fatal("expected app_settings table to exist")
+	}
 	if db.Migrator().HasColumn(&entities.RedisUsageInbox{}, "queue_key") {
 		t.Fatal("expected redis_usage_inboxes.queue_key column not to exist")
 	}
@@ -115,62 +114,11 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 			t.Fatalf("expected usage_identities.%s column to exist", column)
 		}
 	}
-
 	var versions []string
 	if err := db.Table("schema_migrations").Order("version asc").Pluck("version", &versions).Error; err != nil {
 		t.Fatalf("load schema migrations: %v", err)
 	}
-	expected := []string{
-		"20260503_add_usage_event_redis_fields",
-		"20260503_backfill_usage_event_redis_fields",
-		"20260503_drop_snapshot_runs",
-		"20260504_backfill_usage_event_identity_fields",
-		"20260504_backfill_usage_identity_stats",
-		"20260504_create_usage_identities",
-		"20260504_drop_legacy_metadata_tables",
-		"20260504_drop_legacy_snapshot_run_columns",
-		"20260504_migrate_usage_identities_metadata",
-		"20260504_remove_prefix_usage_identities",
-		"20260505_add_usage_identity_lookup_key",
-		"20260505_migrate_ai_provider_identities_to_auth_index",
-		"20260506_add_usage_performance_indexes",
-		"20260507_add_usage_identity_metadata_fields",
-		"20260508_add_usage_event_model_alias",
-		"20260509_update_usage_identity_quota_fields",
-		"20260510_remove_usage_identity_quota_fields",
-		"20260511_add_usage_identity_base_url",
-		"20260512_normalize_storage_times_to_project_tz",
-		"20260513_create_cpa_api_keys",
-		"20260513_use_int64_primary_keys",
-		"20260514_add_usage_event_cache_token_fields",
-		"20260514_add_usage_event_plain_dimension_indexes",
-		"20260514_create_usage_overview_stats",
-		"20260514_remove_usage_event_event_key_unique_index",
-		"20260517_add_usage_identity_sync_metadata_fields",
-		"20260518_usage_overview_rollup_dimensions",
-		"20260519_add_usage_event_reasoning_effort",
-		"20260525_add_usage_event_quota_window_indexes",
-		"20260528_add_usage_event_cpa_response_fields",
-		"20260531_model_price_pricing_style",
-		"20260601_backfill_claude_usage_tokens",
-		"20260602_add_usage_event_executor_type",
-		"20260603_add_usage_identity_file_fields",
-		"20260605_backfill_gemini_codex_token_format",
-		"20260610_remove_usage_event_write_heavy_indexes",
-		"20260611_remove_usage_event_low_value_indexes",
-		"20260612_replace_redis_inbox_queue_key_with_source",
-		"20260620_create_auth_sessions",
-		"20260629_add_usage_identity_alias",
-		"20260701_add_auth_session_source",
-	}
-	if len(versions) != len(expected) {
-		t.Fatalf("expected migration versions %v, got %v", expected, versions)
-	}
-	for i := range expected {
-		if versions[i] != expected[i] {
-			t.Fatalf("expected migration versions %v, got %v", expected, versions)
-		}
-	}
+	assertStringSlicesEqual(t, sortedOrderedMigrationVersions(), versions)
 }
 
 func TestRunNormalizesLegacyStorageTimesToProjectTimezone(t *testing.T) {
@@ -305,50 +253,25 @@ func assertRawMigrationTime(t *testing.T, db *gorm.DB, table string, field strin
 	}
 }
 
-func TestRunSchemaMigrationKeepsDefaultMigrationsTransactional(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(filepath.Join(t.TempDir(), "app.db"))), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
+func TestRunKeepsDefaultMigrationsTransactionalWhenRecordingFails(t *testing.T) {
+	db := openDatabaseWithFailingMigrationRecord(t, "20260620_create_auth_sessions")
 	defer closeOpenedDatabase(t, db)
-	if err := db.Exec("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at DATETIME NOT NULL)").Error; err != nil {
-		t.Fatalf("create schema_migrations: %v", err)
-	}
 
-	err = runSchemaMigration(db, databaseMigration{
-		version: "test_transactional_failure",
-		run: func(tx *gorm.DB) error {
-			if err := tx.Exec("CREATE TABLE transactional_probe (id INTEGER PRIMARY KEY)").Error; err != nil {
-				return err
-			}
-			return fmt.Errorf("boom")
-		},
-	})
+	err := Run(db)
 	if err == nil {
 		t.Fatal("expected migration error")
 	}
-	if db.Migrator().HasTable("transactional_probe") {
-		t.Fatal("expected default schema migration to roll back created table")
+	if db.Migrator().HasTable(&entities.AuthSession{}) {
+		t.Fatal("expected failed auth session migration to roll back created table")
 	}
 }
 
-func TestRunSchemaMigrationLogsErrors(t *testing.T) {
+func TestRunLogsSchemaMigrationErrors(t *testing.T) {
 	logs := captureMigrationLogs(t, logrus.InfoLevel)
-	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(filepath.Join(t.TempDir(), "app.db"))), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
+	db := openDatabaseWithFailingMigrationRecord(t, "20260620_create_auth_sessions")
 	defer closeOpenedDatabase(t, db)
-	if err := db.Exec("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at DATETIME NOT NULL)").Error; err != nil {
-		t.Fatalf("create schema_migrations: %v", err)
-	}
 
-	err = runSchemaMigration(db, databaseMigration{
-		version: "test_failure",
-		run: func(*gorm.DB) error {
-			return fmt.Errorf("boom")
-		},
-	})
+	err := Run(db)
 	if err == nil {
 		t.Fatal("expected migration error")
 	}
@@ -357,13 +280,292 @@ func TestRunSchemaMigrationLogsErrors(t *testing.T) {
 	for _, want := range []string{
 		"level=info",
 		"msg=\"schema migration started\"",
-		"version=test_failure",
+		"version=20260620_create_auth_sessions",
 		"level=error",
 		"msg=\"schema migration failed\"",
-		"error=boom",
+		"error=\"forced record failure\"",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected migration error logs to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRunAddsSourceToExistingAuthSessions(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(filepath.Join(t.TempDir(), "auth-session-source.db"))), &gorm.Config{NowFunc: func() time.Time {
+		return time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	}})
+	if err != nil {
+		t.Fatalf("open sqlite database: %v", err)
+	}
+	defer closeOpenedDatabase(t, db)
+
+	if err := MarkAllAsApplied(db); err != nil {
+		t.Fatalf("mark all migrations applied: %v", err)
+	}
+	if err := db.Exec("DELETE FROM schema_migrations WHERE version = ?", migrationAddAuthSessionSource).Error; err != nil {
+		t.Fatalf("mark target migration pending %s: %v", migrationAddAuthSessionSource, err)
+	}
+	if err := db.Exec(`CREATE TABLE auth_sessions (
+		token_hash TEXT PRIMARY KEY,
+		role TEXT NOT NULL,
+		cpa_api_key_id INTEGER,
+		expires_at DATETIME NOT NULL,
+		created_at DATETIME,
+		updated_at DATETIME
+	)`).Error; err != nil {
+		t.Fatalf("create legacy auth_sessions: %v", err)
+	}
+	if err := db.Exec(
+		"INSERT INTO auth_sessions (token_hash, role, cpa_api_key_id, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		"legacy-token-hash",
+		"admin",
+		0,
+		"2026-07-02T00:00:00Z",
+		"2026-07-01T00:00:00Z",
+		"2026-07-01T00:00:00Z",
+	).Error; err != nil {
+		t.Fatalf("seed legacy auth session: %v", err)
+	}
+
+	if err := Run(db); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	if !db.Migrator().HasColumn(&entities.AuthSession{}, "Source") {
+		t.Fatal("expected auth_sessions.source column to exist after migration")
+	}
+	var source string
+	if err := db.Table("auth_sessions").Select("source").Where("token_hash = ?", "legacy-token-hash").Scan(&source).Error; err != nil {
+		t.Fatalf("load migrated source: %v", err)
+	}
+	if source != "standard" {
+		t.Fatalf("expected legacy session source to backfill to standard, got %q", source)
+	}
+	var count int64
+	if err := db.Table("schema_migrations").Where("version = ?", migrationAddAuthSessionSource).Count(&count).Error; err != nil {
+		t.Fatalf("count auth session source migration: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected migration %s to be recorded once, got %d", migrationAddAuthSessionSource, count)
+	}
+}
+
+func TestRunAddsModelPriceMultiplierDefaultToExistingPricing(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(filepath.Join(t.TempDir(), "model-price-multiplier.db"))), &gorm.Config{NowFunc: func() time.Time {
+		return time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)
+	}})
+	if err != nil {
+		t.Fatalf("open sqlite database: %v", err)
+	}
+	defer closeOpenedDatabase(t, db)
+
+	if err := MarkAllAsApplied(db); err != nil {
+		t.Fatalf("mark all migrations applied: %v", err)
+	}
+	if err := db.Exec("DELETE FROM schema_migrations WHERE version = ?", migrationModelPriceMultiplier).Error; err != nil {
+		t.Fatalf("mark target migration pending %s: %v", migrationModelPriceMultiplier, err)
+	}
+	if err := db.Exec(`CREATE TABLE model_price_settings (
+		id integer PRIMARY KEY,
+		model text,
+		pricing_style text NOT NULL DEFAULT 'openai',
+		prompt_price_per1_m real,
+		completion_price_per1_m real,
+		cache_price_per1_m real,
+		cache_creation_price_per1_m real NOT NULL DEFAULT 0,
+		created_at datetime,
+		updated_at datetime
+	)`).Error; err != nil {
+		t.Fatalf("create legacy model_price_settings table: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO model_price_settings (
+		id,
+		model,
+		pricing_style,
+		prompt_price_per1_m,
+		completion_price_per1_m,
+		cache_price_per1_m,
+		cache_creation_price_per1_m
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`, int64(1), "claude-sonnet", "claude", 3.0, 15.0, 0.3, 3.75).Error; err != nil {
+		t.Fatalf("seed legacy model price setting: %v", err)
+	}
+
+	if err := Run(db); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	if !db.Migrator().HasColumn("model_price_settings", "price_multiplier") {
+		t.Fatal("expected model_price_settings.price_multiplier column to exist after migration")
+	}
+	assertSQLiteColumnDefault(t, db, "model_price_settings", "price_multiplier", "1")
+	var multiplier float64
+	if err := db.Table("model_price_settings").Select("price_multiplier").Where("model = ?", "claude-sonnet").Scan(&multiplier).Error; err != nil {
+		t.Fatalf("load migrated price multiplier: %v", err)
+	}
+	if multiplier != 1 {
+		t.Fatalf("expected legacy price multiplier to default to 1, got %v", multiplier)
+	}
+	var count int64
+	if err := db.Table("schema_migrations").Where("version = ?", migrationModelPriceMultiplier).Count(&count).Error; err != nil {
+		t.Fatalf("count model price multiplier migration: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected migration %s to be recorded once, got %d", migrationModelPriceMultiplier, count)
+	}
+}
+
+func TestRunBackfillsModelPriceMultiplierWhenColumnAlreadyExists(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(filepath.Join(t.TempDir(), "model-price-multiplier-existing-column.db"))), &gorm.Config{NowFunc: func() time.Time {
+		return time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)
+	}})
+	if err != nil {
+		t.Fatalf("open sqlite database: %v", err)
+	}
+	defer closeOpenedDatabase(t, db)
+
+	if err := MarkAllAsApplied(db); err != nil {
+		t.Fatalf("mark all migrations applied: %v", err)
+	}
+	if err := db.Exec("DELETE FROM schema_migrations WHERE version = ?", migrationModelPriceMultiplier).Error; err != nil {
+		t.Fatalf("mark target migration pending %s: %v", migrationModelPriceMultiplier, err)
+	}
+	if err := db.Exec(`CREATE TABLE model_price_settings (
+		id integer PRIMARY KEY,
+		model text,
+		pricing_style text NOT NULL DEFAULT 'openai',
+		prompt_price_per1_m real,
+		completion_price_per1_m real,
+		cache_price_per1_m real,
+		cache_creation_price_per1_m real NOT NULL DEFAULT 0,
+		price_multiplier real,
+		created_at datetime,
+		updated_at datetime
+	)`).Error; err != nil {
+		t.Fatalf("create partially migrated model_price_settings table: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO model_price_settings (
+		id,
+		model,
+		pricing_style,
+		prompt_price_per1_m,
+		completion_price_per1_m,
+		cache_price_per1_m,
+		cache_creation_price_per1_m,
+		price_multiplier
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
+		int64(1), "legacy-null", "openai", 3.0, 15.0, 0.3, 0.0, nil,
+		int64(2), "explicit-zero", "openai", 3.0, 15.0, 0.3, 0.0, 0.0,
+	).Error; err != nil {
+		t.Fatalf("seed partially migrated model price settings: %v", err)
+	}
+
+	if err := Run(db); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	var nullBackfill *float64
+	if err := db.Table("model_price_settings").Select("price_multiplier").Where("model = ?", "legacy-null").Scan(&nullBackfill).Error; err != nil {
+		t.Fatalf("load null multiplier backfill: %v", err)
+	}
+	if nullBackfill == nil || *nullBackfill != 1 {
+		t.Fatalf("expected NULL price multiplier to backfill to 1, got %+v", nullBackfill)
+	}
+	var zeroMultiplier *float64
+	if err := db.Table("model_price_settings").Select("price_multiplier").Where("model = ?", "explicit-zero").Scan(&zeroMultiplier).Error; err != nil {
+		t.Fatalf("load explicit zero multiplier: %v", err)
+	}
+	if zeroMultiplier == nil || *zeroMultiplier != 0 {
+		t.Fatalf("expected explicit zero price multiplier to stay 0, got %+v", zeroMultiplier)
+	}
+	var count int64
+	if err := db.Table("schema_migrations").Where("version = ?", migrationModelPriceMultiplier).Count(&count).Error; err != nil {
+		t.Fatalf("count model price multiplier migration: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected migration %s to be recorded once, got %d", migrationModelPriceMultiplier, count)
+	}
+}
+
+func openDatabaseWithFailingMigrationRecord(t *testing.T, version string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(filepath.Join(t.TempDir(), "app.db"))), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.Exec("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at DATETIME NOT NULL)").Error; err != nil {
+		t.Fatalf("create schema_migrations: %v", err)
+	}
+	seedSchemaMigrationsBefore(t, db, version, "2026-06-20T00:00:00Z")
+	quotedVersion := strings.ReplaceAll(version, "'", "''")
+	if err := db.Exec(fmt.Sprintf(`
+		CREATE TRIGGER fail_schema_migration_record
+		BEFORE INSERT ON schema_migrations
+		WHEN NEW.version = '%s'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced record failure');
+		END
+	`, quotedVersion)).Error; err != nil {
+		t.Fatalf("create schema migration failure trigger: %v", err)
+	}
+	return db
+}
+
+func seedSchemaMigrationsBefore(t *testing.T, db *gorm.DB, targetVersion string, appliedAt string) {
+	t.Helper()
+	for _, migration := range orderedMigrations() {
+		if migration.version == targetVersion {
+			return
+		}
+		if err := db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", migration.version, appliedAt).Error; err != nil {
+			t.Fatalf("seed schema_migrations %s: %v", migration.version, err)
+		}
+	}
+	t.Fatalf("missing migration version %s in expected migration list", targetVersion)
+}
+
+func sortedOrderedMigrationVersions() []string {
+	versions := make([]string, 0, len(orderedMigrations()))
+	for _, migration := range orderedMigrations() {
+		versions = append(versions, migration.version)
+	}
+	sort.Strings(versions)
+	return versions
+}
+
+func assertSQLiteColumnDefault(t *testing.T, db *gorm.DB, table string, column string, wantDefault string) {
+	t.Helper()
+	type columnInfo struct {
+		Name       string
+		DefaultRaw *string `gorm:"column:dflt_value"`
+	}
+	var columns []columnInfo
+	if err := db.Raw(fmt.Sprintf("PRAGMA table_info(%s)", table)).Scan(&columns).Error; err != nil {
+		t.Fatalf("read sqlite table info for %s: %v", table, err)
+	}
+	for _, info := range columns {
+		if info.Name != column {
+			continue
+		}
+		if info.DefaultRaw == nil || *info.DefaultRaw != wantDefault {
+			if info.DefaultRaw == nil {
+				t.Fatalf("expected %s.%s default %q, got NULL", table, column, wantDefault)
+			}
+			t.Fatalf("expected %s.%s default %q, got %q", table, column, wantDefault, *info.DefaultRaw)
+		}
+		return
+	}
+	t.Fatalf("expected %s.%s column in sqlite table info, got %+v", table, column, columns)
+}
+
+func assertStringSlicesEqual(t *testing.T, want []string, got []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("expected versions %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected versions %v, got %v", want, got)
 		}
 	}
 }

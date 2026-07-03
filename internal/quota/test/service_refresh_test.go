@@ -16,14 +16,18 @@ import (
 )
 
 type refreshHandlerStub struct {
-	mu     sync.Mutex
-	calls  []string
-	block  <-chan struct{}
-	output ProviderOutput
-	err    error
+	mu      sync.Mutex
+	calls   []string
+	block   <-chan struct{}
+	output  ProviderOutput
+	err     error
+	onCheck func()
 }
 
 func (s *refreshHandlerStub) Check(ctx context.Context, input ProviderInput) (ProviderOutput, error) {
+	if s.onCheck != nil {
+		s.onCheck()
+	}
 	if s.block != nil {
 		select {
 		case <-ctx.Done():
@@ -858,7 +862,7 @@ func TestStartInspectionIgnoresNonInspectionActiveRefreshTasks(t *testing.T) {
 		source RefreshSource
 	}{
 		{name: "manual", source: RefreshSourceManual},
-		{name: "auto", source: RefreshSourceAuto},
+		{name: "scheduled", source: RefreshSourceScheduled},
 	}
 
 	for _, tt := range tests {
