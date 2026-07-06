@@ -1,0 +1,131 @@
+package test
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"cpa-usage-keeper/internal/config"
+	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/repository"
+	repodto "cpa-usage-keeper/internal/repository/dto"
+	"cpa-usage-keeper/internal/service"
+	"gorm.io/gorm"
+)
+
+func TestProcessRedisUsageInboxNormalizesOpenAICompatibilityTokensForOpenAIIdentity(t *testing.T) {
+	db := openOpenAITokenNormalizationTestDatabase(t)
+	if err := db.Create(&entities.UsageIdentity{
+		Name:         "OpenAI Compatible",
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
+		AuthTypeName: "apikey",
+		Identity:     "openai-compat-auth-index",
+		Type:         "openai",
+		Provider:     "OpenAI Compatible",
+	}).Error; err != nil {
+		t.Fatalf("seed usage identity: %v", err)
+	}
+	_, err := repository.InsertRedisUsageInboxMessages(db, []repodto.RedisInboxInsert{{
+		Source: "usage",
+		RawMessage: `{
+			"timestamp":"2026-07-06T08:00:00Z",
+			"provider":"OpenAI Compatible",
+			"auth_type":"api_key",
+			"auth_index":"openai-compat-auth-index",
+			"model":"gemini-2.5-pro",
+			"request_id":"openai-compatible-gemini-thinking",
+			"executor_type":"OpenAICompatExecutor",
+			"tokens":{
+				"input_tokens":11,
+				"output_tokens":7,
+				"reasoning_tokens":3,
+				"cached_tokens":5,
+				"total_tokens":21
+			}
+		}`,
+		PoppedAt: time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	result, err := syncService.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	if result == nil || result.InsertedEvents != 1 {
+		t.Fatalf("expected one inserted event, got %+v", result)
+	}
+	event := loadOpenAITokenNormalizationEvent(t, db, "openai-compatible-gemini-thinking")
+	if event.InputTokens != 11 || event.OutputTokens != 10 || event.ReasoningTokens != 3 || event.CachedTokens != 5 || event.TotalTokens != 21 {
+		t.Fatalf("expected openai identity to normalize separated reasoning into output, got %+v", event)
+	}
+}
+
+func TestProcessRedisUsageInboxUsesDefaultTokensWhenUsageIdentityMissing(t *testing.T) {
+	db := openOpenAITokenNormalizationTestDatabase(t)
+	_, err := repository.InsertRedisUsageInboxMessages(db, []repodto.RedisInboxInsert{{
+		Source: "usage",
+		RawMessage: `{
+			"timestamp":"2026-07-06T08:00:00Z",
+			"provider":"Unknown Provider",
+			"auth_type":"api_key",
+			"auth_index":"missing-auth-index",
+			"model":"unknown-model",
+			"request_id":"missing-identity-thinking",
+			"tokens":{
+				"input_tokens":11,
+				"output_tokens":7,
+				"reasoning_tokens":3,
+				"cached_tokens":5,
+				"total_tokens":21
+			}
+		}`,
+		PoppedAt: time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC),
+	}})
+	if err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+
+	result, err := syncService.ProcessRedisUsageInbox(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
+	}
+	if result == nil || result.InsertedEvents != 1 {
+		t.Fatalf("expected one inserted event, got %+v", result)
+	}
+	event := loadOpenAITokenNormalizationEvent(t, db, "missing-identity-thinking")
+	if event.InputTokens != 11 || event.OutputTokens != 7 || event.ReasoningTokens != 3 || event.CachedTokens != 5 || event.TotalTokens != 21 {
+		t.Fatalf("expected missing identity to use default strict token normalization, got %+v", event)
+	}
+}
+
+func openOpenAITokenNormalizationTestDatabase(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "openai-token-normalization.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Fatalf("close database: %v", err)
+		}
+	})
+	return db
+}
+
+func loadOpenAITokenNormalizationEvent(t *testing.T, db *gorm.DB, eventKey string) entities.UsageEvent {
+	t.Helper()
+	var event entities.UsageEvent
+	if err := db.Where("event_key = ?", eventKey).First(&event).Error; err != nil {
+		t.Fatalf("load usage event %q: %v", eventKey, err)
+	}
+	return event
+}

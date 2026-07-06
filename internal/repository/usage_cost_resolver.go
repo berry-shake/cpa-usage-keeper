@@ -53,7 +53,7 @@ func NewUsageCostResolver(ctx context.Context, db *gorm.DB) (*UsageCostResolver,
 }
 
 func (r *UsageCostResolver) Calculate(subject UsageCostSubject) UsageCostResult {
-	pricing, matchedModel, matchedBy, ok := r.matchPricing(subject.ModelAlias, subject.Model)
+	pricing, matchedModel, matchedBy, ok := r.matchPricing(subject.Model, subject.ModelAlias)
 	if !ok {
 		return UsageCostResult{Available: !helper.UsageTokenInputRequiresPricing(subject.Tokens)}
 	}
@@ -86,18 +86,18 @@ func (r *UsageCostResolver) CalculateEvent(event entities.UsageEvent) UsageCostR
 	})
 }
 
-func (r *UsageCostResolver) matchPricing(modelAlias string, model string) (entities.ModelPriceSetting, string, string, bool) {
+func (r *UsageCostResolver) matchPricing(model string, modelAlias string) (entities.ModelPriceSetting, string, string, bool) {
 	if r == nil {
 		return entities.ModelPriceSetting{}, "", "", false
-	}
-	if alias := strings.TrimSpace(modelAlias); alias != "" {
-		if pricing, ok := r.pricesByModel[alias]; ok {
-			return pricing, alias, "model_alias", true
-		}
 	}
 	if modelName := strings.TrimSpace(model); modelName != "" {
 		if pricing, ok := r.pricesByModel[modelName]; ok {
 			return pricing, modelName, "model", true
+		}
+	}
+	if alias := strings.TrimSpace(modelAlias); alias != "" {
+		if pricing, ok := r.pricesByModel[alias]; ok {
+			return pricing, alias, "model_alias", true
 		}
 	}
 	return entities.ModelPriceSetting{}, "", "", false

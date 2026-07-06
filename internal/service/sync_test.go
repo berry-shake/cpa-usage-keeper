@@ -1135,7 +1135,7 @@ func TestBuildUsageEventTypeResolverIgnoresBlankActiveType(t *testing.T) {
 	}
 	key := usageEventIdentityKey{authType: entities.UsageIdentityAuthTypeAIProvider, identity: "blank-active-auth-index"}
 	if got := resolver.byIdentity[key]; got != "" {
-		t.Fatalf("expected blank active type to remain unresolved for OpenAI-style fallback, got %q", got)
+		t.Fatalf("expected blank active type to remain unresolved for default token fallback, got %q", got)
 	}
 }
 
@@ -1173,7 +1173,7 @@ func TestProcessRedisUsageInboxFallsBackToDeletedUsageIdentityType(t *testing.T)
 	}
 }
 
-func TestProcessRedisUsageInboxUsesOpenAIStyleForKimiAndMissingType(t *testing.T) {
+func TestProcessRedisUsageInboxUsesStrictTokensForKimiAndMissingType(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	logs := captureSyncDebugLogs(t)
 	if err := db.Create(&entities.UsageIdentity{
@@ -1194,7 +1194,7 @@ func TestProcessRedisUsageInboxUsesOpenAIStyleForKimiAndMissingType(t *testing.T
 		},
 		{
 			Source:     redisUsageInboxTestSource,
-			RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Unknown","auth_type":"apikey","auth_index":"missing-auth-index","model":"unknown-model","request_id":"missing-type-openai-style","tokens":{"input_tokens":100,"output_tokens":30,"cached_tokens":20,"cache_read_tokens":20,"cache_creation_tokens":10}}`,
+			RawMessage: `{"timestamp":"2026-04-27T08:00:00Z","provider":"Unknown","auth_type":"apikey","auth_index":"missing-auth-index","model":"unknown-model","request_id":"missing-type-default-style","tokens":{"input_tokens":100,"output_tokens":30,"reasoning_tokens":5,"cached_tokens":20,"cache_read_tokens":20,"cache_creation_tokens":10,"total_tokens":135}}`,
 			PoppedAt:   time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC),
 		},
 	})
@@ -1206,10 +1206,24 @@ func TestProcessRedisUsageInboxUsesOpenAIStyleForKimiAndMissingType(t *testing.T
 	if _, err := service.ProcessRedisUsageInbox(context.Background()); err != nil {
 		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
 	}
-	for _, eventKey := range []string{"kimi-openai-style", "missing-type-openai-style"} {
+	cases := map[string]struct {
+		outputTokens    int64
+		reasoningTokens int64
+		totalTokens     int64
+	}{
+		"kimi-openai-style":          {outputTokens: 30, totalTokens: 130},
+		"missing-type-default-style": {outputTokens: 30, reasoningTokens: 5, totalTokens: 135},
+	}
+	for eventKey, expected := range cases {
 		event := loadUsageEventByKey(t, db, eventKey)
-		if event.InputTokens != 100 || event.CachedTokens != 20 || event.CacheReadTokens != 20 || event.CacheCreationTokens != 10 || event.OutputTokens != 30 || event.TotalTokens != 130 {
-			t.Fatalf("expected %s to use OpenAI-style token normalization, got %+v", eventKey, event)
+		if event.InputTokens != 100 ||
+			event.CachedTokens != 20 ||
+			event.CacheReadTokens != 20 ||
+			event.CacheCreationTokens != 10 ||
+			event.OutputTokens != expected.outputTokens ||
+			event.ReasoningTokens != expected.reasoningTokens ||
+			event.TotalTokens != expected.totalTokens {
+			t.Fatalf("expected %s to use strict token normalization, got %+v", eventKey, event)
 		}
 	}
 	if output := logs.String(); !strings.Contains(output, "usage identity type not found for redis usage event") || !strings.Contains(output, "missing-auth-index") {

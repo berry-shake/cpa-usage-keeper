@@ -38,7 +38,7 @@ type RecentUsageEvent struct {
 	APIGroupKey string
 	// Model 用于 realtime 当前模型占比和 cost 价格表匹配。
 	Model string
-	// ModelAlias 用于当前价格配置按 alias 优先匹配。
+	// ModelAlias 保留 CPA 上报的请求来源别名，真实 Model 缺价时可用于价格回退。
 	ModelAlias string
 	// AuthIndex 用于关联 usage_identities，找不到身份时才使用 fallback。
 	AuthIndex string

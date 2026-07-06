@@ -215,7 +215,7 @@ func sumRawUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time,
 		Select("model, COALESCE(model_alias, '') AS model_alias, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cached_tokens), 0) AS cached_tokens, COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens").
 		// auth_index 已经是唯一身份维度，这里不再额外按 auth_type 过滤。
 		Where("auth_index = ? AND timestamp >= ?", authIndex, timeutil.FormatStorageTime(start)).
-		// 按 model_alias/model 分组，后续按 alias 优先价格表计算 cost。
+		// 按 model_alias/model 分组保留现有聚合边界，后续 cost 先按真实 model、再按 alias 回退。
 		Group("model_alias, model")
 	// 如果调用方传入结束时间，就用半开区间避免边界重复累计。
 	if end != nil {
@@ -240,7 +240,7 @@ func sumHourlyUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Ti
 		Select("model, model_alias, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cached_tokens), 0) AS cached_tokens, COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens").
 		// auth_index + bucket_start 范围可以使用现有 hourly auth_bucket 索引。
 		Where("auth_index = ? AND bucket_start >= ? AND bucket_start < ?", authIndex, timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end)).
-		// 按 model_alias/model 分组，后续按 alias 优先价格表计算 cost。
+		// 按 model_alias/model 分组保留现有聚合边界，后续 cost 先按真实 model、再按 alias 回退。
 		Group("model_alias, model")
 	// rows 只承接聚合后的少量 model 行。
 	var rows []usageWindowTokenStats
@@ -301,7 +301,7 @@ func usageWindowStatsFromTokenStats(rows []usageWindowTokenStats, costResolver *
 	for _, row := range rows {
 		// total_tokens 直接累计到前端展示的窗口 token。
 		stats.Tokens += row.TotalTokens
-		// 使用统一 resolver 按 alias 优先规则计算该维度的 cost。
+		// 使用统一 resolver 先按真实 model、再按 alias 回退计算该维度的 cost。
 		result := costResolver.Calculate(UsageCostSubject{
 			Model:      row.Model,
 			ModelAlias: row.ModelAlias,

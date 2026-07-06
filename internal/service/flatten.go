@@ -48,8 +48,11 @@ func normalizeUsageTokensByType(tokens dto.TokenStats, usageType string) dto.Tok
 		return normalizeKimiTokens(tokens)
 	case "xai":
 		return normalizeXAIStyleTokens(tokens)
-	case "openai", "openai-compatible", "openai_compatibility", "codex":
-		return normalizeOpenAIStyleTokens(tokens)
+	case "codex":
+		return normalizeCodexTokens(tokens)
+	// CPA OpenAI Compatibility metadata 当前会落成 type=openai，因此 openai 也走兼容口径。
+	case "openai", "openai-compatible", "openai_compatibility":
+		return normalizeOpenAICompatibilityTokens(tokens)
 	default:
 		return normalizeDefaultTokens(tokens)
 	}
@@ -63,8 +66,28 @@ func normalizeClaudeTokens(tokens dto.TokenStats) dto.TokenStats {
 	return fillCodexStyleTotalTokens(tokens)
 }
 
+func normalizeCodexTokens(tokens dto.TokenStats) dto.TokenStats {
+	// Codex Responses usage already includes reasoning_tokens in output_tokens.
+	return normalizeOpenAIStyleTokens(tokens)
+}
+
 func normalizeOpenAIStyleTokens(tokens dto.TokenStats) dto.TokenStats {
+	// 这里的 OpenAI-style 只描述 token 格式：output 已经包含 reasoning。
 	tokens = clampTokenStats(tokens)
+	return fillCodexStyleTotalTokens(tokens)
+}
+
+func normalizeOpenAICompatibilityTokens(tokens dto.TokenStats) dto.TokenStats {
+	tokens = clampTokenStats(tokens)
+	// OpenAI-compatible protocol does not guarantee OpenAI token semantics. CPA may route
+	// Gemini-family models through OpenAICompatExecutor where output_tokens and
+	// reasoning_tokens are reported separately. Fold when arithmetic proves reasoning
+	// is not already included in output.
+	if tokens.ReasoningTokens > 0 &&
+		tokens.TotalTokens > 0 &&
+		tokens.InputTokens+tokens.OutputTokens+tokens.ReasoningTokens == tokens.TotalTokens {
+		tokens.OutputTokens += tokens.ReasoningTokens
+	}
 	return fillCodexStyleTotalTokens(tokens)
 }
 
@@ -87,11 +110,10 @@ func normalizeKimiTokens(tokens dto.TokenStats) dto.TokenStats {
 }
 
 func normalizeXAIStyleTokens(tokens dto.TokenStats) dto.TokenStats {
-	tokens = clampTokenStats(tokens)
 	// xAI 当前由 CPA XAIExecutor 调用 /v1/responses，usage 是 OpenAI Responses 风格：
 	// input_tokens 已包含 input_tokens_details.cached_tokens，output_tokens 已包含 reasoning_tokens。
 	// 后续如果 xAI 切到其他 usage 口径，只需要收敛修改这个分支。
-	return fillCodexStyleTotalTokens(tokens)
+	return normalizeOpenAIStyleTokens(tokens)
 }
 
 func normalizeDefaultTokens(tokens dto.TokenStats) dto.TokenStats {
