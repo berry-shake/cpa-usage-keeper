@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	RemoteModelPricePrimaryURL  = "https://raw.githubusercontent.com/berry-shake/cpa-usage-keeper/refs/heads/mod/model_prices.json"
 	RemoteModelPriceFallbackURL = "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/refs/heads/main/model_prices_and_context_window.json"
 	RemoteModelPriceLiteLLMURL  = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
@@ -190,7 +189,6 @@ func DefaultRemoteModelPriceURLs() []string {
 // earlier ones did not provide.
 func DefaultRemoteModelPriceSources() []RemoteSource {
 	return []RemoteSource{
-		{URL: RemoteModelPricePrimaryURL, Parse: ConvertRemoteModelPrices},
 		{URL: RemoteModelPriceFallbackURL, Parse: ConvertRemoteModelPrices},
 		{URL: RemoteModelPriceLiteLLMURL, Parse: ConvertLiteLLMModelPrices},
 	}
