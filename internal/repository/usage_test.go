@@ -281,6 +281,7 @@ func TestBuildAnalysisWithFilterBuildsLatencyDiagnosticsFromUsageEvents(t *testi
 	ttft300 := int64(300)
 	ttft450 := int64(450)
 	ttft900 := int64(900)
+	ttftFailed := int64(2500)
 	ttftZero := int64(0)
 	ttftOutside := int64(80)
 	ttftOtherKey := int64(700)
@@ -295,6 +296,7 @@ func TestBuildAnalysisWithFilterBuildsLatencyDiagnosticsFromUsageEvents(t *testi
 		{EventKey: "latency-2", APIGroupKey: "sk-target-key", Model: "claude-sonnet", Timestamp: start.Add(10 * time.Minute), LatencyMS: 1600, TTFTMS: &ttft300},
 		{EventKey: "latency-3", APIGroupKey: "sk-target-key", Model: "claude-sonnet", Timestamp: start.Add(20 * time.Minute), LatencyMS: 2300, TTFTMS: &ttft450},
 		{EventKey: "latency-4", APIGroupKey: "sk-target-key", Model: "claude-sonnet", Timestamp: start.Add(30 * time.Minute), LatencyMS: 5000, TTFTMS: &ttft900},
+		{EventKey: "failed-latency", APIGroupKey: "sk-target-key", Model: "claude-sonnet", Timestamp: start.Add(31 * time.Minute), Failed: true, LatencyMS: 20000, TTFTMS: &ttftFailed},
 		{EventKey: "zero-ttft", APIGroupKey: "sk-target-key", Model: "claude-sonnet", Timestamp: start.Add(32 * time.Minute), LatencyMS: 6000, TTFTMS: &ttftZero},
 		{EventKey: "missing-ttft", APIGroupKey: "sk-target-key", Model: "claude-sonnet", Timestamp: start.Add(35 * time.Minute), LatencyMS: 7000},
 		{EventKey: "outside-window", APIGroupKey: "sk-target-key", Model: "claude-sonnet", Timestamp: start.Add(-time.Minute), LatencyMS: 900, TTFTMS: &ttftOutside},

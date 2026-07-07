@@ -563,7 +563,7 @@ const resources = {
         no_requests: '暂无请求'
       },
       auth: {
-        login_title: 'CPA 用量统计仪表盘',
+        login_title: 'CPA 用量统计\n仪表盘',
         login_subtitle: '持续保存 CPA 请求记录，聚合用量分析，并在受保护的控制台中查看请求健康、模型活动与 API 统计。',
         console_kicker: '访问控制',
         console_title: '选择访问方式',
@@ -1086,7 +1086,7 @@ const resources = {
         no_requests: '尚無請求'
       },
       auth: {
-        login_title: 'CPA 用量統計儀表板',
+        login_title: 'CPA 用量統計\n儀表板',
         login_subtitle: '持續保存 CPA 請求記錄，彙整用量分析，並在受保護的控制台中查看請求健康、模型活動與 API 統計。',
         console_kicker: '存取控制',
         console_title: '選擇存取方式',

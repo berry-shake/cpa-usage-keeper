@@ -566,9 +566,10 @@ type analysisIdentityLookup map[entities.UsageIdentityAuthType]map[string]analys
 
 func buildAnalysisLatencyDiagnosticsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter) (dto.AnalysisLatencyDiagnosticsRecord, error) {
 	empty := emptyAnalysisLatencyDiagnosticsRecord()
-	// 延迟诊断的 SQL 只按已有索引维度收窄窗口；TTFT/Latency 有效性在内存过滤，避免依赖未索引列。
+	// 延迟诊断只统计成功请求；TTFT/Latency 有效性仍在内存过滤，避免依赖未索引列。
 	query := db.Model(&entities.UsageEvent{}).
-		Select("latency_ms, ttft_ms")
+		Select("latency_ms, ttft_ms").
+		Where("failed = ?", false)
 	query = applyUsageAnalysisTabQuery(query, filter)
 
 	rows, err := query.Rows()
@@ -1819,13 +1820,15 @@ func buildUsageOverviewRealtime(db *gorm.DB, filter dto.UsageQueryFilter, costRe
 			// current usage 的请求数同样包含成功和失败，token 后续只由成功请求累计。
 			applyUsageOverviewRealtimeRequest(realtimeEvent, modelUsage, apiKeyUsage, authFileUsage, aiProviderUsage, identityLookup)
 		}
-		// TTFT 缺失或非正数时不补 0，避免 log 分布和 percentile 被无效样本拉低。
-		if event.TTFTMS != nil && *event.TTFTMS > 0 {
-			bucket.ttftSamples = append(bucket.ttftSamples, usageOverviewRealtimeResponseSample{timestamp: timestamp, ms: *event.TTFTMS})
-		}
-		// Latency 只有正数才作为样本。
-		if event.LatencyMS > 0 {
-			bucket.latencySamples = append(bucket.latencySamples, usageOverviewRealtimeResponseSample{timestamp: timestamp, ms: event.LatencyMS})
+		if !event.Failed {
+			// TTFT 缺失或非正数时不补 0，避免 log 分布和 percentile 被无效样本拉低。
+			if event.TTFTMS != nil && *event.TTFTMS > 0 {
+				bucket.ttftSamples = append(bucket.ttftSamples, usageOverviewRealtimeResponseSample{timestamp: timestamp, ms: *event.TTFTMS})
+			}
+			// Latency 只有成功请求的正数才作为耗时样本，避免失败快速返回污染响应统计。
+			if event.LatencyMS > 0 {
+				bucket.latencySamples = append(bucket.latencySamples, usageOverviewRealtimeResponseSample{timestamp: timestamp, ms: event.LatencyMS})
+			}
 		}
 		// 失败或无 token 的请求不参与 token velocity/cache/current token share。
 		if event.Failed || event.TotalTokens <= 0 {

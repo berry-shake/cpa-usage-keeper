@@ -284,7 +284,7 @@ describe('i18n resources', () => {
 
   it('keeps the login product title aligned across languages', () => {
     expect(i18n.getResourceBundle('en', 'translation').auth.login_title).toBe('CPA Usage Statistics Dashboard');
-    expect(i18n.getResourceBundle('zh', 'translation').auth.login_title).toBe('CPA 用量统计仪表盘');
-    expect(i18n.getResourceBundle('zh-TW', 'translation').auth.login_title).toBe('CPA 用量統計儀表板');
+    expect(i18n.getResourceBundle('zh', 'translation').auth.login_title).toBe('CPA 用量统计\n仪表盘');
+    expect(i18n.getResourceBundle('zh-TW', 'translation').auth.login_title).toBe('CPA 用量統計\n儀表板');
   });
 });

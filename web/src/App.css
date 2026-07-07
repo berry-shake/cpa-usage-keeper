@@ -1,5 +1,9 @@
 .app-frame {
-  min-height: 100svh;
+  --keeper-page-max-width: clamp(1245px, 86vw, 1600px);
+  --keeper-ui-zoom: 0.9;
+
+  zoom: var(--keeper-ui-zoom);
+  min-height: calc(100svh / var(--keeper-ui-zoom));
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);

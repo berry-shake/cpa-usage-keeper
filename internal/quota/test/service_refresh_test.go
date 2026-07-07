@@ -519,7 +519,17 @@ func TestManualRefreshReturnsDuplicateForRunningTaskEvenWhenIdentityDeleted(t *t
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "auth-1", Provider: "claude", Type: "auth-file", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	block := make(chan struct{})
-	handler := &refreshHandlerStub{block: block, output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}}}
+	providerEntered := make(chan struct{})
+	var providerEnteredOnce sync.Once
+	handler := &refreshHandlerStub{
+		block:  block,
+		output: ProviderOutput{Result: ClaudeResult{Usage: &ClaudeUsagePayload{FiveHour: &ClaudeUsageWindow{Utilization: 25}}}},
+		onCheck: func() {
+			providerEnteredOnce.Do(func() {
+				close(providerEntered)
+			})
+		},
+	}
 	service := newQuotaServiceWithRegistry(t, db, NewProviderRegistry(map[string]ProviderHandler{"claude": handler}))
 	setRefreshCooldown(service, func(time.Duration) {})
 
@@ -528,6 +538,11 @@ func TestManualRefreshReturnsDuplicateForRunningTaskEvenWhenIdentityDeleted(t *t
 		t.Fatalf("first Refresh returned error: %v", err)
 	}
 	waitForRefreshTask(t, service, first.Tasks[0].AuthIndex, RefreshTaskStatusRunning)
+	select {
+	case <-providerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for provider check to start")
+	}
 	if err := db.Model(&entities.UsageIdentity{}).Where("identity = ?", "auth-1").Update("is_deleted", true).Error; err != nil {
 		t.Fatalf("delete usage identity returned error: %v", err)
 	}

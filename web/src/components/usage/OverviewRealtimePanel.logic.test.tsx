@@ -459,8 +459,8 @@ describe('OverviewRealtimePanel', () => {
         { bucket: '2026-06-09T11:55:30Z', tokens_per_minute: 2000, tokens: 1000 },
       ],
       response_level: [
-        { bucket: '2026-06-09T11:55:00Z', ttft_p95_ms: 700, latency_p95_ms: 1500 },
-        { bucket: '2026-06-09T11:55:30Z', ttft_p95_ms: 900, latency_p95_ms: 2500 },
+        { bucket: '2026-06-09T11:55:00Z', ttft_p95_ms: 7000, latency_p95_ms: 15000 },
+        { bucket: '2026-06-09T11:55:30Z', ttft_p95_ms: 9000, latency_p95_ms: 25000 },
       ],
       response_distribution: {
         ttft: {
@@ -493,8 +493,20 @@ describe('OverviewRealtimePanel', () => {
 
     expect(html).toContain('2.00K/min');
     expect(html).toContain('1.50K/min');
+    expect(html).toContain('900ms');
+    expect(html).toContain('800ms');
     expect(html).toContain('2.5s');
     expect(html).toContain('2s');
+    expect(html).not.toContain('9s');
+    expect(html).not.toContain('25s');
+    expect(chartCapture.chartCalls[0].data.datasets[0].data).toEqual([
+      { x: Date.parse('2026-06-09T11:55:00Z'), y: 700 },
+      { x: Date.parse('2026-06-09T11:55:30Z'), y: 900 },
+    ]);
+    expect(chartCapture.chartCalls[1].data.datasets[0].data).toEqual([
+      { x: Date.parse('2026-06-09T11:55:00Z'), y: 1500 },
+      { x: Date.parse('2026-06-09T11:55:30Z'), y: 2500 },
+    ]);
   });
 
   it('keeps realtime response duration units fixed in non-English locales', async () => {
