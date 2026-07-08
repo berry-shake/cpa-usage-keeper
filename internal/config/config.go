@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	DefaultTimeZone                = "Asia/Shanghai"
-	RedisQueueBatchSizeDefault     = 10000
-	MetadataSyncIntervalDefault    = 30 * time.Second
-	QuotaRefreshWorkerLimitDefault = 10
-	QuotaRefreshWorkerLimitMax     = 100
+	DefaultTimeZone                    = "Asia/Shanghai"
+	RedisQueueBatchSizeDefault         = 10000
+	MetadataSyncIntervalDefault        = 30 * time.Second
+	QuotaRefreshWorkerLimitDefault     = 10
+	QuotaRefreshWorkerLimitMax         = 100
+	RedisIngestRecoveryIntervalDefault = 30 * time.Second
 )
 
 var (
@@ -57,6 +58,10 @@ type Config struct {
 	RedisQueueBatchSize int
 	// RedisQueueIdleInterval 是 Redis 队列为空时的下一次检查间隔。
 	RedisQueueIdleInterval time.Duration
+	// RedisIngestMode 是强制的远端拉取模式：subscribe、redis_pull、http_pull；空值表示启动自动探测。
+	RedisIngestMode string
+	// RedisIngestRecoveryInterval 是 subscribe 断线重连和 redis_pull 恢复探测的间隔。
+	RedisIngestRecoveryInterval time.Duration
 	// MetadataSyncInterval 是 auth files 和 provider metadata 的固定刷新间隔。
 	MetadataSyncInterval time.Duration
 	// QuotaRefreshWorkerLimit 是 Auth Files 限额刷新队列的最大并发数。
@@ -137,6 +142,24 @@ func Load(options LoadOptions) (*Config, error) {
 	}
 	if redisQueueIdleInterval <= 0 {
 		return nil, fmt.Errorf("REDIS_QUEUE_IDLE_INTERVAL must be positive")
+	}
+
+	redisIngestMode := strings.ToLower(strings.TrimSpace(os.Getenv("REDIS_INGEST_MODE")))
+	switch redisIngestMode {
+	case "", "auto":
+		// 空值和 auto 都表示按 subscribe -> redis_pull -> http_pull 自动探测。
+		redisIngestMode = ""
+	case "subscribe", "redis_pull", "http_pull":
+	default:
+		return nil, fmt.Errorf("REDIS_INGEST_MODE must be one of auto, subscribe, redis_pull, http_pull")
+	}
+
+	redisIngestRecoveryInterval, err := getDuration("REDIS_INGEST_RECOVERY_INTERVAL", RedisIngestRecoveryIntervalDefault)
+	if err != nil {
+		return nil, err
+	}
+	if redisIngestRecoveryInterval <= 0 {
+		return nil, fmt.Errorf("REDIS_INGEST_RECOVERY_INTERVAL must be positive")
 	}
 
 	quotaRefreshWorkerLimit, err := getInt("QUOTA_REFRESH_WORKER_LIMIT", QuotaRefreshWorkerLimitDefault)
@@ -227,36 +250,38 @@ func Load(options LoadOptions) (*Config, error) {
 	workDir := getString("WORK_DIR", DefaultWorkDir)
 
 	cfg := &Config{
-		AppPort:                   getString("APP_PORT", "8080"),
-		AppBasePath:               appBasePath,
-		CPAPublicURL:              strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
-		TLSEnabled:                tlsEnabled,
-		TLSCertFile:               strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
-		TLSKeyFile:                strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
-		CPABaseURL:                strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
-		CPAManagementKey:          strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
-		RedisQueueAddr:            strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
-		RedisQueueTLS:             redisQueueTLS,
-		RedisQueueBatchSize:       redisQueueBatchSize,
-		RedisQueueIdleInterval:    redisQueueIdleInterval,
-		MetadataSyncInterval:      MetadataSyncIntervalDefault,
-		QuotaRefreshWorkerLimit:   quotaRefreshWorkerLimit,
-		WorkDir:                   workDir,
-		SQLitePath:                filepath.Join(workDir, workDirDatabaseName),
-		BackupEnabled:             backupEnabled,
-		BackupDir:                 filepath.Join(workDir, workDirBackupsName),
-		BackupInterval:            backupInterval,
-		BackupRetentionDays:       backupRetentionDays,
-		CleanupUsageEventsEnabled: cleanupUsageEventsEnabled,
-		RequestTimeout:            requestTimeout,
-		TLSSkipVerify:             tlsSkipVerify,
-		LogLevel:                  getString("LOG_LEVEL", "info"),
-		LogFileEnabled:            logFileEnabled,
-		LogDir:                    filepath.Join(workDir, workDirLogsName),
-		LogRetentionDays:          logRetentionDays,
-		AuthEnabled:               authEnabled,
-		LoginPassword:             strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
-		AuthSessionTTL:            authSessionTTL,
+		AppPort:                     getString("APP_PORT", "8080"),
+		AppBasePath:                 appBasePath,
+		CPAPublicURL:                strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
+		TLSEnabled:                  tlsEnabled,
+		TLSCertFile:                 strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
+		TLSKeyFile:                  strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
+		CPABaseURL:                  strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
+		CPAManagementKey:            strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
+		RedisQueueAddr:              strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
+		RedisQueueTLS:               redisQueueTLS,
+		RedisQueueBatchSize:         redisQueueBatchSize,
+		RedisQueueIdleInterval:      redisQueueIdleInterval,
+		RedisIngestMode:             redisIngestMode,
+		RedisIngestRecoveryInterval: redisIngestRecoveryInterval,
+		MetadataSyncInterval:        MetadataSyncIntervalDefault,
+		QuotaRefreshWorkerLimit:     quotaRefreshWorkerLimit,
+		WorkDir:                     workDir,
+		SQLitePath:                  filepath.Join(workDir, workDirDatabaseName),
+		BackupEnabled:               backupEnabled,
+		BackupDir:                   filepath.Join(workDir, workDirBackupsName),
+		BackupInterval:              backupInterval,
+		BackupRetentionDays:         backupRetentionDays,
+		CleanupUsageEventsEnabled:   cleanupUsageEventsEnabled,
+		RequestTimeout:              requestTimeout,
+		TLSSkipVerify:               tlsSkipVerify,
+		LogLevel:                    getString("LOG_LEVEL", "info"),
+		LogFileEnabled:              logFileEnabled,
+		LogDir:                      filepath.Join(workDir, workDirLogsName),
+		LogRetentionDays:            logRetentionDays,
+		AuthEnabled:                 authEnabled,
+		LoginPassword:               strings.TrimSpace(os.Getenv("LOGIN_PASSWORD")),
+		AuthSessionTTL:              authSessionTTL,
 	}
 	if cfg.CPABaseURL == "" {
 		return nil, fmt.Errorf("CPA_BASE_URL is required")

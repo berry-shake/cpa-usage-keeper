@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"strings"
 	"time"
 
 	"cpa-usage-keeper/internal/cpa"
@@ -8,6 +9,22 @@ import (
 
 // RedisIngestSyncMode 表示启动探测后固定下来的长期远端拉取模式。
 type RedisIngestSyncMode string
+
+// ParseRedisIngestForcedMode 解析 REDIS_INGEST_MODE 环境变量值；空值和 auto 表示保持自动探测。
+func ParseRedisIngestForcedMode(value string) (RedisIngestSyncMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto":
+		return RedisIngestSyncModeUnknown, true
+	case "subscribe":
+		return RedisIngestSyncModeSubscribe, true
+	case "redis_pull":
+		return RedisIngestSyncModeRedisPull, true
+	case "http_pull":
+		return RedisIngestSyncModeHTTPPull, true
+	default:
+		return RedisIngestSyncModeUnknown, false
+	}
+}
 
 const (
 	// RedisIngestSyncModeUnknown 表示尚未完成启动探测或正在重新探测。
@@ -54,7 +71,7 @@ const (
 const (
 	// RedisIngestAllFailedRetryInitial 是三条远端入口全部失败后的最小重试间隔。
 	RedisIngestAllFailedRetryInitial = 10 * time.Second
-	// redisIngestRecoveryRetryInterval 控制 subscribe/Redis 恢复探测间隔。
+	// redisIngestRecoveryRetryInterval 是 subscribe/Redis 恢复探测间隔的默认值，可被 RedisIngestRunnerConfig.RecoveryRetryInterval 覆盖。
 	redisIngestRecoveryRetryInterval = 30 * time.Second
 )
 

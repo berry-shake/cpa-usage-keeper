@@ -15,6 +15,7 @@ import (
 var configEnvKeys = []string{
 	"APP_PORT", "APP_BASE_PATH", "CPA_PUBLIC_URL", "WORK_DIR", "CPA_BASE_URL", "CPA_MANAGEMENT_KEY", "POLL_INTERVAL",
 	"USAGE_SYNC_MODE", "REDIS_QUEUE_ADDR", "REDIS_QUEUE_TLS", "REDIS_QUEUE_BATCH_SIZE", "REDIS_QUEUE_IDLE_INTERVAL",
+	"REDIS_INGEST_MODE", "REDIS_INGEST_RECOVERY_INTERVAL",
 	"SQLITE_PATH", "BACKUP_ENABLED", "BACKUP_DIR", "BACKUP_INTERVAL", "BACKUP_RETENTION_DAYS", "CLEANUP_USAGE_EVENTS_ENABLED",
 	"REQUEST_TIMEOUT", "LOG_LEVEL", "LOG_FILE_ENABLED", "LOG_DIR", "LOG_RETENTION_DAYS",
 	"AUTH_ENABLED", "LOGIN_PASSWORD", "AUTH_SESSION_TTL", "TZ", "TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT",
@@ -543,6 +544,76 @@ func TestLoadFromEnvIgnoresRemovedMetadataSyncIntervalOverride(t *testing.T) {
 	}
 	if cfg.MetadataSyncInterval != MetadataSyncIntervalDefault {
 		t.Fatalf("expected removed env overrides to be ignored, got metadata_interval=%s", cfg.MetadataSyncInterval)
+	}
+}
+
+func TestLoadFromEnvParsesRedisIngestMode(t *testing.T) {
+	for value, want := range map[string]string{
+		"":           "",
+		"auto":       "",
+		"AUTO":       "",
+		"subscribe":  "subscribe",
+		"Subscribe":  "subscribe",
+		"redis_pull": "redis_pull",
+		"http_pull":  "http_pull",
+	} {
+		t.Run("value="+value, func(t *testing.T) {
+			t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+			t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+			t.Setenv("REDIS_INGEST_MODE", value)
+
+			cfg, err := LoadFromEnv()
+			if err != nil {
+				t.Fatalf("LoadFromEnv returned error: %v", err)
+			}
+			if cfg.RedisIngestMode != want {
+				t.Fatalf("expected redis ingest mode %q, got %q", want, cfg.RedisIngestMode)
+			}
+		})
+	}
+}
+
+func TestLoadFromEnvRejectsInvalidRedisIngestMode(t *testing.T) {
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	t.Setenv("REDIS_INGEST_MODE", "resp")
+
+	_, err := LoadFromEnv()
+	if err == nil || err.Error() != "REDIS_INGEST_MODE must be one of auto, subscribe, redis_pull, http_pull" {
+		t.Fatalf("expected REDIS_INGEST_MODE validation error, got %v", err)
+	}
+}
+
+func TestLoadFromEnvParsesRedisIngestRecoveryInterval(t *testing.T) {
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	if cfg.RedisIngestRecoveryInterval != RedisIngestRecoveryIntervalDefault {
+		t.Fatalf("expected default redis ingest recovery interval 30s, got %s", cfg.RedisIngestRecoveryInterval)
+	}
+
+	t.Setenv("REDIS_INGEST_RECOVERY_INTERVAL", "2s")
+	cfg, err = LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	if cfg.RedisIngestRecoveryInterval != 2*time.Second {
+		t.Fatalf("expected redis ingest recovery interval 2s, got %s", cfg.RedisIngestRecoveryInterval)
+	}
+}
+
+func TestLoadFromEnvRejectsNonPositiveRedisIngestRecoveryInterval(t *testing.T) {
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	t.Setenv("REDIS_INGEST_RECOVERY_INTERVAL", "0s")
+
+	_, err := LoadFromEnv()
+	if err == nil || err.Error() != "REDIS_INGEST_RECOVERY_INTERVAL must be positive" {
+		t.Fatalf("expected REDIS_INGEST_RECOVERY_INTERVAL validation error, got %v", err)
 	}
 }
 

@@ -30,6 +30,10 @@ type RedisIngestRunnerConfig struct {
 	BatchSize          int
 	HTTPBackoffInitial time.Duration
 	HTTPBackoffMax     time.Duration
+	// ForcedMode 非 unknown 时跳过启动探测并固定长期模式；模式内部原有的 backfill 和临时 fallback 仍保留。
+	ForcedMode RedisIngestSyncMode
+	// RecoveryRetryInterval 控制 subscribe 断线重连和 redis_pull 恢复探测间隔，非正值回退默认 30s。
+	RecoveryRetryInterval time.Duration
 }
 
 type RedisIngestRunner struct {
@@ -119,6 +123,10 @@ func (r *RedisIngestRunner) Run(ctx context.Context) error {
 	r.setRunning(true)
 	// 无论哪条路径退出，都必须清掉 running 状态。
 	defer r.setRunning(false)
+	// 显式固定模式时跳过启动探测，长期模式不再切换，模式内部原有的临时 fallback 仍保留。
+	if r.config.ForcedMode != RedisIngestSyncModeUnknown {
+		return r.runForcedMode(ctx)
+	}
 	// 外层循环负责“启动探测”和“固定模式退出后重新探测”。
 	for {
 		// context 取消代表应用关闭，后台 runner 正常退出，不把关闭当作错误。
@@ -203,6 +211,48 @@ func (r *RedisIngestRunner) Run(ctx context.Context) error {
 		// 等待可被 context 取消；取消时正常退出后台任务。
 		if !r.sleep(ctx, delay) {
 			return nil
+		}
+	}
+}
+
+func (r *RedisIngestRunner) runForcedMode(ctx context.Context) error {
+	// 固定模式不做启动探测，也不切换长期模式；各模式内部仍沿用原有 backfill、临时 fallback 和恢复逻辑。
+	for {
+		// 每轮先响应应用关闭，避免固定模式失败重试时卡住退出。
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+		switch r.config.ForcedMode {
+		case RedisIngestSyncModeSubscribe:
+			sub, err := r.subscribeSource.Subscribe(ctx)
+			if err != nil {
+				// 固定 subscribe 模式不允许降级到 redis_pull/http_pull 长期模式，只按退避重试订阅。
+				r.recordError("subscribe_forced_unavailable", err)
+				if !r.sleep(ctx, r.failureBackoff.NextDelay()) {
+					return nil
+				}
+				continue
+			}
+			// 订阅成功后清掉连续失败退避，进入正常 subscribe 生命周期。
+			r.failureBackoff.Reset()
+			r.recordState(RedisIngestSyncModeSubscribe, RedisIngestSubStateSubscribeBackfill, "subscribe_connected", "", "")
+			// subscribe 模式内部的断线降级轮询和恢复重连逻辑保持不变。
+			if err := r.runSubscribeMode(ctx, sub); err != nil && !errors.Is(err, context.Canceled) {
+				r.recordError("subscribe_stopped", err)
+			}
+		case RedisIngestSyncModeRedisPull:
+			r.recordState(RedisIngestSyncModeRedisPull, RedisIngestSubStateRedisPullActive, "redis_pull_forced", "", "")
+			if err := r.runRedisPullMode(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				r.recordError("redis_pull_stopped", err)
+			}
+		case RedisIngestSyncModeHTTPPull:
+			r.recordState(RedisIngestSyncModeHTTPPull, RedisIngestSubStateHTTPPullActive, "http_pull_forced", "", "")
+			if err := r.runHTTPPullMode(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				r.recordError("http_pull_stopped", err)
+			}
+		default:
+			// validate 已拒绝非法值，这里兜底避免未知模式忙循环。
+			return fmt.Errorf("unsupported forced redis ingest mode: %s", r.config.ForcedMode)
 		}
 	}
 }
@@ -371,7 +421,7 @@ func (r *RedisIngestRunner) receiveSubscribeBatches(ctx context.Context, sub Usa
 
 func (r *RedisIngestRunner) runSubscribeDegradedPolling(ctx context.Context) (UsageSubscription, error) {
 	// 订阅断开后不是立即重连，而是 固定间隔后探测，避免断线时高频打 Redis。
-	nextSubscribeRetryAt := r.now().Add(redisIngestRecoveryRetryInterval)
+	nextSubscribeRetryAt := r.now().Add(r.recoveryRetryInterval())
 	// 降级轮询会持续运行，直到 subscribe 恢复或应用关闭。
 	for {
 		// 每轮先检查关停，避免关停时继续拉取远端数据。
@@ -394,7 +444,7 @@ func (r *RedisIngestRunner) runSubscribeDegradedPolling(ctx context.Context) (Us
 			// 重连失败只记录 warning/error 日志，然后重新安排 固定间隔后再试。
 			r.recordWarning("subscribe_reconnect_failed", err)
 			// 使用 r.now 保持测试时钟一致。
-			nextSubscribeRetryAt = r.now().Add(redisIngestRecoveryRetryInterval)
+			nextSubscribeRetryAt = r.now().Add(r.recoveryRetryInterval())
 		}
 		// 降级期间优先 Redis pull，尽量走原 Redis 队列路径。
 		count, err := r.serialPullAndWrite(ctx, RedisIngestSourceRedisPull, r.redisSource)
@@ -496,7 +546,7 @@ func (r *RedisIngestRunner) runRedisPullMode(ctx context.Context) error {
 					continue
 				}
 				r.recordWarning("redis_recovery_failed", err)
-				nextRedisRetryAt = r.now().Add(redisIngestRecoveryRetryInterval)
+				nextRedisRetryAt = r.now().Add(r.recoveryRetryInterval())
 			}
 			// 恢复点未到或恢复失败时，继续 HTTP pull 作为兜底。
 			count, err := r.serialPullAndWrite(ctx, RedisIngestSourceHTTPPull, r.httpSource)
@@ -565,7 +615,7 @@ func (r *RedisIngestRunner) runRedisPullMode(ctx context.Context) error {
 			// HTTP 成功后清退避，并进入 redis_pull 的 HTTP 降级子状态。
 			r.failureBackoff.Reset()
 			degraded = true
-			nextRedisRetryAt = r.now().Add(redisIngestRecoveryRetryInterval)
+			nextRedisRetryAt = r.now().Add(r.recoveryRetryInterval())
 			// 记录降级结果，状态仍保持长期模式 redis_pull。
 			r.recordState(RedisIngestSyncModeRedisPull, RedisIngestSubStateRedisPullDegradedHTTP, pullStatus(count), "", "")
 			// HTTP 已经接管拉取，不能把 Redis 失败继续保留在状态快照中。
@@ -725,6 +775,15 @@ func (r *RedisIngestRunner) validate() error {
 	if r.writer == nil {
 		// writer 缺失会导致 raw message 无法进入 durable inbox。
 		return fmt.Errorf("redis ingest writer is nil")
+	}
+	// 新增配置字段必须保持零值兼容：未填写 ForcedMode 时继续沿用原自动探测行为。
+	switch r.config.ForcedMode {
+	case "":
+		r.config.ForcedMode = RedisIngestSyncModeUnknown
+	case RedisIngestSyncModeUnknown, RedisIngestSyncModeSubscribe, RedisIngestSyncModeRedisPull, RedisIngestSyncModeHTTPPull:
+		// 合法模式无需额外处理。
+	default:
+		return fmt.Errorf("unsupported forced redis ingest mode: %s", r.config.ForcedMode)
 	}
 	if r.config.IdleInterval <= 0 {
 		// 非正 idle interval 会导致空队列时忙循环，强制退回 1s。
@@ -909,6 +968,11 @@ func (r *RedisIngestRunner) markRefreshPollingRequired(reason string) {
 		// 回调 metadata runner，让它从通知模式回到轮询模式。
 		observer.MarkRefreshPollingRequired(reason)
 	}
+}
+
+func (r *RedisIngestRunner) recoveryRetryInterval() time.Duration {
+	// 未配置或非法值时保持原默认 30s，避免 0 值导致高频重连。
+	return resolvePositiveDuration(r.config.RecoveryRetryInterval, redisIngestRecoveryRetryInterval)
 }
 
 func (r *RedisIngestRunner) sleepUntilRecovery(ctx context.Context, delay time.Duration, retryAt time.Time) bool {

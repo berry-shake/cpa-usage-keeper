@@ -83,6 +83,12 @@ func NewWithOptions(options Options) (*App, error) {
 }
 
 func NewWithConfig(cfg config.Config) (*App, error) {
+	// NewWithConfig 也可被程序化调用，不能只依赖环境变量加载路径完成 mode 校验。
+	forcedIngestMode, ok := poller.ParseRedisIngestForcedMode(cfg.RedisIngestMode)
+	if !ok {
+		return nil, fmt.Errorf("REDIS_INGEST_MODE must be one of auto, subscribe, redis_pull, http_pull")
+	}
+
 	logCloser, err := logging.Configure(cfg)
 	if err != nil {
 		return nil, err
@@ -154,6 +160,10 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		BatchSize:          cfg.RedisQueueBatchSize,
 		HTTPBackoffInitial: time.Second,
 		HTTPBackoffMax:     30 * time.Second,
+		// 显式固定长期模式时跳过其他模式的启动探测，但保留该模式内部的临时 fallback。
+		ForcedMode: forcedIngestMode,
+		// subscribe 断线重连和 redis_pull 恢复探测间隔，默认 30s。
+		RecoveryRetryInterval: cfg.RedisIngestRecoveryInterval,
 	})
 	// usage 链路一旦降级或失败，metadata 同步回到轮询，直到下一条 CPA 控制消息重新启用通知模式。
 	redisIngestRunner.SetControlMessageObserver(metadataSyncRunner)

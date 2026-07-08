@@ -14,6 +14,71 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func TestParseRedisIngestForcedMode(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value string
+		want  poller.RedisIngestSyncMode
+		ok    bool
+	}{
+		{name: "empty", value: "", want: poller.RedisIngestSyncModeUnknown, ok: true},
+		{name: "auto", value: " AUTO ", want: poller.RedisIngestSyncModeUnknown, ok: true},
+		{name: "subscribe", value: "Subscribe", want: poller.RedisIngestSyncModeSubscribe, ok: true},
+		{name: "redis pull", value: "redis_pull", want: poller.RedisIngestSyncModeRedisPull, ok: true},
+		{name: "http pull", value: "http_pull", want: poller.RedisIngestSyncModeHTTPPull, ok: true},
+		{name: "invalid", value: "resp", want: poller.RedisIngestSyncModeUnknown, ok: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := poller.ParseRedisIngestForcedMode(tt.value)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("ParseRedisIngestForcedMode(%q) = (%q, %t), want (%q, %t)", tt.value, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func TestRedisIngestRunnerZeroForcedModeUsesAutomaticProbe(t *testing.T) {
+	writer := newFakeInboxWriter()
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{err: errors.New("subscribe unavailable")},
+		&fakePullSource{batches: [][]string{{`{"request_id":"redis"}`}}},
+		&fakePullSource{batches: [][]string{{`{"request_id":"http"}`}}},
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- runner.Run(ctx) }()
+
+	select {
+	case entry := <-writer.ch:
+		cancel()
+		if entry.source != poller.RedisIngestSourceRedisPull {
+			t.Fatalf("expected zero forced mode to use automatic Redis probe, got %q", entry.source)
+		}
+	case err := <-errCh:
+		t.Fatalf("expected zero forced mode to keep automatic probing, runner exited with %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for zero forced mode automatic probe")
+	}
+}
+
+func TestRedisIngestRunnerRejectsInvalidForcedMode(t *testing.T) {
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{},
+		&fakePullSource{},
+		&fakePullSource{},
+		newFakeInboxWriter(),
+		poller.RedisIngestRunnerConfig{ForcedMode: poller.RedisIngestSyncMode("resp")},
+	)
+
+	err := runner.Run(context.Background())
+	if err == nil || err.Error() != "unsupported forced redis ingest mode: resp" {
+		t.Fatalf("expected invalid forced mode error, got %v", err)
+	}
+}
+
 func TestRedisIngestRunnerStartupFallsBackToHTTPPull(t *testing.T) {
 	writer := newFakeInboxWriter()
 	runner := poller.NewRedisIngestRunner(
@@ -366,6 +431,149 @@ func TestRedisIngestRunnerDegradedHTTPSuccessClearsStatusError(t *testing.T) {
 	cancel()
 }
 
+func TestRedisIngestRunnerForcedSubscribeInitialFailureDoesNotProbePullModes(t *testing.T) {
+	redisSource := &fakePullSource{batches: [][]string{{`{"request_id":"redis"}`}}}
+	httpSource := &fakePullSource{batches: [][]string{{`{"request_id":"http"}`}}}
+	runner := poller.NewRedisIngestRunner(
+		fakeSubscribeSource{err: errors.New("subscribe unavailable")},
+		redisSource,
+		httpSource,
+		newFakeInboxWriter(),
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond, ForcedMode: poller.RedisIngestSyncModeSubscribe},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	// 等到强制订阅模式记录首次失败，确认启动阶段没有降级探测其他模式。
+	_ = waitForStatus(t, runner, func(status poller.Status) bool {
+		return status.LastStatus == "subscribe_forced_unavailable"
+	})
+	cancel()
+	if calls := redisSource.callCount(); calls != 0 {
+		t.Fatalf("expected forced subscribe not to probe redis pull, got %d calls", calls)
+	}
+	if calls := httpSource.callCount(); calls != 0 {
+		t.Fatalf("expected forced subscribe not to probe http pull, got %d calls", calls)
+	}
+}
+
+func TestRedisIngestRunnerForcedRedisPullSkipsSubscribeProbe(t *testing.T) {
+	writer := newFakeInboxWriter()
+	subscribeSource := &countingSubscribeSource{sub: &blockingSubscription{messages: make(chan string)}}
+	httpSource := &fakePullSource{batches: [][]string{{`{"request_id":"http"}`}}}
+	runner := poller.NewRedisIngestRunner(
+		subscribeSource,
+		&fakePullSource{batches: [][]string{{`{"request_id":"redis"}`}}},
+		httpSource,
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond, ForcedMode: poller.RedisIngestSyncModeRedisPull},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	entry := writer.waitForInsert(t)
+	cancel()
+	if entry.source != poller.RedisIngestSourceRedisPull {
+		t.Fatalf("expected forced Redis source, got %q", entry.source)
+	}
+	if calls := subscribeSource.callCount(); calls != 0 {
+		t.Fatalf("expected forced redis pull not to probe subscribe, got %d calls", calls)
+	}
+	if calls := httpSource.callCount(); calls != 0 {
+		t.Fatalf("expected healthy forced redis pull not to call HTTP fallback, got %d calls", calls)
+	}
+}
+
+func TestRedisIngestRunnerForcedRedisPullUsesConfiguredRecoveryInterval(t *testing.T) {
+	writer := newFakeInboxWriter()
+	subscribeSource := &countingSubscribeSource{sub: &blockingSubscription{messages: make(chan string)}}
+	redisSource := &fakePullSource{
+		errs: []error{errors.New("redis unavailable"), nil},
+		batches: [][]string{
+			{`{"request_id":"redis-recovered"}`},
+		},
+	}
+	runner := poller.NewRedisIngestRunner(
+		subscribeSource,
+		redisSource,
+		&fakePullSource{batches: [][]string{{`{"request_id":"http"}`}}},
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond, ForcedMode: poller.RedisIngestSyncModeRedisPull, RecoveryRetryInterval: time.Millisecond},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	fallback := writer.waitForInsert(t)
+	if fallback.source != poller.RedisIngestSourceHTTPPull {
+		t.Fatalf("expected forced redis pull to retain temporary HTTP fallback, got %q", fallback.source)
+	}
+	recovered := writer.waitForInsert(t)
+	cancel()
+	if recovered.source != poller.RedisIngestSourceRedisPull {
+		t.Fatalf("expected forced redis pull to recover Redis using configured interval, got %q", recovered.source)
+	}
+	if calls := subscribeSource.callCount(); calls != 0 {
+		t.Fatalf("expected forced redis pull recovery not to probe subscribe, got %d calls", calls)
+	}
+	if calls := redisSource.callCount(); calls < 2 {
+		t.Fatalf("expected configured recovery interval to trigger another Redis probe, got %d calls", calls)
+	}
+}
+
+func TestRedisIngestRunnerForcedHTTPPullSkipsSubscribeProbe(t *testing.T) {
+	writer := newFakeInboxWriter()
+	subscribeSource := &countingSubscribeSource{sub: &blockingSubscription{messages: make(chan string)}}
+	redisSource := &fakePullSource{batches: [][]string{{`{"request_id":"redis"}`}}}
+	runner := poller.NewRedisIngestRunner(
+		subscribeSource,
+		redisSource,
+		&fakePullSource{batches: [][]string{{`{"request_id":"http"}`}}},
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: 10 * time.Millisecond, BatchSize: 10, HTTPBackoffInitial: 10 * time.Millisecond, HTTPBackoffMax: 10 * time.Millisecond, ForcedMode: poller.RedisIngestSyncModeHTTPPull},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	entry := writer.waitForInsert(t)
+	cancel()
+	if entry.source != poller.RedisIngestSourceHTTPPull {
+		t.Fatalf("expected forced HTTP source, got %q", entry.source)
+	}
+	if calls := subscribeSource.callCount(); calls != 0 {
+		t.Fatalf("expected forced http pull not to probe subscribe, got %d calls", calls)
+	}
+	if calls := redisSource.callCount(); calls != 0 {
+		t.Fatalf("expected forced http pull not to probe redis pull, got %d calls", calls)
+	}
+}
+
+func TestRedisIngestRunnerSubscribeReconnectUsesConfiguredRecoveryInterval(t *testing.T) {
+	logs := capturePollerLogs(t, logrus.InfoLevel)
+	writer := newFakeInboxWriter()
+	source := &sequencedSubscribeSource{results: []subscribeResult{
+		{sub: failingSubscription{err: io.EOF}},
+		{sub: &blockingSubscription{messages: make(chan string)}},
+	}}
+	runner := poller.NewRedisIngestRunner(
+		source,
+		&fakePullSource{},
+		&fakePullSource{},
+		writer,
+		poller.RedisIngestRunnerConfig{IdleInterval: time.Millisecond, BatchSize: 10, HTTPBackoffInitial: time.Millisecond, HTTPBackoffMax: time.Millisecond, RecoveryRetryInterval: time.Millisecond},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	// 默认恢复间隔是 30s；1s 内能看到重连日志说明配置的 1ms 间隔生效。
+	_ = waitForLogContains(t, logs, "subscribe_reconnected")
+	cancel()
+}
+
 func TestRedisIngestRunnerMarksMetadataPollingRequiredOnSubscribeDisconnect(t *testing.T) {
 	observer := &controlObserverStub{}
 	runner := poller.NewRedisIngestRunner(
@@ -455,6 +663,51 @@ func (s fakeSubscribeSource) Subscribe(context.Context) (poller.UsageSubscriptio
 		return nil, s.err
 	}
 	return s.sub, nil
+}
+
+type countingSubscribeSource struct {
+	mu    sync.Mutex
+	sub   poller.UsageSubscription
+	err   error
+	calls int
+}
+
+func (s *countingSubscribeSource) Subscribe(context.Context) (poller.UsageSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.sub, nil
+}
+
+func (s *countingSubscribeSource) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+type subscribeResult struct {
+	sub poller.UsageSubscription
+	err error
+}
+
+type sequencedSubscribeSource struct {
+	mu      sync.Mutex
+	results []subscribeResult
+}
+
+func (s *sequencedSubscribeSource) Subscribe(context.Context) (poller.UsageSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.results) == 0 {
+		// 结果耗尽后保持失败，让重连测试保持在降级轮询。
+		return nil, errors.New("no more subscribe results")
+	}
+	result := s.results[0]
+	s.results = s.results[1:]
+	return result.sub, result.err
 }
 
 type blockingSubscription struct {

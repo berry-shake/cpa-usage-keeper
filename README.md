@@ -306,6 +306,8 @@ Scheduled Auth Files quota refresh is configured from the gear button in the Aut
 | `REDIS_QUEUE_TLS` | No | `false` | Use TLS for Redis queue connection; set `true` when `REDIS_QUEUE_ADDR` is explicit and requires TLS |
 | `REDIS_QUEUE_BATCH_SIZE` | No | `10000` | Maximum queue records per pull |
 | `REDIS_QUEUE_IDLE_INTERVAL` | No | `1s` | Empty queue check interval |
+| `REDIS_INGEST_MODE` | No | `auto` | Long-term remote ingest mode: `auto`, `subscribe`, `redis_pull`, or `http_pull`. A forced mode skips startup probes for other modes and retains the selected long-term mode; `subscribe` and `redis_pull` still retain their existing temporary fallback and recovery behavior |
+| `REDIS_INGEST_RECOVERY_INTERVAL` | No | `30s` | Interval for `subscribe` reconnect and `redis_pull` recovery probes; lower it when multiple consumers share one CPA |
 
 ### Storage, Logs, And Backups
 

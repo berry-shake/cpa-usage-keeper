@@ -136,6 +136,44 @@ func TestNewWithConfigBuildsRedisIngestAndRouter(t *testing.T) {
 	}
 }
 
+func TestNewWithConfigRejectsInvalidRedisIngestMode(t *testing.T) {
+	cfg := testAppConfig(t)
+	cfg.RedisIngestMode = "resp"
+
+	app, err := NewWithConfig(cfg)
+	if app != nil {
+		defer app.Close()
+		t.Fatal("expected invalid redis ingest mode not to construct app")
+	}
+	if err == nil || err.Error() != "REDIS_INGEST_MODE must be one of auto, subscribe, redis_pull, http_pull" {
+		t.Fatalf("expected invalid redis ingest mode error, got %v", err)
+	}
+}
+
+func TestNewWithConfigWiresRedisIngestSettings(t *testing.T) {
+	cfg := testAppConfig(t)
+	cfg.RedisIngestMode = "redis_pull"
+	cfg.RedisIngestRecoveryInterval = 2 * time.Second
+
+	app, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	defer app.Close()
+
+	runner, ok := app.RedisIngest.(*poller.RedisIngestRunner)
+	if !ok {
+		t.Fatalf("expected redis ingest runner, got %T", app.RedisIngest)
+	}
+	runnerConfig := reflect.ValueOf(runner).Elem().FieldByName("config")
+	if got := poller.RedisIngestSyncMode(runnerConfig.FieldByName("ForcedMode").String()); got != poller.RedisIngestSyncModeRedisPull {
+		t.Fatalf("expected forced redis pull mode, got %q", got)
+	}
+	if got := time.Duration(runnerConfig.FieldByName("RecoveryRetryInterval").Int()); got != 2*time.Second {
+		t.Fatalf("expected redis ingest recovery interval 2s, got %s", got)
+	}
+}
+
 func TestNewWithConfigWiresMetadataRefreshControl(t *testing.T) {
 	app, err := NewWithConfig(testAppConfig(t))
 	if err != nil {

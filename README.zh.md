@@ -306,6 +306,8 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 | `REDIS_QUEUE_TLS` | 否 | `false` | 是否使用 TLS 连接 Redis 队列；显式设置 `REDIS_QUEUE_ADDR` 且需要 TLS 时设为 `true` |
 | `REDIS_QUEUE_BATCH_SIZE` | 否 | `10000` | 每次最多拉取的队列记录数 |
 | `REDIS_QUEUE_IDLE_INTERVAL` | 否 | `1s` | 队列为空时的检查间隔 |
+| `REDIS_INGEST_MODE` | 否 | `auto` | 远端 ingest 长期模式：`auto`、`subscribe`、`redis_pull`、`http_pull`。固定模式会跳过其他模式的启动探测并保持所选长期模式；`subscribe` 与 `redis_pull` 仍保留故障期间的临时 fallback 和恢复探测 |
+| `REDIS_INGEST_RECOVERY_INTERVAL` | 否 | `30s` | `subscribe` 断线重连和 `redis_pull` 恢复探测的间隔；多消费端共用 CPA 时建议调小 |
 
 ### 存储、日志与备份
 
