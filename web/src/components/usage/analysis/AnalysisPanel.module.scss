@@ -573,10 +573,11 @@
 
 .donutCanvasBox {
   position: relative;
-  width: min(100%, 300px);
-  height: 300px;
+  width: min(100%, 340px);
+  height: auto;
   aspect-ratio: 1;
-  flex: 0 0 auto;
+  flex: 0 1 340px;
+  max-width: 100%;
 
   :global(canvas) {
     max-width: 100%;
@@ -694,60 +695,6 @@
 .compositionUsageMetaValue {
   color: var(--text-secondary);
   min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.compositionFloatingTooltip {
-  position: fixed;
-  z-index: 1000;
-  display: grid;
-  gap: 8px;
-  width: max-content;
-  max-width: min(260px, calc(100vw - 16px));
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.18);
-  padding: 10px 12px;
-  pointer-events: none;
-  text-align: left;
-  font-size: 11px;
-  line-height: 1.45;
-  opacity: 0;
-}
-
-.compositionTooltipGroup {
-  display: grid;
-  gap: 3px;
-}
-
-.compositionTooltipHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--text-primary);
-
-  strong {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    font-size: 12px;
-    font-weight: 900;
-  }
-}
-
-.compositionTooltipDot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  flex: 0 0 auto;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
-}
-
-.compositionTooltipMetric {
-  padding-left: 17px;
-  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 

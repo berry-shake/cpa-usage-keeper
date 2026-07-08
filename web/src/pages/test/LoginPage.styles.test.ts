@@ -5,7 +5,7 @@ const loginPageStyles = readFileSync(new URL('../LoginPage.module.scss', import.
 const themeStyles = readFileSync(new URL('../../styles/themes.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 describe('LoginPage layout styles', () => {
-  it('gives the desktop login columns more room under the shared app zoom', () => {
+  it('gives the desktop login columns enough room without relying on shared app zoom', () => {
     expect(loginPageStyles).toMatch(/\.frame\s*\{[\s\S]*?width:\s*min\(1180px, 100%\);/)
     expect(loginPageStyles).toMatch(/\.frame\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1\.15fr\) minmax\(360px, 440px\);/)
     expect(loginPageStyles).toMatch(/\.frame\s*\{[\s\S]*?gap:\s*64px;/)

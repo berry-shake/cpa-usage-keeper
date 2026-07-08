@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const appStyles = readFileSync(new URL('../App.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const embedStyles = readFileSync(new URL('../embed/cpamcEmbed.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const appFrameBlock = appStyles.match(/\.app-frame\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
 
 describe('App CPAMC embed shell', () => {
   it('loads the scoped CPAMC embed stylesheet and marks the app frame', () => {
@@ -17,12 +18,17 @@ describe('App CPAMC embed shell', () => {
     expect(embedStyles).not.toContain('--keeper-page-max-width');
   });
 
-  it('applies a shared app zoom preview across normal and CPAMC modes', () => {
-    expect(appStyles).toMatch(/\.app-frame\s*\{[\s\S]*?--keeper-ui-zoom:\s*0\.9;/);
-    expect(appStyles).toMatch(/\.app-frame\s*\{[\s\S]*?zoom:\s*var\(--keeper-ui-zoom\);/);
-    expect(appStyles).toMatch(/\.app-frame\s*\{[\s\S]*?min-height:\s*calc\(100svh\s*\/\s*var\(--keeper-ui-zoom\)\);/);
-    expect(embedStyles).not.toContain('--keeper-ui-zoom');
+  it('uses density variables instead of root-level zoom for normal and CPAMC layouts', () => {
+    expect(appFrameBlock).toContain('--keeper-density: 1;');
+    expect(appFrameBlock).toContain('min-height: 100svh;');
+    expect(appFrameBlock).not.toContain('--keeper-ui-zoom');
+    expect(appFrameBlock).not.toContain('zoom:');
+    expect(appFrameBlock).not.toContain('transform:');
+    expect(appFrameBlock).not.toContain('scale(');
+    expect(appStyles).not.toContain('calc(100svh / var(--keeper-ui-zoom))');
+    expect(embedStyles).not.toContain('--keeper-density');
     expect(embedStyles).not.toContain('zoom:');
+    expect(embedStyles).not.toContain('scale(');
   });
 
   it('preserves the CPAMC embed query when normalizing app paths', () => {

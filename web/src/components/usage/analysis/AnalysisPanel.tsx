@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FocusEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@/lib/chartjs';
-import type { Chart, ChartData, ChartOptions, Plugin, ScriptableContext, TooltipModel } from 'chart.js';
+import { Interaction, Tooltip } from 'chart.js';
+import type { Chart, ChartData, ChartOptions, InteractionItem, InteractionModeFunction, Plugin, ScriptableContext, TooltipModel, TooltipPositionerFunction } from 'chart.js';
 import { Bar, Doughnut, Scatter } from 'react-chartjs-2';
 import type { AnalysisCompositionItem, AnalysisCostBreakdown, AnalysisHeatmapCell, AnalysisLatencyDiagnostics, AnalysisModelEfficiencyItem, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
 import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber, formatDurationMs, formatUsd } from '@/utils/usage';
@@ -68,6 +69,15 @@ type FloatingTooltipState = {
   y: number;
   placement: 'above' | 'below';
 };
+type ViewportPoint = {
+  x: number;
+  y: number;
+};
+type ChartTooltipPointer = {
+  chartX: number;
+  chartY: number;
+  viewport?: ViewportPoint;
+};
 type CostBreakdownSegmentKey = 'input' | 'output' | 'cached';
 type CostBreakdownSegment = {
   key: CostBreakdownSegmentKey;
@@ -116,6 +126,16 @@ type LatencyReferenceHover = {
 };
 type LatencyPluginEventArgs = Parameters<NonNullable<Plugin<'scatter'>['afterEvent']>>[1];
 
+declare module 'chart.js' {
+  interface TooltipPositionerMap {
+    analysisCompositionCursor: TooltipPositionerFunction<'doughnut'>;
+  }
+
+  interface InteractionModeMap {
+    analysisCompositionArc: InteractionModeFunction;
+  }
+}
+
 const CHART_COLORS: GradientColor[] = [
   { base: '#1d4ed8', light: '#60a5fa' },
   { base: '#ca8a04', light: '#facc15' },
@@ -159,12 +179,14 @@ const MODEL_EFFICIENCY_COLORS: ModelEfficiencyColor[] = [
 const COST_TOOLTIP_MAX_WIDTH = 280;
 const COST_TOOLTIP_VIEWPORT_PADDING = 8;
 const COST_TOOLTIP_CURSOR_OFFSET = 14;
-const COMPOSITION_TOOLTIP_ID = 'analysis-composition-tooltip';
-const COMPOSITION_TOOLTIP_MAX_WIDTH = 260;
-const COMPOSITION_TOOLTIP_VIEWPORT_PADDING = 8;
-const COMPOSITION_TOOLTIP_CURSOR_OFFSET = 12;
 const COMPOSITION_DONUT_BORDER_RADIUS = 10;
 const COMPOSITION_DONUT_SPACING = 4;
+const COMPOSITION_DONUT_HOVER_OFFSET = 10;
+const COMPOSITION_DONUT_LAYOUT_PADDING = 28;
+const COMPOSITION_TOOLTIP_CARET_PADDING = 18;
+const COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH = 28;
+const COMPOSITION_TOOLTIP_TITLE_MAX_LINES = 3;
+const FULL_CIRCLE = Math.PI * 2;
 const HEATMAP_TOOLTIP_MAX_WIDTH = 280;
 const HEATMAP_TOOLTIP_VIEWPORT_PADDING = 8;
 const HEATMAP_TOOLTIP_CURSOR_OFFSET = 14;
@@ -180,9 +202,28 @@ const MODEL_EFFICIENCY_OUTLIER_RATIO = 8;
 const MODEL_EFFICIENCY_AXIS_PADDING_FACTOR = 2.5;
 const LATENCY_REFERENCE_HIT_RADIUS_PX = 8;
 const EMPTY_COMPOSITION_ITEMS: AnalysisCompositionItem[] = [];
-const compositionTooltipPointers = new WeakMap<Chart, { x: number; y: number }>();
+const modelEfficiencyTooltipPointers = new WeakMap<Chart, ChartTooltipPointer>();
 const latencyReferenceHoverStates = new WeakMap<Chart<'scatter'>, LatencyReferenceHover>();
-const FULL_CIRCLE = Math.PI * 2;
+
+const analysisCompositionCursorPositioner: TooltipPositionerFunction<'doughnut'> = function (_items, eventPosition) {
+  if (!eventPosition) return false;
+  const x = toFiniteNumber(eventPosition.x);
+  const y = toFiniteNumber(eventPosition.y);
+  if (x === undefined || y === undefined) return false;
+  const chartArea = this.chart.chartArea;
+  const chartHeight = this.chart.height;
+  const verticalMidpoint = chartArea
+    ? (chartArea.top + chartArea.bottom) / 2
+    : chartHeight / 2;
+  return {
+    x,
+    y,
+    xAlign: 'center',
+    yAlign: y <= verticalMidpoint ? 'bottom' : 'top',
+  };
+};
+
+Tooltip.positioners.analysisCompositionCursor = analysisCompositionCursorPositioner;
 type TokenLabels = {
   input: string;
   output: string;
@@ -236,67 +277,38 @@ const drawTokenAverageLinePlugin: Plugin<'bar'> = {
   },
 };
 
-const compositionTooltipPointerPlugin: Plugin<'doughnut'> = {
-  id: 'analysis-composition-tooltip-pointer',
-  beforeEvent: (chart, args) => {
-    const { event } = args;
-    if (event.type === 'mouseout') {
-      compositionTooltipPointers.delete(chart);
-      return;
-    }
-    const { x, y } = event;
-    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return;
-    compositionTooltipPointers.set(chart, { x, y });
-  },
+const toFiniteNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 };
 
-type CompositionArcGeometry = {
+type DoughnutArcProps = {
   x: number;
   y: number;
   innerRadius: number;
   outerRadius: number;
   startAngle: number;
   endAngle: number;
-  circumference?: number;
+  circumference: number;
 };
 
-type CompositionArcElement = Partial<CompositionArcGeometry> & {
-  getProps?: (props: Array<keyof CompositionArcGeometry>, final?: boolean) => Partial<CompositionArcGeometry>;
-};
-
-const normalizeRadians = (angle: number) => ((angle % FULL_CIRCLE) + FULL_CIRCLE) % FULL_CIRCLE;
-const radiansDistance = (from: number, to: number) => Math.abs(Math.atan2(Math.sin(from - to), Math.cos(from - to)));
-
-const getCompositionArcGeometry = (chart: Chart, dataIndex: number): CompositionArcGeometry | null => {
-  if (!chart.data?.datasets?.length) return null;
-  const arc = chart.getDatasetMeta(0)?.data?.[dataIndex] as CompositionArcElement | undefined;
-  if (!arc) return null;
-  const props = arc.getProps
-    ? arc.getProps(['x', 'y', 'innerRadius', 'outerRadius', 'startAngle', 'endAngle', 'circumference'], true)
-    : arc;
-  const { x, y, innerRadius, outerRadius, startAngle, endAngle, circumference } = props;
-  if (
-    !Number.isFinite(x)
-    || !Number.isFinite(y)
-    || !Number.isFinite(innerRadius)
-    || !Number.isFinite(outerRadius)
-    || !Number.isFinite(startAngle)
-    || !Number.isFinite(endAngle)
-  ) {
-    return null;
-  }
-  return {
-    x: x as number,
-    y: y as number,
-    innerRadius: innerRadius as number,
-    outerRadius: outerRadius as number,
-    startAngle: startAngle as number,
-    endAngle: endAngle as number,
-    circumference: Number.isFinite(circumference) ? circumference : undefined,
+type DoughnutArcElement = {
+  options?: {
+    spacing?: unknown;
+    borderWidth?: unknown;
   };
+  getProps: (props: Array<keyof DoughnutArcProps>, useFinalPosition?: boolean) => Partial<DoughnutArcProps>;
 };
 
-const isAngleWithinArc = (angle: number, startAngle: number, endAngle: number) => {
+const normalizeRadians = (angle: number): number => ((angle % FULL_CIRCLE) + FULL_CIRCLE) % FULL_CIRCLE;
+
+const getRadiansDistance = (first: number, second: number): number => {
+  const distance = Math.abs(normalizeRadians(first) - normalizeRadians(second));
+  return Math.min(distance, FULL_CIRCLE - distance);
+};
+
+const isAngleWithinArc = (angle: number, startAngle: number, endAngle: number, circumference: number): boolean => {
+  if (Math.abs(circumference) >= FULL_CIRCLE - 0.0001) return true;
   const normalizedAngle = normalizeRadians(angle);
   const normalizedStart = normalizeRadians(startAngle);
   const normalizedEnd = normalizeRadians(endAngle);
@@ -305,27 +317,127 @@ const isAngleWithinArc = (angle: number, startAngle: number, endAngle: number) =
     : normalizedAngle >= normalizedStart || normalizedAngle <= normalizedEnd;
 };
 
-const isCompositionPointerInsidePaintedArc = (chart: Chart, dataIndex: number, itemCount: number) => {
-  const pointer = compositionTooltipPointers.get(chart);
-  if (!pointer) return true;
-  const arc = getCompositionArcGeometry(chart, dataIndex);
+const getDoughnutArcProps = (element: unknown, useFinalPosition?: boolean): { element: DoughnutArcElement; props: DoughnutArcProps } | undefined => {
+  if (!element || typeof element !== 'object') return undefined;
+  const candidate = element as Partial<DoughnutArcElement>;
+  if (typeof candidate.getProps !== 'function') return undefined;
+  const props = candidate.getProps(['x', 'y', 'innerRadius', 'outerRadius', 'startAngle', 'endAngle', 'circumference'], useFinalPosition);
+  const x = toFiniteNumber(props.x);
+  const y = toFiniteNumber(props.y);
+  const innerRadius = toFiniteNumber(props.innerRadius);
+  const outerRadius = toFiniteNumber(props.outerRadius);
+  const startAngle = toFiniteNumber(props.startAngle);
+  const endAngle = toFiniteNumber(props.endAngle);
+  const circumference = toFiniteNumber(props.circumference);
+  if (
+    x === undefined
+    || y === undefined
+    || innerRadius === undefined
+    || outerRadius === undefined
+    || startAngle === undefined
+    || endAngle === undefined
+    || circumference === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    element: candidate as DoughnutArcElement,
+    props: { x, y, innerRadius, outerRadius, startAngle, endAngle, circumference },
+  };
+};
+
+const isPointerInsidePaintedArc = (item: InteractionItem, event: unknown, useFinalPosition?: boolean): boolean => {
+  const pointerX = toFiniteNumber((event as { x?: unknown } | undefined)?.x);
+  const pointerY = toFiniteNumber((event as { y?: unknown } | undefined)?.y);
+  if (pointerX === undefined || pointerY === undefined) return false;
+  const arc = getDoughnutArcProps(item.element, useFinalPosition);
   if (!arc) return false;
-  if (itemCount <= 1 || COMPOSITION_DONUT_SPACING <= 0) return true;
+  const { element, props } = arc;
+  const deltaX = pointerX - props.x;
+  const deltaY = pointerY - props.y;
+  const radius = Math.hypot(deltaX, deltaY);
+  if (radius < props.innerRadius || radius > props.outerRadius) return false;
+  const angle = Math.atan2(deltaY, deltaX);
+  if (!isAngleWithinArc(angle, props.startAngle, props.endAngle, props.circumference)) return false;
+  if (Math.abs(props.circumference) >= FULL_CIRCLE - 0.0001) return true;
 
-  const dx = pointer.x - arc.x;
-  const dy = pointer.y - arc.y;
-  const radius = Math.sqrt((dx * dx) + (dy * dy));
-  if (radius < arc.innerRadius || radius > arc.outerRadius) return false;
+  const midRadius = (props.innerRadius + props.outerRadius) / 2;
+  if (midRadius <= 0) return true;
+  const spacing = toFiniteNumber(element.options?.spacing) ?? COMPOSITION_DONUT_SPACING;
+  const borderWidth = toFiniteNumber(element.options?.borderWidth) ?? 0;
+  const boundaryPadding = Math.min(
+    Math.abs(props.circumference) / 3,
+    ((spacing + borderWidth) / midRadius) * 1.2,
+  );
+  if (boundaryPadding <= 0) return true;
 
-  const circumference = Math.abs(arc.circumference ?? (arc.endAngle - arc.startAngle));
-  if (circumference >= FULL_CIRCLE - 0.001) return true;
+  // Chart.js 的 nearest 负责小扇区候选；这里只剔除视觉切缝附近未绘制的像素。
+  return getRadiansDistance(angle, props.startAngle) > boundaryPadding
+    && getRadiansDistance(angle, props.endAngle) > boundaryPadding;
+};
 
-  const angle = Math.atan2(dy, dx);
-  if (!isAngleWithinArc(angle, arc.startAngle, arc.endAngle)) return false;
+const analysisCompositionArcMode: InteractionModeFunction = (chart, event, options, useFinalPosition) => {
+  const candidateItems = Interaction.modes.nearest(chart, event, { ...options, axis: 'r', intersect: false }, useFinalPosition);
+  return candidateItems.filter((item) => isPointerInsidePaintedArc(item, event, useFinalPosition));
+};
 
-  const midRadius = Math.max((arc.innerRadius + arc.outerRadius) / 2, 1);
-  const gapAngle = Math.min(circumference / 3, (COMPOSITION_DONUT_SPACING / midRadius) * 1.2);
-  return radiansDistance(angle, arc.startAngle) > gapAngle && radiansDistance(angle, arc.endAngle) > gapAngle;
+Interaction.modes.analysisCompositionArc = analysisCompositionArcMode;
+
+const getNativeViewportPoint = (event: unknown): ViewportPoint | undefined => {
+  if (!event || typeof event !== 'object') return undefined;
+  const native = (event as { native?: unknown }).native;
+  if (!native || typeof native !== 'object') return undefined;
+  const touchLists = native as {
+    touches?: ArrayLike<{ clientX?: unknown; clientY?: unknown }>;
+    changedTouches?: ArrayLike<{ clientX?: unknown; clientY?: unknown }>;
+  };
+  const touch = touchLists.touches?.[0] ?? touchLists.changedTouches?.[0];
+  const target = touch ?? native;
+  const x = toFiniteNumber((target as { clientX?: unknown }).clientX);
+  const y = toFiniteNumber((target as { clientY?: unknown }).clientY);
+  return x === undefined || y === undefined ? undefined : { x, y };
+};
+
+const getChartTooltipPointer = (event: unknown): ChartTooltipPointer | undefined => {
+  if (!event || typeof event !== 'object') return undefined;
+  const chartX = toFiniteNumber((event as { x?: unknown }).x);
+  const chartY = toFiniteNumber((event as { y?: unknown }).y);
+  if (chartX === undefined || chartY === undefined) return undefined;
+  return {
+    chartX,
+    chartY,
+    viewport: getNativeViewportPoint(event),
+  };
+};
+
+const getTooltipViewportAnchor = (
+  chart: Chart,
+  tooltip: Pick<TooltipModel<'scatter'>, 'caretX' | 'caretY'>,
+  pointer: ChartTooltipPointer | undefined,
+): ViewportPoint | undefined => {
+  if (pointer?.viewport) return pointer.viewport;
+  const canvasRect = chart.canvas?.getBoundingClientRect();
+  if (!canvasRect) return undefined;
+  const anchorX = pointer?.chartX ?? tooltip.caretX ?? canvasRect.width / 2;
+  const anchorY = pointer?.chartY ?? tooltip.caretY ?? canvasRect.height / 2;
+  return {
+    x: canvasRect.left + anchorX,
+    y: canvasRect.top + anchorY,
+  };
+};
+
+const modelEfficiencyTooltipPointerPlugin: Plugin<'scatter'> = {
+  id: 'analysis-model-efficiency-tooltip-pointer',
+  beforeEvent: (chart, args) => {
+    const { event } = args;
+    if (event.type === 'mouseout') {
+      modelEfficiencyTooltipPointers.delete(chart);
+      return;
+    }
+    const pointer = getChartTooltipPointer(event);
+    if (!pointer) return;
+    modelEfficiencyTooltipPointers.set(chart, pointer);
+  },
 };
 
 const getChartTheme = (isDark: boolean): ChartTheme => ({
@@ -859,7 +971,7 @@ function buildCompositionChartData(items: AnalysisCompositionItem[]): ChartData<
       borderColor: 'transparent',
       borderWidth: 0,
       borderRadius: COMPOSITION_DONUT_BORDER_RADIUS,
-      hoverOffset: 0,
+      hoverOffset: COMPOSITION_DONUT_HOVER_OFFSET,
     }],
   };
 }
@@ -868,110 +980,53 @@ type CompositionTooltipLabels = {
   totalTokens: string;
 };
 
-function getCompositionTooltipElement() {
-  let tooltipEl = document.getElementById(COMPOSITION_TOOLTIP_ID) as HTMLDivElement | null;
-  if (tooltipEl) return tooltipEl;
-  tooltipEl = document.createElement('div');
-  tooltipEl.id = COMPOSITION_TOOLTIP_ID;
-  tooltipEl.className = styles.compositionFloatingTooltip;
-  document.body.appendChild(tooltipEl);
-  return tooltipEl;
-}
+const toTruncatedTooltipTitleLine = (line: string): string => {
+  const suffixLength = 3;
+  const maxContentLength = COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH - suffixLength;
+  return `${line.slice(0, maxContentLength)}...`;
+};
 
-function removeCompositionTooltip() {
-  document.getElementById(COMPOSITION_TOOLTIP_ID)?.remove();
-}
+const wrapCompositionTooltipTitle = (label: unknown): string[] => {
+  const normalized = String(label ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  const lines: string[] = [];
+  let remaining = normalized;
 
-function appendCompositionTooltipMetric(group: HTMLDivElement, label: string, value: string) {
-  const metric = document.createElement('div');
-  metric.className = styles.compositionTooltipMetric;
-  metric.textContent = `${label}: ${value}`;
-  group.appendChild(metric);
-}
-
-function createCompositionTooltipHandler({
-  items,
-  labels,
-}: {
-  items: AnalysisCompositionItem[];
-  labels: CompositionTooltipLabels;
-}): (args: { chart: Chart; tooltip: TooltipModel<'doughnut'> }) => void {
-  return ({ chart, tooltip }) => {
-    if (typeof document === 'undefined') return;
-    const tooltipEl = getCompositionTooltipElement();
-    if (tooltip.opacity === 0) {
-      tooltipEl.style.opacity = '0';
-      return;
+  while (remaining.length > 0) {
+    if (remaining.length <= COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH) {
+      lines.push(remaining);
+      break;
     }
+    const naturalBreak = remaining.lastIndexOf(' ', COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH);
+    const breakIndex = naturalBreak > 0 ? naturalBreak : COMPOSITION_TOOLTIP_TITLE_LINE_LENGTH;
+    lines.push(remaining.slice(0, breakIndex).trim());
+    remaining = remaining.slice(breakIndex).trimStart();
+  }
 
-    const dataIndex = tooltip.dataPoints?.[0]?.dataIndex;
-    const item = typeof dataIndex === 'number' ? items[dataIndex] : undefined;
-    if (!item || !isCompositionPointerInsidePaintedArc(chart, dataIndex, items.length)) {
-      tooltipEl.style.opacity = '0';
-      return;
-    }
+  if (lines.length <= COMPOSITION_TOOLTIP_TITLE_MAX_LINES) return lines;
+  const visibleLines = lines.slice(0, COMPOSITION_TOOLTIP_TITLE_MAX_LINES);
+  visibleLines[COMPOSITION_TOOLTIP_TITLE_MAX_LINES - 1] = toTruncatedTooltipTitleLine(visibleLines[COMPOSITION_TOOLTIP_TITLE_MAX_LINES - 1]);
+  return visibleLines;
+};
 
-    tooltipEl.replaceChildren();
-    const group = document.createElement('div');
-    group.className = styles.compositionTooltipGroup;
-    const header = document.createElement('div');
-    header.className = styles.compositionTooltipHeader;
-    const dot = document.createElement('span');
-    dot.className = styles.compositionTooltipDot;
-    dot.style.background = CHART_COLORS[dataIndex % CHART_COLORS.length].base;
-    header.appendChild(dot);
-    const name = document.createElement('strong');
-    name.textContent = item.label;
-    header.appendChild(name);
-    group.appendChild(header);
-    appendCompositionTooltipMetric(group, labels.totalTokens, formatCompactNumber(toNumber(item.total_tokens)));
-    tooltipEl.appendChild(group);
-
-    const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
-    const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
-    const maxWidth = Math.min(COMPOSITION_TOOLTIP_MAX_WIDTH, viewportWidth - COMPOSITION_TOOLTIP_VIEWPORT_PADDING * 2);
-    tooltipEl.style.opacity = '1';
-    tooltipEl.style.maxWidth = `${maxWidth}px`;
-    const canvasRect = chart.canvas?.getBoundingClientRect();
-    if (!canvasRect) {
-      tooltipEl.style.opacity = '0';
-      return;
-    }
-    const tooltipWidth = tooltipEl.offsetWidth || COMPOSITION_TOOLTIP_MAX_WIDTH;
-    const tooltipHeight = tooltipEl.offsetHeight || 120;
-    const pointer = compositionTooltipPointers.get(chart);
-    const anchorX = pointer?.x ?? tooltip.caretX ?? canvasRect.width / 2;
-    const anchorY = pointer?.y ?? tooltip.caretY ?? canvasRect.height / 2;
-    const rawRightSideLeft = canvasRect.left + anchorX + COMPOSITION_TOOLTIP_CURSOR_OFFSET;
-    const left = rawRightSideLeft + tooltipWidth <= viewportWidth - COMPOSITION_TOOLTIP_VIEWPORT_PADDING
-      ? rawRightSideLeft
-      : Math.max(COMPOSITION_TOOLTIP_VIEWPORT_PADDING, canvasRect.left + anchorX - tooltipWidth - COMPOSITION_TOOLTIP_CURSOR_OFFSET);
-    const rawTop = canvasRect.top + anchorY - tooltipHeight / 2;
-    const top = Math.max(
-      COMPOSITION_TOOLTIP_VIEWPORT_PADDING,
-      Math.min(rawTop, viewportHeight - tooltipHeight - COMPOSITION_TOOLTIP_VIEWPORT_PADDING),
-    );
-    tooltipEl.style.left = `${left}px`;
-    tooltipEl.style.top = `${top}px`;
-  };
-}
-
-function buildCompositionChartOptions(chartTheme: ChartTheme, items: AnalysisCompositionItem[], labels: CompositionTooltipLabels): ChartOptions<'doughnut'> {
+function buildCompositionChartOptions(chartTheme: ChartTheme, labels: CompositionTooltipLabels): ChartOptions<'doughnut'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    interaction: { mode: 'nearest', intersect: true },
-    hover: { mode: 'nearest', intersect: true },
-    layout: { padding: 6 },
+    interaction: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
+    hover: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
+    layout: { padding: COMPOSITION_DONUT_LAYOUT_PADDING },
     cutout: '58%',
     spacing: COMPOSITION_DONUT_SPACING,
     plugins: {
       legend: { display: false },
       tooltip: {
-        enabled: false,
-        external: createCompositionTooltipHandler({ items, labels }),
-        mode: 'nearest',
-        intersect: true,
+        enabled: true,
+        mode: 'analysisCompositionArc',
+        intersect: false,
+        axis: 'r',
+        position: 'analysisCompositionCursor',
+        caretPadding: COMPOSITION_TOOLTIP_CARET_PADDING,
         backgroundColor: chartTheme.tooltipBg,
         titleColor: chartTheme.textPrimary,
         bodyColor: chartTheme.tooltipBody,
@@ -981,7 +1036,8 @@ function buildCompositionChartOptions(chartTheme: ChartTheme, items: AnalysisCom
         displayColors: true,
         usePointStyle: true,
         callbacks: {
-          label: (context) => formatCompactNumber(Number(context.parsed ?? 0)),
+          title: (context) => wrapCompositionTooltipTitle(context[0]?.label),
+          label: (context) => `${labels.totalTokens}: ${formatCompactNumber(Number(context.parsed ?? 0))}`,
         },
       },
     },
@@ -1267,14 +1323,8 @@ function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; l
     totalTokens: t('usage_stats.total_tokens'),
   }), [t]);
   const chartData = useMemo(() => buildCompositionChartData(items), [items]);
-  const chartOptions = useMemo(() => buildCompositionChartOptions(chartTheme, items, tooltipLabels), [chartTheme, items, tooltipLabels]);
+  const chartOptions = useMemo(() => buildCompositionChartOptions(chartTheme, tooltipLabels), [chartTheme, tooltipLabels]);
   const hasUnavailableCost = items.some((item) => item.cost_available === false);
-  useEffect(() => {
-    removeCompositionTooltip();
-  }, [items]);
-  useEffect(() => () => {
-    removeCompositionTooltip();
-  }, []);
   return (
     <section className={`${styles.analysisCard} ${styles.compositionCard}`}>
       <AnalysisCardHeader
@@ -1306,7 +1356,7 @@ function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; l
           <div className={styles.compositionLayout}>
             <div className={styles.donutChartFrame}>
               <div className={styles.donutCanvasBox}>
-                <Doughnut key={`chart-${activeContentKey}`} data={chartData} options={chartOptions} plugins={[compositionTooltipPointerPlugin]} />
+                <Doughnut key={`chart-${activeContentKey}`} data={chartData} options={chartOptions} />
               </div>
             </div>
             <div key={`list-${activeContentKey}`} className={styles.compositionUsageList}>
@@ -1681,16 +1731,24 @@ function createModelEfficiencyTooltipHandler({
     }
 
     const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
     const maxWidth = Math.min(MODEL_EFFICIENCY_TOOLTIP_MAX_WIDTH, viewportWidth - MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING * 2);
     tooltipEl.style.opacity = '1';
     tooltipEl.style.maxWidth = `${maxWidth}px`;
-    const canvasRect = chart.canvas.getBoundingClientRect();
+    const anchor = getTooltipViewportAnchor(chart, tooltip, modelEfficiencyTooltipPointers.get(chart));
+    if (!anchor) {
+      tooltipEl.style.opacity = '0';
+      return;
+    }
     const tooltipWidth = tooltipEl.offsetWidth || MODEL_EFFICIENCY_TOOLTIP_MAX_WIDTH;
     const tooltipHeight = tooltipEl.offsetHeight || 160;
-    const rawLeft = canvasRect.left + tooltip.caretX + MODEL_EFFICIENCY_TOOLTIP_CURSOR_OFFSET;
+    const rawLeft = anchor.x + MODEL_EFFICIENCY_TOOLTIP_CURSOR_OFFSET;
     const left = Math.max(MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING, Math.min(rawLeft, viewportWidth - tooltipWidth - MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING));
-    const rawTop = canvasRect.top + tooltip.caretY - tooltipHeight / 2;
-    const top = Math.max(MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING, rawTop);
+    const rawTop = anchor.y - tooltipHeight / 2;
+    const top = Math.max(
+      MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING,
+      Math.min(rawTop, viewportHeight - tooltipHeight - MODEL_EFFICIENCY_TOOLTIP_VIEWPORT_PADDING),
+    );
     tooltipEl.style.left = `${left}px`;
     tooltipEl.style.top = `${top}px`;
   };
@@ -1798,7 +1856,7 @@ function ModelEfficiencyCard({ rows, loading, isDark, isMobile }: { rows: Analys
         <div className={styles.modelEfficiencyBody}>
           {hasPricedData ? (
             <div className={styles.efficiencyChartFrame}>
-              <Scatter data={chartData} options={chartOptions} />
+              <Scatter data={chartData} options={chartOptions} plugins={[modelEfficiencyTooltipPointerPlugin]} />
             </div>
           ) : (
             <div className={styles.emptyState}>{t('usage_stats.no_data')}</div>

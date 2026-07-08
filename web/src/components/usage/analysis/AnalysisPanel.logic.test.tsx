@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Interaction, Tooltip } from 'chart.js';
 import type { ChartData, ChartOptions, Plugin } from 'chart.js';
 import type { AnalysisResponse } from '@/lib/types';
 
@@ -312,18 +313,21 @@ describe('AnalysisPanel token chart data', () => {
     expect(chartCapture.doughnutData?.datasets[0]?.data).toEqual([1000]);
     expect(chartCapture.doughnutData?.datasets[0]).toMatchObject({
       borderRadius: 10,
-      hoverOffset: 0,
+      hoverOffset: 10,
     });
     expect(chartCapture.doughnutOptions).toMatchObject({
       cutout: '58%',
       spacing: 4,
-      interaction: { mode: 'nearest', intersect: true },
-      hover: { mode: 'nearest', intersect: true },
+      interaction: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
+      hover: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
     });
     expect(chartCapture.doughnutOptions?.maintainAspectRatio).toBe(false);
-    expect(chartCapture.doughnutOptions?.plugins?.tooltip?.enabled).toBe(false);
-    expect(typeof chartCapture.doughnutOptions?.plugins?.tooltip?.external).toBe('function');
-    expect(chartCapture.doughnutPlugins?.map((plugin) => plugin.id)).toContain('analysis-composition-tooltip-pointer');
+    expect(chartCapture.doughnutOptions?.layout?.padding).toBe(28);
+    expect(chartCapture.doughnutOptions?.plugins?.tooltip?.enabled).toBe(true);
+    expect(chartCapture.doughnutOptions?.plugins?.tooltip?.position).toBe('analysisCompositionCursor');
+    expect(chartCapture.doughnutOptions?.plugins?.tooltip?.caretPadding).toBe(18);
+    expect(chartCapture.doughnutOptions?.plugins?.tooltip?.external).toBeUndefined();
+    expect(chartCapture.doughnutPlugins).toBeUndefined();
     expect(markup).toContain('usage_stats.analysis_composition_title');
     expect(markup).toContain('usage_stats.analysis_composition_api_key_tab');
     expect(markup).toContain('usage_stats.analysis_composition_token_percent');
@@ -342,7 +346,7 @@ describe('AnalysisPanel token chart data', () => {
     expect(markup).not.toContain('usage_stats.analysis_ai_provider_composition_title');
   });
 
-  it('positions the usage distribution tooltip from the pointer rather than the doughnut segment center', () => {
+  it('uses native usage distribution tooltip callbacks with wrapped long titles', () => {
     const analysis: AnalysisResponse = {
       ...emptyAnalysis,
       api_key_composition: [{
@@ -362,62 +366,183 @@ describe('AnalysisPanel token chart data', () => {
 
     renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
 
-    const elements = new Map<string, FakeElement>();
-    const fakeDocument = createFakeDocument(elements);
-    vi.stubGlobal('document', fakeDocument);
-    vi.stubGlobal('window', { innerWidth: 1024, innerHeight: 768 });
+    const tooltipLabel = chartCapture.doughnutOptions?.plugins?.tooltip?.callbacks?.label;
+    const tooltipTitle = chartCapture.doughnutOptions?.plugins?.tooltip?.callbacks?.title;
+    expect(typeof tooltipLabel).toBe('function');
+    expect(typeof tooltipTitle).toBe('function');
+    expect(tooltipTitle?.([{ label: 'Primary Key' }] as never)).toEqual(['Primary Key']);
+    const longTitle = tooltipTitle?.([{
+      label: 'averyveryverylongapikeylabelwithoutnaturalbreaks-000000000000000000000000000000000000',
+    }] as never);
+    expect(Array.isArray(longTitle)).toBe(true);
+    expect(longTitle).toHaveLength(3);
+    expect((longTitle as string[]).every((line) => line.length <= 28)).toBe(true);
+    expect((longTitle as string[])[2]?.endsWith('...')).toBe(true);
+    expect(tooltipLabel?.({
+      label: 'Primary Key',
+      parsed: 1000,
+    } as never)).toBe('usage_stats.total_tokens: 1.00K');
+  });
 
-    const fakeChart = {
-      data: { datasets: [{ data: [1000] }] },
-      canvas: {
-        getBoundingClientRect: () => ({
-          left: 100,
-          top: 80,
-          right: 400,
-          bottom: 380,
-          width: 300,
-          height: 300,
-        }),
-      },
-      getDatasetMeta: () => ({
-        data: [{
-          x: 150,
-          y: 150,
-          innerRadius: 70,
-          outerRadius: 140,
-          startAngle: 0,
-          endAngle: Math.PI * 2,
-          circumference: Math.PI * 2,
-        }],
-      }),
+  it('coerces non-string usage distribution tooltip titles before wrapping', () => {
+    const analysis: AnalysisResponse = {
+      ...emptyAnalysis,
+      api_key_composition: [{
+        key: '1',
+        label: 'Primary Key',
+        total_tokens: 1000,
+        requests: 4,
+        percent: 100,
+        input_tokens: 700,
+        output_tokens: 200,
+        cached_tokens: 50,
+        reasoning_tokens: 50,
+        cost_usd: 0.42,
+        cost_available: true,
+      }],
     };
 
-    chartCapture.doughnutPlugins?.[0]?.beforeEvent?.(fakeChart as never, {
-      event: { type: 'mousedown', x: 140, y: 240, native: null },
-      replay: false,
-      changed: false,
-      cancelable: false,
-      inChartArea: true,
-    } as never, undefined as never);
-    chartCapture.doughnutOptions?.plugins?.tooltip?.external?.({
-      chart: fakeChart,
-      tooltip: {
-        opacity: 1,
-        caretX: 260,
-        caretY: 30,
-        dataPoints: [{ dataIndex: 0 }],
-      },
-    } as never);
+    renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
 
-    const tooltipElement = elements.get('analysis-composition-tooltip');
-    expect(tooltipElement).toBeTruthy();
-    expect(tooltipElement?.style.opacity).toBe('1');
-    expect(tooltipElement?.style.left).toBe('252px');
-    expect(tooltipElement?.style.top).toBe('240px');
-    expect(collectFakeText(tooltipElement)).toEqual([
-      'Primary Key',
-      'usage_stats.total_tokens: 1.00K',
-    ]);
+    const tooltipTitle = chartCapture.doughnutOptions?.plugins?.tooltip?.callbacks?.title;
+    expect(typeof tooltipTitle).toBe('function');
+    expect(tooltipTitle?.([{ label: 12345 }] as never)).toEqual(['12345']);
+  });
+
+  it('uses usage distribution interaction options for small arcs', () => {
+    const analysis: AnalysisResponse = {
+      ...emptyAnalysis,
+      api_key_composition: [
+        {
+          key: '1',
+          label: 'Primary Key',
+          total_tokens: 999,
+          requests: 4,
+          percent: 99.9,
+          input_tokens: 700,
+          output_tokens: 200,
+          cached_tokens: 50,
+          reasoning_tokens: 49,
+          cost_usd: 0.42,
+          cost_available: true,
+        },
+        {
+          key: '2',
+          label: 'Tiny Key',
+          total_tokens: 1,
+          requests: 1,
+          percent: 0.1,
+          input_tokens: 1,
+          output_tokens: 0,
+          cached_tokens: 0,
+          reasoning_tokens: 0,
+          cost_usd: 0,
+          cost_available: true,
+        },
+      ],
+    };
+
+    renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
+
+    expect(chartCapture.doughnutData?.labels).toEqual(['Primary Key', 'Tiny Key']);
+    expect(chartCapture.doughnutOptions).toMatchObject({
+      interaction: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
+      hover: { mode: 'analysisCompositionArc', intersect: false, axis: 'r' },
+    });
+    expect(chartCapture.doughnutOptions?.plugins?.tooltip).toMatchObject({
+      enabled: true,
+      mode: 'analysisCompositionArc',
+      intersect: false,
+      axis: 'r',
+      position: 'analysisCompositionCursor',
+      caretPadding: 18,
+    });
+    expect(chartCapture.doughnutOptions?.plugins?.tooltip?.external).toBeUndefined();
+    expect(chartCapture.doughnutPlugins).toBeUndefined();
+  });
+
+  it('limits usage distribution hover to the painted doughnut arc', () => {
+    renderToStaticMarkup(<AnalysisPanel analysis={{
+      ...emptyAnalysis,
+      api_key_composition: [{
+        key: '1',
+        label: 'Primary Key',
+        total_tokens: 1000,
+        requests: 4,
+        percent: 100,
+        input_tokens: 700,
+        output_tokens: 200,
+        cached_tokens: 50,
+        reasoning_tokens: 50,
+        cost_usd: 0.42,
+        cost_available: true,
+      }],
+    }} loading={false} isDark={false} isMobile={false} />);
+
+    const mode = (Interaction.modes as typeof Interaction.modes & {
+      analysisCompositionArc?: (chart: unknown, event: { x: number; y: number }, options: unknown, useFinalPosition?: boolean) => unknown[];
+    }).analysisCompositionArc;
+    expect(typeof mode).toBe('function');
+    const originalNearest = Interaction.modes.nearest;
+    const arcElement = {
+      options: { spacing: 4, borderWidth: 0 },
+      getProps: () => ({
+        x: 150,
+        y: 150,
+        innerRadius: 70,
+        outerRadius: 140,
+        startAngle: 0,
+        endAngle: Math.PI / 2,
+        circumference: Math.PI / 2,
+      }),
+    };
+    const activeItem = { element: arcElement, datasetIndex: 0, index: 0 };
+    Interaction.modes.nearest = vi.fn(() => [activeItem]) as typeof Interaction.modes.nearest;
+
+    try {
+      expect(mode?.({} as never, { x: 225, y: 225 }, {}, false)).toEqual([activeItem]);
+      expect(mode?.({} as never, { x: 150, y: 150 }, {}, false)).toEqual([]);
+      expect(mode?.({} as never, { x: 300, y: 150 }, {}, false)).toEqual([]);
+      expect(mode?.({} as never, { x: 255, y: 150 }, {}, false)).toEqual([]);
+    } finally {
+      Interaction.modes.nearest = originalNearest;
+    }
+  });
+
+  it('positions the usage distribution tooltip away from the hovered arc', () => {
+    renderToStaticMarkup(<AnalysisPanel analysis={{
+      ...emptyAnalysis,
+      api_key_composition: [{
+        key: '1',
+        label: 'Primary Key',
+        total_tokens: 1000,
+        requests: 4,
+        percent: 100,
+        input_tokens: 700,
+        output_tokens: 200,
+        cached_tokens: 50,
+        reasoning_tokens: 50,
+        cost_usd: 0.42,
+        cost_available: true,
+      }],
+    }} loading={false} isDark={false} isMobile={false} />);
+
+    const positioner = (Tooltip.positioners as typeof Tooltip.positioners & {
+      analysisCompositionCursor?: (items: unknown[], eventPosition: { x: number; y: number }) => unknown;
+    }).analysisCompositionCursor;
+    expect(typeof positioner).toBe('function');
+    expect(positioner?.call({ chart: { chartArea: { top: 0, bottom: 300 }, height: 300 } }, [], { x: 150, y: 40 })).toEqual({
+      x: 150,
+      y: 40,
+      xAlign: 'center',
+      yAlign: 'bottom',
+    });
+    expect(positioner?.call({ chart: { chartArea: { top: 0, bottom: 300 }, height: 300 } }, [], { x: 150, y: 260 })).toEqual({
+      x: 150,
+      y: 260,
+      xAlign: 'center',
+      yAlign: 'top',
+    });
   });
 
   it('keeps two-item usage distribution donuts visually segmented', () => {
@@ -458,185 +583,11 @@ describe('AnalysisPanel token chart data', () => {
     expect(chartCapture.doughnutData?.labels).toEqual(['Primary Key', 'Secondary Key']);
     expect(chartCapture.doughnutData?.datasets[0]).toMatchObject({
       borderRadius: 10,
-      hoverOffset: 0,
+      hoverOffset: 10,
     });
     expect(chartCapture.doughnutOptions?.spacing).toBe(4);
     expect(markup).toContain('--composition-bar-color:#1d4ed8');
     expect(markup).toContain('--composition-bar-color:#ca8a04');
-  });
-
-  it('hides the usage distribution tooltip when the pointer is in a visual segment gap', () => {
-    const analysis: AnalysisResponse = {
-      ...emptyAnalysis,
-      api_key_composition: [
-        {
-          key: '1',
-          label: 'Primary Key',
-          total_tokens: 750,
-          requests: 3,
-          percent: 75,
-          input_tokens: 500,
-          output_tokens: 200,
-          cached_tokens: 50,
-          reasoning_tokens: 0,
-          cost_usd: 0.3,
-          cost_available: true,
-        },
-        {
-          key: '2',
-          label: 'Secondary Key',
-          total_tokens: 250,
-          requests: 1,
-          percent: 25,
-          input_tokens: 200,
-          output_tokens: 50,
-          cached_tokens: 0,
-          reasoning_tokens: 0,
-          cost_usd: 0.1,
-          cost_available: true,
-        },
-      ],
-    };
-
-    renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
-
-    const elements = new Map<string, FakeElement>();
-    const fakeDocument = createFakeDocument(elements);
-    vi.stubGlobal('document', fakeDocument);
-    vi.stubGlobal('window', { innerWidth: 1024, innerHeight: 768 });
-
-    const fakeChart = {
-      data: { datasets: [{ data: [750, 250] }] },
-      canvas: {
-        getBoundingClientRect: () => ({
-          left: 0,
-          top: 0,
-          right: 300,
-          bottom: 300,
-          width: 300,
-          height: 300,
-        }),
-      },
-      getDatasetMeta: () => ({
-        data: [{
-          x: 150,
-          y: 150,
-          innerRadius: 70,
-          outerRadius: 140,
-          startAngle: 0,
-          endAngle: Math.PI,
-          circumference: Math.PI,
-        }],
-      }),
-    };
-
-    chartCapture.doughnutPlugins?.[0]?.beforeEvent?.(fakeChart as never, {
-      event: { type: 'mousemove', x: 255, y: 150, native: null },
-      replay: false,
-      changed: false,
-      cancelable: false,
-      inChartArea: true,
-    } as never, undefined as never);
-    chartCapture.doughnutOptions?.plugins?.tooltip?.external?.({
-      chart: fakeChart,
-      tooltip: {
-        opacity: 1,
-        caretX: 255,
-        caretY: 150,
-        dataPoints: [{ dataIndex: 0 }],
-      },
-    } as never);
-
-    const tooltipElement = elements.get('analysis-composition-tooltip');
-    expect(tooltipElement?.style.opacity).toBe('0');
-  });
-
-  it('hides the usage distribution tooltip when chart metadata or canvas is unavailable', () => {
-    const analysis: AnalysisResponse = {
-      ...emptyAnalysis,
-      api_key_composition: [{
-        key: '1',
-        label: 'Primary Key',
-        total_tokens: 750,
-        requests: 3,
-        percent: 75,
-        input_tokens: 500,
-        output_tokens: 200,
-        cached_tokens: 50,
-        reasoning_tokens: 0,
-        cost_usd: 0.3,
-        cost_available: true,
-      }],
-    };
-
-    renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
-
-    const elements = new Map<string, FakeElement>();
-    const fakeDocument = createFakeDocument(elements);
-    vi.stubGlobal('document', fakeDocument);
-    vi.stubGlobal('window', { innerWidth: 1024, innerHeight: 768 });
-
-    const chartWithoutDatasets = {
-      data: { datasets: [] },
-      canvas: {
-        getBoundingClientRect: () => ({ left: 0, top: 0, right: 300, bottom: 300, width: 300, height: 300 }),
-      },
-      getDatasetMeta: () => {
-        throw new Error('metadata should not be read without datasets');
-      },
-    };
-
-    chartCapture.doughnutPlugins?.[0]?.beforeEvent?.(chartWithoutDatasets as never, {
-      event: { type: 'mousemove', x: 150, y: 150, native: null },
-      replay: false,
-      changed: false,
-      cancelable: false,
-      inChartArea: true,
-    } as never, undefined as never);
-    expect(() => chartCapture.doughnutOptions?.plugins?.tooltip?.external?.({
-      chart: chartWithoutDatasets,
-      tooltip: {
-        opacity: 1,
-        caretX: 150,
-        caretY: 150,
-        dataPoints: [{ dataIndex: 0 }],
-      },
-    } as never)).not.toThrow();
-    expect(elements.get('analysis-composition-tooltip')?.style.opacity).toBe('0');
-
-    const chartWithoutCanvas = {
-      data: { datasets: [{ data: [750] }] },
-      canvas: undefined,
-      getDatasetMeta: () => ({
-        data: [{
-          x: 150,
-          y: 150,
-          innerRadius: 70,
-          outerRadius: 140,
-          startAngle: 0,
-          endAngle: Math.PI,
-          circumference: Math.PI,
-        }],
-      }),
-    };
-
-    chartCapture.doughnutPlugins?.[0]?.beforeEvent?.(chartWithoutCanvas as never, {
-      event: { type: 'mousemove', x: 105, y: 150, native: null },
-      replay: false,
-      changed: false,
-      cancelable: false,
-      inChartArea: true,
-    } as never, undefined as never);
-    expect(() => chartCapture.doughnutOptions?.plugins?.tooltip?.external?.({
-      chart: chartWithoutCanvas,
-      tooltip: {
-        opacity: 1,
-        caretX: 105,
-        caretY: 150,
-        dataPoints: [{ dataIndex: 0 }],
-      },
-    } as never)).not.toThrow();
-    expect(elements.get('analysis-composition-tooltip')?.style.opacity).toBe('0');
   });
 
   it('shows raw composition percentages while bounding progress bar width', () => {
@@ -684,6 +635,24 @@ describe('AnalysisPanel token chart data', () => {
     const markup = renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
     const backgroundColor = chartCapture.doughnutData?.datasets[0]?.backgroundColor;
     expect(typeof backgroundColor).toBe('function');
+    const gradientStops: Array<[number, string]> = [];
+    const gradient = {
+      addColorStop: vi.fn((offset: number, color: string) => {
+        gradientStops.push([offset, color]);
+      }),
+    };
+    const ctx = {
+      createLinearGradient: vi.fn(() => gradient),
+    };
+    expect((
+      backgroundColor as (context: {
+        dataIndex: number;
+        chart: { ctx: typeof ctx; chartArea?: { top: number; bottom: number } };
+      }) => unknown
+    )({ dataIndex: 0, chart: { ctx, chartArea: { top: 0, bottom: 100 } } })).toBe(gradient);
+    expect(ctx.createLinearGradient).toHaveBeenCalledWith(0, 0, 0, 100);
+    expect(gradientStops).toEqual([[0, '#60a5fa'], [1, '#1d4ed8']]);
+
     const compositionColors = Array.from({ length: 6 }, (_, dataIndex) => (
       backgroundColor as (context: { dataIndex: number; chart: { chartArea?: unknown } }) => string
     )({ dataIndex, chart: {} }));
@@ -1217,6 +1186,128 @@ describe('AnalysisPanel token chart data', () => {
       'usage_stats.analysis_cost_per_million_tokens: $1.00',
       'usage_stats.requests_count: 6',
     ]);
+  });
+
+  it('positions the model efficiency tooltip from the native viewport pointer', () => {
+    const analysis: AnalysisResponse = {
+      ...emptyAnalysis,
+      model_efficiency: [
+        {
+          model: 'gpt-4o',
+          requests: 4,
+          input_tokens: 1000,
+          output_tokens: 300,
+          cached_tokens: 100,
+          reasoning_tokens: 20,
+          total_tokens: 2_000_000,
+          cost_usd: 2,
+          cost_available: true,
+          cost_per_request_usd: 0.5,
+          output_tokens_per_request: 80,
+          cache_rate: 0.1,
+        },
+      ],
+    };
+
+    renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
+
+    const elements = new Map<string, FakeElement>();
+    const fakeDocument = createFakeDocument(elements);
+    vi.stubGlobal('document', fakeDocument);
+    vi.stubGlobal('window', { innerWidth: 1024, innerHeight: 768 });
+
+    const modelScatterIndex = chartCapture.scatterData.findIndex((data) => data.datasets[0]?.label === 'usage_stats.analysis_model_efficiency_title');
+    expect(modelScatterIndex).toBeGreaterThanOrEqual(0);
+    const pointerPlugin = chartCapture.scatterPlugins[modelScatterIndex]?.find((plugin) => plugin.id === 'analysis-model-efficiency-tooltip-pointer');
+    expect(pointerPlugin).toBeTruthy();
+
+    const fakeChart = {
+      canvas: {
+        getBoundingClientRect: () => ({ left: 10, top: 20, right: 310, bottom: 320, width: 300, height: 300 }),
+      },
+    };
+    pointerPlugin?.beforeEvent?.(fakeChart as never, {
+      event: { type: 'mousemove', x: 100, y: 60, native: { clientX: 420, clientY: 300 } },
+      replay: false,
+      changed: false,
+      cancelable: false,
+      inChartArea: true,
+    } as never, undefined as never);
+    chartCapture.scatterOptions[modelScatterIndex]?.plugins?.tooltip?.external?.({
+      chart: fakeChart,
+      tooltip: {
+        opacity: 1,
+        caretX: 100,
+        caretY: 60,
+        dataPoints: [{ dataIndex: 0 }],
+      },
+    } as never);
+
+    const tooltipElement = elements.get('analysis-model-efficiency-tooltip');
+    expect(tooltipElement?.style.opacity).toBe('1');
+    expect(tooltipElement?.style.left).toBe('434px');
+    expect(tooltipElement?.style.top).toBe('220px');
+  });
+
+  it('positions the model efficiency tooltip from a native touch point', () => {
+    const analysis: AnalysisResponse = {
+      ...emptyAnalysis,
+      model_efficiency: [
+        {
+          model: 'gpt-4o',
+          requests: 4,
+          input_tokens: 1000,
+          output_tokens: 300,
+          cached_tokens: 100,
+          reasoning_tokens: 20,
+          total_tokens: 2_000_000,
+          cost_usd: 2,
+          cost_available: true,
+          cost_per_request_usd: 0.5,
+          output_tokens_per_request: 80,
+          cache_rate: 0.1,
+        },
+      ],
+    };
+
+    renderToStaticMarkup(<AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />);
+
+    const elements = new Map<string, FakeElement>();
+    const fakeDocument = createFakeDocument(elements);
+    vi.stubGlobal('document', fakeDocument);
+    vi.stubGlobal('window', { innerWidth: 1024, innerHeight: 768 });
+
+    const modelScatterIndex = chartCapture.scatterData.findIndex((data) => data.datasets[0]?.label === 'usage_stats.analysis_model_efficiency_title');
+    expect(modelScatterIndex).toBeGreaterThanOrEqual(0);
+    const pointerPlugin = chartCapture.scatterPlugins[modelScatterIndex]?.find((plugin) => plugin.id === 'analysis-model-efficiency-tooltip-pointer');
+    expect(pointerPlugin).toBeTruthy();
+
+    const fakeChart = {
+      canvas: {
+        getBoundingClientRect: () => ({ left: 10, top: 20, right: 310, bottom: 320, width: 300, height: 300 }),
+      },
+    };
+    pointerPlugin?.beforeEvent?.(fakeChart as never, {
+      event: { type: 'mousemove', x: 100, y: 60, native: { touches: [{ clientX: 520, clientY: 360 }] } },
+      replay: false,
+      changed: false,
+      cancelable: false,
+      inChartArea: true,
+    } as never, undefined as never);
+    chartCapture.scatterOptions[modelScatterIndex]?.plugins?.tooltip?.external?.({
+      chart: fakeChart,
+      tooltip: {
+        opacity: 1,
+        caretX: 100,
+        caretY: 60,
+        dataPoints: [{ dataIndex: 0 }],
+      },
+    } as never);
+
+    const tooltipElement = elements.get('analysis-model-efficiency-tooltip');
+    expect(tooltipElement?.style.opacity).toBe('1');
+    expect(tooltipElement?.style.left).toBe('534px');
+    expect(tooltipElement?.style.top).toBe('280px');
   });
 
   it('keeps partial cost values visible and shows pricing hints near analysis charts', () => {

@@ -7,7 +7,7 @@
     radial-gradient(1200px 520px at 12% -8%, rgba($primary-color, 0.12), transparent 58%),
     radial-gradient(880px 480px at 100% 0%, rgba(0, 0, 0, 0.06), transparent 52%),
     var(--bg-secondary);
-  padding: 28px 20px 48px;
+  padding: var(--keeper-page-padding-top, 28px) var(--keeper-page-padding-x, 20px) var(--keeper-page-padding-bottom, 48px);
 
   @include mobile {
     padding: 18px 12px 32px;
@@ -19,7 +19,7 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--keeper-page-frame-gap, 18px);
 }
 
 .topBar {
@@ -29,8 +29,8 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 18px;
-  padding: 18px 20px;
+  gap: var(--keeper-top-bar-gap, 18px);
+  padding: var(--keeper-top-bar-padding-y, 18px) var(--keeper-top-bar-padding-x, 20px);
   border: 1px solid var(--border-color);
   border-radius: 24px;
   background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
@@ -57,7 +57,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 42px;
+  min-height: var(--keeper-toolbar-control-height, 42px);
   padding: 0 20px;
   border-radius: 999px;
   border: 1px solid rgba($primary-color, 0.24);
@@ -91,7 +91,7 @@
   display: inline-flex;
   align-items: stretch;
   gap: 4px;
-  min-height: 42px;
+  min-height: var(--keeper-toolbar-control-height, 42px);
   padding: 4px;
   border-radius: 999px;
   border: 1px solid var(--border-color);
@@ -132,7 +132,7 @@
 .refreshSwitcher {
   display: inline-flex;
   align-items: stretch;
-  min-height: 42px;
+  min-height: var(--keeper-toolbar-control-height, 42px);
   padding: 4px;
   border-radius: 999px;
   border: 1px solid var(--border-color);
