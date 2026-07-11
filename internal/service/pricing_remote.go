@@ -15,20 +15,19 @@ import (
 )
 
 const (
-	RemoteModelPriceFallbackURL = "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/refs/heads/main/model_prices_and_context_window.json"
-	RemoteModelPriceLiteLLMURL  = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+	RemoteModelPriceLiteLLMURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
 	remoteModelPriceRequestTimeout = 15 * time.Second
 	tokensPerPriceUnit             = 1_000_000
 )
 
 type RemoteModelPrice struct {
-	PromptPricePer1M        float64
-	CompletionPricePer1M    float64
-	CachePricePer1M         float64
-	CacheCreationPricePer1M float64
-	// PricingStyle 当远端条目能识别出 Claude 风格时为 entities.ModelPricingStyleClaude，
-	// 否则保持空串，由 UpsertModelPriceSetting 走默认 openai。
+	PromptPricePer1M     float64
+	CompletionPricePer1M float64
+	CacheReadPricePer1M  float64
+	CacheWritePricePer1M float64
+	// PricingStyle 优先根据远端 provider 或模型名识别。未能识别时保持空串，
+	// 同步已有行时保留其 style，新行则走默认 openai；不再以 cache_write 推断 Claude。
 	PricingStyle string
 }
 
@@ -189,7 +188,6 @@ func DefaultRemoteModelPriceURLs() []string {
 // earlier ones did not provide.
 func DefaultRemoteModelPriceSources() []RemoteSource {
 	return []RemoteSource{
-		{URL: RemoteModelPriceFallbackURL, Parse: ConvertRemoteModelPrices},
 		{URL: RemoteModelPriceLiteLLMURL, Parse: ConvertLiteLLMModelPrices},
 	}
 }
@@ -328,7 +326,7 @@ func ConvertRemoteModelPrices(payload any) map[string]RemoteModelPrice {
 				continue
 			}
 			modelName := extractModelName(entryRecord)
-			price, ok := convertEntryToModelPrice(entryRecord)
+			price, ok := convertEntryToModelPrice(entryRecord, modelName)
 			if modelName == "" || !ok {
 				continue
 			}
@@ -336,7 +334,7 @@ func ConvertRemoteModelPrices(payload any) map[string]RemoteModelPrice {
 		}
 	case map[string]any:
 		for modelName, entry := range value {
-			price, ok := convertEntryToModelPrice(entry)
+			price, ok := convertEntryToModelPrice(entry, modelName)
 			if strings.TrimSpace(modelName) == "" || !ok {
 				continue
 			}
@@ -425,7 +423,7 @@ func resolvePricingRecord(entryRecord map[string]any) map[string]any {
 	return entryRecord
 }
 
-func convertEntryToModelPrice(entry any) (RemoteModelPrice, bool) {
+func convertEntryToModelPrice(entry any, modelName string) (RemoteModelPrice, bool) {
 	entryRecord, ok := entry.(map[string]any)
 	if !ok {
 		return RemoteModelPrice{}, false
@@ -448,32 +446,43 @@ func convertEntryToModelPrice(entry any) (RemoteModelPrice, bool) {
 		completion = 0
 	}
 	if !hasCache {
-		cache = resolvedPrompt
+		cache = 0
 	}
 	if !hasCacheCreation {
 		cacheCreation = 0
 	}
 
 	return RemoteModelPrice{
-		PromptPricePer1M:        resolvedPrompt,
-		CompletionPricePer1M:    completion,
-		CachePricePer1M:         cache,
-		CacheCreationPricePer1M: cacheCreation,
-		PricingStyle:            inferRemotePricingStyle(pricingRecord, hasCacheCreation),
+		PromptPricePer1M:     resolvedPrompt,
+		CompletionPricePer1M: completion,
+		CacheReadPricePer1M:  cache,
+		CacheWritePricePer1M: cacheCreation,
+		PricingStyle:         inferRemotePricingStyle(pricingRecord, modelName),
 	}, true
 }
 
-// inferRemotePricingStyle 在远端目录足够明确时返回 entities.ModelPricingStyleClaude，
-// 否则返回空串，让 UpsertModelPriceSetting 走默认 openai 或保留 DB 既有值。
-// 触发条件按强→弱：litellm_provider=="anthropic"；有 cache_creation 单价。
-func inferRemotePricingStyle(record map[string]any, hasCacheCreation bool) string {
-	if provider, ok := record["litellm_provider"].(string); ok {
-		if strings.EqualFold(strings.TrimSpace(provider), "anthropic") {
+// inferRemotePricingStyle 根据 provider 和模型名判断价格类型。
+// OpenAI 模型同样可以提供 cache_write 单价，因此不能再用该字段推断 Claude。
+func inferRemotePricingStyle(record map[string]any, modelName string) string {
+	provider := ""
+	for _, key := range []string{"litellm_provider", "provider", "provider_id"} {
+		if value, ok := record[key].(string); ok && strings.TrimSpace(value) != "" {
+			provider = strings.ToLower(strings.TrimSpace(value))
+			break
+		}
+	}
+	if provider != "" {
+		if strings.Contains(provider, "anthropic") || strings.Contains(provider, "claude") {
 			return entities.ModelPricingStyleClaude
 		}
 	}
-	if hasCacheCreation {
+
+	normalizedModel := strings.ToLower(strings.TrimSpace(modelName))
+	if strings.Contains(normalizedModel, "claude") || strings.Contains(normalizedModel, "anthropic") {
 		return entities.ModelPricingStyleClaude
+	}
+	if provider != "" {
+		return entities.ModelPricingStyleOpenAI
 	}
 	return ""
 }

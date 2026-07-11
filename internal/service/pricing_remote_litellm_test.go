@@ -75,8 +75,8 @@ func TestConvertLiteLLMModelPricesCacheDefaultsToZero(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing gemini-1.5-pro: %#v", prices)
 	}
-	if got.CachePricePer1M != 0 {
-		t.Fatalf("cache must default to 0 when absent, got %v", got.CachePricePer1M)
+	if got.CacheReadPricePer1M != 0 {
+		t.Fatalf("cache must default to 0 when absent, got %v", got.CacheReadPricePer1M)
 	}
 	if !almostEqual(got.PromptPricePer1M, 1.25) {
 		t.Fatalf("version-number dot in key must not break parsing: %#v", got)
@@ -94,8 +94,8 @@ func TestConvertLiteLLMModelPricesReadsCacheReadCost(t *testing.T) {
 		},
 	})
 	got := prices["claude-3-5-sonnet-20241022"]
-	if !almostEqual(got.CachePricePer1M, 0.3) {
-		t.Fatalf("cache_read_input_token_cost should produce 0.3 per 1M, got %v", got.CachePricePer1M)
+	if !almostEqual(got.CacheReadPricePer1M, 0.3) {
+		t.Fatalf("cache_read_input_token_cost should produce 0.3 per 1M, got %v", got.CacheReadPricePer1M)
 	}
 }
 
@@ -114,29 +114,31 @@ func TestConvertLiteLLMModelPricesReadsCacheCreationCostAndClaudeStyle(t *testin
 	if !ok {
 		t.Fatalf("expected claude-sonnet-4-5 entry, got %#v", prices)
 	}
-	if !almostEqual(got.CacheCreationPricePer1M, 3.75) {
-		t.Fatalf("cache_creation_input_token_cost should produce 3.75 per 1M, got %v", got.CacheCreationPricePer1M)
+	if !almostEqual(got.CacheWritePricePer1M, 3.75) {
+		t.Fatalf("cache_creation_input_token_cost should produce 3.75 per 1M, got %v", got.CacheWritePricePer1M)
 	}
 	if got.PricingStyle != "claude" {
 		t.Fatalf("anthropic provider must produce claude style, got %q", got.PricingStyle)
 	}
 }
 
-func TestConvertLiteLLMModelPricesLeavesNonAnthropicStyleEmpty(t *testing.T) {
+func TestConvertLiteLLMModelPricesKeepsOpenAIStyleWithCacheWrite(t *testing.T) {
 	prices := ConvertLiteLLMModelPrices(map[string]any{
-		"gpt-4o": map[string]any{
-			"input_cost_per_token":  0.0000025,
-			"output_cost_per_token": 0.00001,
-			"litellm_provider":      "openai",
-			"mode":                  "chat",
+		"gpt-5.6-terra": map[string]any{
+			"input_cost_per_token":            0.0000025,
+			"output_cost_per_token":           0.000015,
+			"cache_read_input_token_cost":     0.00000025,
+			"cache_creation_input_token_cost": 0.000003125,
+			"litellm_provider":                "openai",
+			"mode":                            "chat",
 		},
 	})
-	got := prices["gpt-4o"]
-	if got.PricingStyle != "" {
-		t.Fatalf("non-anthropic provider without cache_creation should leave style empty, got %q", got.PricingStyle)
+	got := prices["gpt-5.6-terra"]
+	if got.PricingStyle != "openai" {
+		t.Fatalf("OpenAI cache write pricing must keep openai style, got %q", got.PricingStyle)
 	}
-	if got.CacheCreationPricePer1M != 0 {
-		t.Fatalf("missing cache_creation must default to 0, got %v", got.CacheCreationPricePer1M)
+	if !almostEqual(got.CacheWritePricePer1M, 3.125) {
+		t.Fatalf("expected OpenAI cache write price 3.125 per 1M, got %v", got.CacheWritePricePer1M)
 	}
 }
 
@@ -159,6 +161,9 @@ func TestConvertLiteLLMModelPricesCanonicalizesRegionPrefixes(t *testing.T) {
 	}
 	if !almostEqual(got.PromptPricePer1M, 5) || !almostEqual(got.CompletionPricePer1M, 25) {
 		t.Fatalf("canonical entry has wrong price: %#v", got)
+	}
+	if got.PricingStyle != "claude" {
+		t.Fatalf("provider-prefixed Claude model must keep claude style, got %q", got.PricingStyle)
 	}
 	if _, ok := prices["global.anthropic.claude-opus-4-7"]; !ok {
 		t.Fatalf("raw key should also remain available")

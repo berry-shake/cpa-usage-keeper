@@ -25,9 +25,8 @@ var litellmAllowedModes = map[string]struct{}{
 //   - Top-level entry "sample_spec" is a schema template, not a model.
 //   - Entries with non-text modes (embedding/image/audio/...) are skipped.
 //   - Price fields are per-token; converted to per-1M-tokens.
-//   - Missing `cache_read_input_token_cost` defaults to 0 (the generic parser
-//     defaults to the prompt price, which would silently overcharge cache
-//     hits for providers without cache discounts).
+//   - Missing `cache_read_input_token_cost` defaults to 0, matching the
+//     canonical v1.13 pricing semantics for an unspecified cache price.
 //   - Keys often carry provider/region prefixes separated by `.` (Bedrock-
 //     style: `global.anthropic.claude-opus-4-7`, `us.anthropic.claude-...`)
 //     or by `/` (`azure/gpt-4o`, `vertex_ai/gemini-1.5-pro`). The parser
@@ -64,7 +63,7 @@ func ConvertLiteLLMModelPrices(payload any) map[string]RemoteModelPrice {
 				continue
 			}
 		}
-		price, ok := convertLiteLLMEntry(entryRecord)
+		price, ok := convertLiteLLMEntry(entryRecord, rawKey)
 		if !ok {
 			continue
 		}
@@ -98,7 +97,7 @@ func ConvertLiteLLMModelPrices(payload any) map[string]RemoteModelPrice {
 	return result
 }
 
-func convertLiteLLMEntry(entry map[string]any) (RemoteModelPrice, bool) {
+func convertLiteLLMEntry(entry map[string]any, modelName string) (RemoteModelPrice, bool) {
 	prompt, hasPrompt := readFirstPrice(entry, promptPriceFields)
 	completion, hasCompletion := readFirstPrice(entry, completionPriceFields)
 	cache, hasCache := readFirstPrice(entry, cachePriceFields)
@@ -119,11 +118,11 @@ func convertLiteLLMEntry(entry map[string]any) (RemoteModelPrice, bool) {
 		cacheCreation = 0
 	}
 	return RemoteModelPrice{
-		PromptPricePer1M:        prompt,
-		CompletionPricePer1M:    completion,
-		CachePricePer1M:         cache,
-		CacheCreationPricePer1M: cacheCreation,
-		PricingStyle:            inferRemotePricingStyle(entry, hasCacheCreation),
+		PromptPricePer1M:     prompt,
+		CompletionPricePer1M: completion,
+		CacheReadPricePer1M:  cache,
+		CacheWritePricePer1M: cacheCreation,
+		PricingStyle:         inferRemotePricingStyle(entry, modelName),
 	}, true
 }
 

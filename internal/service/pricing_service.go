@@ -101,9 +101,18 @@ func (s *pricingService) SyncRemotePricing(ctx context.Context) (*RemotePricingS
 	}
 	// 把已有 model_price_settings 行的模型也并入同步范围：
 	// effectiveModels 只看 CPA backend 当前活跃模型 / usage_events DISTINCT，
-	// 会漏掉「历史定过价、当前不活跃」的模型（典型如老版本 Claude），导致同步永远
-	// 不会用新解析器纠正它们的 pricing_style / cache_creation 字段。
-	usedModels = mergeWithExistingPriceSettings(s.db, usedModels)
+	// 会漏掉「历史定过价、当前不活跃」的模型。同时保留用户手工设置的
+	// price_multiplier，远端同步只更新基础价格，不应把 multiplier 重置为 1。
+	existingSettings, settingsErr := repository.ListModelPriceSettings(s.db)
+	if settingsErr != nil {
+		logrus.WithError(settingsErr).Warn("failed to load existing price settings for sync, falling back to used models only")
+		existingSettings = nil
+	}
+	usedModels = mergeWithExistingPriceSettings(usedModels, existingSettings)
+	existingByModel := make(map[string]entities.ModelPriceSetting, len(existingSettings))
+	for _, setting := range existingSettings {
+		existingByModel[strings.TrimSpace(setting.Model)] = setting
+	}
 
 	fetcher := s.remotePricesFetcher
 	if fetcher == nil {
@@ -124,13 +133,25 @@ func (s *pricingService) SyncRemotePricing(ctx context.Context) (*RemotePricingS
 	settings := make([]entities.ModelPriceSetting, 0, len(matchedModels))
 	for _, modelName := range matchedModels {
 		price := matchedPrices[modelName]
+		pricingStyle := strings.TrimSpace(price.PricingStyle)
+		var priceMultiplier *float64
+		if existing, ok := existingByModel[modelName]; ok {
+			if pricingStyle == "" {
+				pricingStyle = existing.PricingStyle
+			}
+			if existing.PriceMultiplier != nil {
+				multiplier := *existing.PriceMultiplier
+				priceMultiplier = &multiplier
+			}
+		}
 		setting, err := repository.UpsertModelPriceSetting(s.db, repodto.ModelPriceSettingInput{
 			Model:                modelName,
-			PricingStyle:         price.PricingStyle,
+			PricingStyle:         pricingStyle,
 			PromptPricePer1M:     price.PromptPricePer1M,
 			CompletionPricePer1M: price.CompletionPricePer1M,
-			CacheReadPricePer1M:  price.CachePricePer1M,
-			CacheWritePricePer1M: price.CacheCreationPricePer1M,
+			CacheReadPricePer1M:  price.CacheReadPricePer1M,
+			CacheWritePricePer1M: price.CacheWritePricePer1M,
+			PriceMultiplier:      priceMultiplier,
 		})
 		if err != nil {
 			return nil, err
@@ -219,13 +240,7 @@ func mergeModelNames(modelLists ...[]string) []string {
 }
 
 // mergeWithExistingPriceSettings 把 model_price_settings 表已有的模型并入 sync 范围。
-// 读表失败时不阻断同步，仅退化为原 used 列表，保留可用性。
-func mergeWithExistingPriceSettings(db *gorm.DB, used []string) []string {
-	settings, err := repository.ListModelPriceSettings(db)
-	if err != nil {
-		logrus.WithError(err).Warn("failed to load existing price settings for sync, falling back to used models only")
-		return used
-	}
+func mergeWithExistingPriceSettings(used []string, settings []entities.ModelPriceSetting) []string {
 	seen := make(map[string]struct{}, len(used)+len(settings))
 	merged := make([]string, 0, len(used)+len(settings))
 	for _, modelName := range used {
