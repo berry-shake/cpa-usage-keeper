@@ -265,12 +265,15 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 | `APP_PORT` | No | `8080` | Keeper HTTP listen port |
 | `APP_BASE_PATH` | No | root path | Keeper subpath prefix, such as `/keeper`; empty means `/` |
 | `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link and CPAMC frame trust |
+| `FRAME_ANCESTOR_ORIGINS` | No | empty | Extra trusted `frame-ancestors` origins, comma-separated; each entry must be an `http://` or `https://` URL with a host |
 
 `APP_BASE_PATH` must be empty or start with `/`; for example `/cpa`. `/cpa/` is normalized to `/cpa`.
 
 `CPA_PUBLIC_URL` may be a domain, a full URL with scheme, or a relative path, such as `https://cpa.example.com`, `https://cpa.example.com/cpa/`, or `/cpa/`. The frontend appends `management.html` automatically and handles trailing `/` or values that already end in `management.html`. When unset, the "Back to CPA" link points to `/management.html` on the current browser origin. If CPA and Keeper use different public domains, ports, or paths, set `CPA_PUBLIC_URL` explicitly.
 
 For CPAMC frame trust, `CPA_PUBLIC_URL` must be an explicit `http://` or `https://` URL with a host. Relative paths only affect same-origin "Back to CPA" navigation and do not add an external `frame-ancestors` source.
+
+To trust additional embedding origins beyond `CPA_PUBLIC_URL` (for example a separately deployed management panel domain), set `FRAME_ANCESTOR_ORIGINS` to a comma-separated list, such as `FRAME_ANCESTOR_ORIGINS=https://cpamc.example.com,http://10.0.0.2:18317`. Each entry is normalized to `scheme://host` and merged (deduplicated) with the `CPA_PUBLIC_URL` origin; invalid entries fail at startup.
 
 `CPA_BASE_URL` is only used by the server to call CPA, so it can be a Docker service name or private network address. It is not used for browser navigation or frame trust.
 
@@ -339,7 +342,7 @@ Security and data notes:
 - For public deployments, enable `AUTH_ENABLED=true` and terminate HTTPS at your reverse proxy.
 - Login session hashes are stored in SQLite and remain valid across service restarts until logout or `AUTH_SESSION_TTL` expiry.
 - CPAMC embedded mode uses a separate embed session. Keeper first tries the `HttpOnly` `cpa_usage_keeper_embed_session` cookie, then falls back to an embed-only request header when the browser cannot persist the embedded cookie. The normal dashboard session keeps `SameSite=Lax` and is not reused by the embedded view.
-- Same-origin CPAMC embedding works with the default `frame-ancestors 'self'`. For cross-origin CPAMC embedding, set `CPA_PUBLIC_URL` to the public CPA/CPAMC origin; Keeper uses only `CPA_PUBLIC_URL` for the external `frame-ancestors` source, never `CPA_BASE_URL`.
+- Same-origin CPAMC embedding works with the default `frame-ancestors 'self'`. For cross-origin CPAMC embedding, set `CPA_PUBLIC_URL` to the public CPA/CPAMC origin, or add more trusted origins via `FRAME_ANCESTOR_ORIGINS`; Keeper never uses `CPA_BASE_URL` as a `frame-ancestors` source.
 - Cross-site embedded login works best over HTTPS with browser support for third-party or partitioned cookies. When that cookie path is unavailable, CPAMC embedded mode falls back to a per-tab header token stored in browser session storage.
 - Redis inbox raw messages are cleaned up automatically: successful rows are kept until the end of the current day, and failed rows are kept for 7 days.
 

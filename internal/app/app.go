@@ -250,10 +250,20 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 
 func frameAncestorOrigins(cfg config.Config) []string {
 	// 只信任显式浏览器公开地址；CPA_BASE_URL 可能是内网地址，不能进入 frame-ancestors。
+	var origins []string
+	seen := map[string]struct{}{}
 	if origin, ok := publicOrigin(cfg.CPAPublicURL); ok {
-		return []string{origin}
+		seen[origin] = struct{}{}
+		origins = append(origins, origin)
 	}
-	return nil
+	for _, origin := range cfg.FrameAncestorOrigins {
+		if _, ok := seen[origin]; ok {
+			continue
+		}
+		seen[origin] = struct{}{}
+		origins = append(origins, origin)
+	}
+	return origins
 }
 
 func publicOrigin(candidate string) (string, bool) {

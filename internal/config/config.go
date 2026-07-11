@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -40,6 +41,8 @@ type Config struct {
 	AppBasePath string
 	// CPAPublicURL 是浏览器访问 CPA 的公开地址；为空时前端按同源根路径跳转。
 	CPAPublicURL string
+	// FrameAncestorOrigins 是额外信任的 frame-ancestors 来源，已归一化为 scheme://host。
+	FrameAncestorOrigins []string
 	// TLSEnabled 控制是否以 HTTPS 模式启动 HTTP 服务。
 	TLSEnabled bool
 	// TLSCertFile 是 HTTPS 证书文件路径。
@@ -253,12 +256,18 @@ func Load(options LoadOptions) (*Config, error) {
 		return nil, fmt.Errorf("APP_BASE_PATH is invalid: %w", err)
 	}
 
+	frameAncestorOrigins, err := parseFrameAncestorOrigins(os.Getenv("FRAME_ANCESTOR_ORIGINS"))
+	if err != nil {
+		return nil, err
+	}
+
 	workDir := getString("WORK_DIR", DefaultWorkDir)
 
 	cfg := &Config{
 		AppPort:                     getString("APP_PORT", "8080"),
 		AppBasePath:                 appBasePath,
 		CPAPublicURL:                strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
+		FrameAncestorOrigins:        frameAncestorOrigins,
 		TLSEnabled:                  tlsEnabled,
 		TLSCertFile:                 strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
 		TLSKeyFile:                  strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
@@ -402,6 +411,28 @@ func resolveRelativePath(baseDir, value string) string {
 		return value
 	}
 	return filepath.Join(baseDir, value)
+}
+
+func parseFrameAncestorOrigins(value string) ([]string, error) {
+	var origins []string
+	seen := map[string]struct{}{}
+	for _, entry := range strings.Split(value, ",") {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, fmt.Errorf("FRAME_ANCESTOR_ORIGINS entry %q must be an http:// or https:// URL with a host", trimmed)
+		}
+		origin := parsed.Scheme + "://" + parsed.Host
+		if _, ok := seen[origin]; ok {
+			continue
+		}
+		seen[origin] = struct{}{}
+		origins = append(origins, origin)
+	}
+	return origins, nil
 }
 
 func normalizeBasePath(value string) (string, error) {

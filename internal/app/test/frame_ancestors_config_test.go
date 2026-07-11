@@ -50,6 +50,47 @@ func TestFrameAncestorsUsesCPAPublicURLOrigin(t *testing.T) {
 	}
 }
 
+func TestFrameAncestorsMergesConfiguredOrigins(t *testing.T) {
+	cases := []struct {
+		name      string
+		publicURL string
+		extra     []string
+		want      []string
+	}{
+		{
+			name:      "extra origins only",
+			publicURL: "",
+			extra:     []string{"https://cpamc.example.com", "http://10.0.0.2:18317"},
+			want:      []string{"https://cpamc.example.com", "http://10.0.0.2:18317"},
+		},
+		{
+			name:      "public URL origin first then extras",
+			publicURL: "https://cpa.example.com/cpa/",
+			extra:     []string{"https://cpamc.example.com"},
+			want:      []string{"https://cpa.example.com", "https://cpamc.example.com"},
+		},
+		{
+			name:      "duplicate of public URL origin removed",
+			publicURL: "https://cpa.example.com/cpa/",
+			extra:     []string{"https://cpa.example.com", "https://cpamc.example.com"},
+			want:      []string{"https://cpa.example.com", "https://cpamc.example.com"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testFrameAncestorConfig(t)
+			cfg.CPAPublicURL = tc.publicURL
+			cfg.FrameAncestorOrigins = tc.extra
+
+			origins := frameAncestorOrigins(cfg)
+			if !reflect.DeepEqual(origins, tc.want) {
+				t.Fatalf("expected frame ancestor origins %#v, got %#v", tc.want, origins)
+			}
+		})
+	}
+}
+
 func TestFrameAncestorsNeverFallsBackToCPABaseURL(t *testing.T) {
 	for _, publicURL := range []string{"", "/cpa/", "ftp://cpa.example.com", "cpa.example.com:8443/", "//cpa.example.com"} {
 		t.Run("public URL "+publicURL, func(t *testing.T) {
