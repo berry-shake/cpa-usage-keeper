@@ -132,7 +132,7 @@ func TestPricingServiceSyncRemotePricingRefreshesInactiveModelsWithExistingPrice
 		PricingStyle:         "openai",
 		PromptPricePer1M:     3,
 		CompletionPricePer1M: 15,
-		CachePricePer1M:      0.3,
+		CacheReadPricePer1M:  0.3,
 	}); err != nil {
 		t.Fatalf("seed legacy price setting: %v", err)
 	}
@@ -167,8 +167,8 @@ func TestPricingServiceSyncRemotePricingRefreshesInactiveModelsWithExistingPrice
 	if settings[0].PricingStyle != "claude" {
 		t.Fatalf("legacy row should be upgraded to claude style, got %q", settings[0].PricingStyle)
 	}
-	if settings[0].CacheCreationPricePer1M != 3.75 {
-		t.Fatalf("legacy row should pick up cache_creation 3.75/1M, got %v", settings[0].CacheCreationPricePer1M)
+	if settings[0].CacheWritePricePer1M != 3.75 {
+		t.Fatalf("legacy row should pick up cache_creation 3.75/1M, got %v", settings[0].CacheWritePricePer1M)
 	}
 }
 
@@ -216,8 +216,8 @@ func TestPricingServiceSyncRemotePricingPersistsClaudeStyleAndCacheCreation(t *t
 	if saved.PricingStyle != "claude" {
 		t.Fatalf("expected claude pricing style, got %q", saved.PricingStyle)
 	}
-	if saved.CacheCreationPricePer1M != 3.75 {
-		t.Fatalf("expected cache_creation 3.75/1M, got %v", saved.CacheCreationPricePer1M)
+	if saved.CacheWritePricePer1M != 3.75 {
+		t.Fatalf("expected cache_creation 3.75/1M, got %v", saved.CacheWritePricePer1M)
 	}
 }
 

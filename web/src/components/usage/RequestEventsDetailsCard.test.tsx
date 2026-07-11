@@ -413,7 +413,7 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('Input');
     expect(html).toContain('Output');
     expect(html).toContain('Reasoning');
-    expect(html).toContain('Cached');
+    expect(html).toContain('Cache Read');
     expect(html).toContain('Total Tokens');
     expect(html).toContain('Total Cost');
   });

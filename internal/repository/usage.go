@@ -450,7 +450,6 @@ func ListUsageCredentialStatsWithFilter(db *gorm.DB, filter dto.UsageQueryFilter
 			Tokens: helper.UsageTokenCostInput{
 				InputTokens:         rows[index].InputTokens,
 				OutputTokens:        rows[index].OutputTokens,
-				CachedTokens:        rows[index].CachedTokens,
 				CacheReadTokens:     rows[index].CacheReadTokens,
 				CacheCreationTokens: rows[index].CacheCreationTokens,
 			},

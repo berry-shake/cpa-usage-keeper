@@ -1463,8 +1463,8 @@ export function RequestEventsDetailsCard({
                       <dd>{row.reasoningTokens.toLocaleString()}</dd>
                     </div>
                     <div>
-                      <dt>{t('usage_stats.cached_tokens')}</dt>
-                      <dd>{row.cachedTokens.toLocaleString()}</dd>
+                      <dt>{t('usage_stats.cache_read_tokens')}</dt>
+                      <dd>{row.cacheReadTokens.toLocaleString()}</dd>
                     </div>
                     <div>
                       <dt>{t('usage_stats.total_tokens')}</dt>

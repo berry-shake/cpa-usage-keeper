@@ -1,10 +1,10 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconChevronDown } from '@/components/ui/icons';
-import { calculateCacheRate, formatCompactNumber, formatUsd } from '@/utils/usage';
+import { calculateCacheReadRate, formatCompactNumber, formatUsd } from '@/utils/usage';
 import type { UsageCredential } from '@/lib/types';
 import {
-  cacheRateTone,
+  cacheReadRateTone,
   CredentialSectionShell,
   formatCredentialNumber,
   formatCredentialPercent,
@@ -56,6 +56,7 @@ export function buildCredentialModelRows(models: UsageCredential['models'] = [])
       const total = Number(model.total_count) || success + failure;
       const inputTokens = Number(model.input_tokens) || 0;
       const cachedTokens = Number(model.cached_tokens) || 0;
+      const cacheReadTokens = Number(model.cache_read_tokens) || 0;
       return {
         model: String(model.model ?? '').trim() || 'unknown',
         success,
@@ -65,7 +66,7 @@ export function buildCredentialModelRows(models: UsageCredential['models'] = [])
         tokens: Number(model.total_tokens) || 0,
         inputTokens,
         cachedTokens,
-        cacheRate: calculateCacheRate({ inputTokens, cachedTokens }),
+        cacheRate: calculateCacheReadRate({ inputTokens, cacheReadTokens }),
         cost: Number(model.total_cost) || 0,
         costAvailable: model.cost_available === true,
       };
@@ -89,6 +90,7 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
       const cost = Number(credential.total_cost) || 0;
       const inputTokens = Number(credential.input_tokens) || 0;
       const cachedTokens = Number(credential.cached_tokens) || 0;
+      const cacheReadTokens = Number(credential.cache_read_tokens) || 0;
       return {
         key,
         displayName,
@@ -100,7 +102,7 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
         tokens: Number(credential.total_tokens) || 0,
         inputTokens,
         cachedTokens,
-        cacheRate: calculateCacheRate({ inputTokens, cachedTokens }),
+        cacheRate: calculateCacheReadRate({ inputTokens, cacheReadTokens }),
         cost,
         costAvailable,
         models: buildCredentialModelRows(credential.models),
@@ -148,7 +150,7 @@ function successRateValueClass(rate: number): string {
 }
 
 function cacheRateValueClass(rate: number | null): string {
-  const tone = cacheRateTone(rate);
+  const tone = cacheReadRateTone(rate);
   switch (tone) {
     case 'success':
       return styles.metricValueSuccess;

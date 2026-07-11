@@ -104,7 +104,7 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 		Model:                "claude-sonnet",
 		PromptPricePer1M:     10,
 		CompletionPricePer1M: 20,
-		CachePricePer1M:      1,
+		CacheReadPricePer1M:  1,
 	}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
@@ -113,13 +113,14 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 			EventKey:     "credential-cost-1",
 			APIGroupKey:  "provider-a",
 			Model:        "claude-sonnet",
-			Timestamp:    time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
-			Source:       "source-a",
-			AuthIndex:    "1",
-			InputTokens:  250,
-			OutputTokens: 100,
-			CachedTokens: 50,
-			TotalTokens:  400,
+			Timestamp:       time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+			Source:          "source-a",
+			AuthIndex:       "1",
+			InputTokens:     250,
+			OutputTokens:    100,
+			CachedTokens:    50,
+			CacheReadTokens: 50,
+			TotalTokens:     400,
 		},
 		{
 			EventKey:     "credential-cost-2",
@@ -166,12 +167,12 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 func TestUsageCredentialStatsAppliesClaudeCachePricing(t *testing.T) {
 	db := openUsageTestDatabase(t)
 	if _, err := UpsertModelPriceSetting(db, repodto.ModelPriceSettingInput{
-		Model:                   "claude-opus",
-		PricingStyle:            string(entities.ModelPricingStyleClaude),
-		PromptPricePer1M:        15,
-		CompletionPricePer1M:    75,
-		CachePricePer1M:         1.5,
-		CacheCreationPricePer1M: 18.75,
+		Model:                "claude-opus",
+		PricingStyle:         string(entities.ModelPricingStyleClaude),
+		PromptPricePer1M:     15,
+		CompletionPricePer1M: 75,
+		CacheReadPricePer1M:  1.5,
+		CacheWritePricePer1M: 18.75,
 	}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
