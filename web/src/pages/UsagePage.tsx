@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
-import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageEvent, UsageSourceFilterOption, VersionResponse } from '@/lib/types';
+import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, VersionResponse } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
@@ -33,7 +33,6 @@ import {
 import {
   RequestEventsDetailsCard,
   REQUEST_EVENT_COLUMN_IDS,
-  normalizeRequestEventVisibleColumnIds,
   type RequestEventColumnId,
 } from '@/components/usage/RequestEventsDetailsCard';
 import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
@@ -84,7 +83,7 @@ const DEFAULT_USAGE_TAB: UsageTab = 'overview';
 const USAGE_TAB_STORAGE_KEY = 'cli-proxy-usage-tab-v1';
 const REQUEST_EVENTS_PAGE_SIZES = [20, 50, 100, 500, 1000] as const;
 const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 100;
-const REQUEST_EVENTS_PREFERENCES_VERSION = 3;
+const REQUEST_EVENTS_PREFERENCES_VERSION = 5;
 const ALL_REQUEST_EVENTS_FILTER = '__all__';
 const OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
 export const CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS = 60_000;
@@ -202,9 +201,117 @@ const buildDefaultRequestEventsPreferences = (): RequestEventsPreferences => ({
   visibleColumnIds: [...REQUEST_EVENT_COLUMN_IDS],
 });
 
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_WITHOUT_MODEL_ALIAS = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'model_alias');
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_WITHOUT_SPEED_MODE = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'service_tier');
-const LEGACY_REQUEST_EVENT_COLUMN_IDS_WITHOUT_SPEED_MODE_AND_MODEL_ALIAS = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'service_tier' && columnId !== 'model_alias');
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V3 = [
+  'timestamp',
+  'api_key',
+  'source',
+  'model',
+  'model_alias',
+  'reasoning_effort',
+  'service_tier',
+  'result',
+  'request_type',
+  'endpoint',
+  'ttft',
+  'latency',
+  'speed',
+  'input_tokens',
+  'output_tokens',
+  'reasoning_tokens',
+  'cached_tokens',
+  'cache_rate',
+  'total_tokens',
+  'total_cost',
+] as const;
+
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V4 = [
+  'timestamp',
+  'api_key',
+  'source',
+  'model',
+  'model_alias',
+  'reasoning_effort',
+  'service_tier',
+  'result',
+  'request_type',
+  'endpoint',
+  'ttft',
+  'latency',
+  'speed',
+  'input_tokens',
+  'output_tokens',
+  'reasoning_tokens',
+  'cache_read_tokens',
+  'cache_creation_tokens',
+  'cache_rate',
+  'total_tokens',
+  'total_cost',
+] as const;
+
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V2 = [
+  'timestamp',
+  'api_key',
+  'source',
+  'model',
+  'reasoning_effort',
+  'service_tier',
+  'result',
+  'request_type',
+  'endpoint',
+  'ttft',
+  'latency',
+  'speed',
+  'input_tokens',
+  'output_tokens',
+  'reasoning_tokens',
+  'cached_tokens',
+  'cache_rate',
+  'total_tokens',
+  'total_cost',
+] as const;
+
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V1 = [
+  'timestamp',
+  'api_key',
+  'source',
+  'model',
+  'reasoning_effort',
+  'result',
+  'request_type',
+  'endpoint',
+  'ttft',
+  'latency',
+  'speed',
+  'input_tokens',
+  'output_tokens',
+  'reasoning_tokens',
+  'cached_tokens',
+  'cache_rate',
+  'total_tokens',
+  'total_cost',
+] as const;
+
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V1_WITH_MODEL_ALIAS = [
+  'timestamp',
+  'api_key',
+  'source',
+  'model',
+  'model_alias',
+  'reasoning_effort',
+  'result',
+  'request_type',
+  'endpoint',
+  'ttft',
+  'latency',
+  'speed',
+  'input_tokens',
+  'output_tokens',
+  'reasoning_tokens',
+  'cached_tokens',
+  'cache_rate',
+  'total_tokens',
+  'total_cost',
+] as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -236,32 +343,44 @@ const normalizeRequestEventPreferenceFilters = (value: unknown): RequestEventFil
 };
 
 const hasSameRequestEventColumnOrder = (
-  left: readonly RequestEventColumnId[],
-  right: readonly RequestEventColumnId[]
+  left: readonly string[],
+  right: readonly string[]
 ): boolean => left.length === right.length && left.every((columnId, index) => columnId === right[index]);
+
+const migrateRequestEventColumnId = (value: unknown): RequestEventColumnId | null => {
+  if (value === 'cached_tokens') return 'cache_read_tokens';
+  if (value === 'cache_rate') return 'cache_read_rate';
+  return isRequestEventColumnId(value) ? value : null;
+};
 
 const normalizeRequestEventPreferenceColumnIds = (value: unknown, version: unknown): RequestEventColumnId[] => {
   if (!Array.isArray(value)) {
     return [...REQUEST_EVENT_COLUMN_IDS];
   }
-  const normalized = normalizeRequestEventVisibleColumnIds(value.filter(isRequestEventColumnId));
-  if (
-    version !== REQUEST_EVENTS_PREFERENCES_VERSION &&
-    hasSameRequestEventColumnOrder(normalized, LEGACY_REQUEST_EVENT_COLUMN_IDS_WITHOUT_MODEL_ALIAS)
-  ) {
+
+  const rawColumnIds = value.filter((columnId): columnId is string => typeof columnId === 'string');
+  const legacyFullSelection = version !== REQUEST_EVENTS_PREFERENCES_VERSION && (
+    (version === 4 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V4)) ||
+    (version === 3 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V3)) ||
+    (version === 2 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V2)) ||
+    (typeof version === 'number' && version < 2 && (
+      hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V1) ||
+      hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V1_WITH_MODEL_ALIAS)
+    ))
+  );
+  if (legacyFullSelection) {
     return [...REQUEST_EVENT_COLUMN_IDS];
   }
-  if (
-    typeof version === 'number' &&
-    version < 2 &&
-    (
-      hasSameRequestEventColumnOrder(normalized, LEGACY_REQUEST_EVENT_COLUMN_IDS_WITHOUT_SPEED_MODE) ||
-      hasSameRequestEventColumnOrder(normalized, LEGACY_REQUEST_EVENT_COLUMN_IDS_WITHOUT_SPEED_MODE_AND_MODEL_ALIAS)
-    )
-  ) {
-    return [...REQUEST_EVENT_COLUMN_IDS];
+
+  const seen = new Set<RequestEventColumnId>();
+  const normalized: RequestEventColumnId[] = [];
+  for (const rawColumnId of rawColumnIds) {
+    const columnId = migrateRequestEventColumnId(rawColumnId);
+    if (columnId === null || seen.has(columnId)) continue;
+    seen.add(columnId);
+    normalized.push(columnId);
   }
-  return normalized;
+  return normalized.length > 0 ? normalized : [...REQUEST_EVENT_COLUMN_IDS];
 };
 
 export const normalizeRequestEventsPreferences = (value: unknown): RequestEventsPreferences => {
@@ -348,6 +467,19 @@ type UsagePageVersionInfoOptions = {
   onAuthRequired?: () => void;
 };
 
+type RequestLogDownloadGenerationRef = {
+  current: number;
+};
+
+type UsageEventRequestLogDownloadOptions = {
+  eventId: string;
+  generationRef: RequestLogDownloadGenerationRef;
+  createDownloadURL?: (eventId: string) => Promise<string>;
+  triggerDownload?: (url: string) => void;
+  setDownloading: (downloading: boolean) => void;
+  showDownloadError: (error: unknown) => void;
+};
+
 export const loadUsagePageVersionInfo = async ({
   loadVersion,
   signal,
@@ -370,6 +502,32 @@ export const loadUsagePageVersionInfo = async ({
 
 export const refreshPageData = async ({ refreshActiveTab }: RefreshPageDataOptions) => {
   await refreshActiveTab();
+};
+
+export const runUsageEventRequestLogDownload = async ({
+  eventId,
+  generationRef,
+  createDownloadURL = createUsageEventRequestLogDownloadURL,
+  triggerDownload = triggerBrowserURLDownload,
+  setDownloading,
+  showDownloadError,
+}: UsageEventRequestLogDownloadOptions) => {
+  const normalizedEventId = eventId.trim();
+  if (!normalizedEventId) return;
+  const generation = generationRef.current;
+  setDownloading(true);
+  try {
+    const downloadURL = await createDownloadURL(normalizedEventId);
+    if (generationRef.current !== generation) return;
+    triggerDownload(downloadURL);
+  } catch (error) {
+    if (generationRef.current !== generation) return;
+    showDownloadError(error);
+  } finally {
+    if (generationRef.current === generation) {
+      setDownloading(false);
+    }
+  }
 };
 
 export const getOverviewDisplayLoading = ({ loading, hasUsage }: { loading: boolean; hasUsage: boolean }) => loading && !hasUsage;
@@ -704,6 +862,16 @@ export const triggerBrowserFileDownload = (blob: Blob, filename: string) => {
   window.URL.revokeObjectURL(url);
 };
 
+export const triggerBrowserURLDownload = (url: string) => {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = '';
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
+
 export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -807,8 +975,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [eventsVisibleColumnIds, setEventsVisibleColumnIds] = useState<RequestEventColumnId[]>(initialRequestEventsPreferences.visibleColumnIds);
   const [eventsExportingFormat, setEventsExportingFormat] = useState<UsageEventsExportFormat | null>(null);
   const [eventsFilterOptionsLoaded, setEventsFilterOptionsLoaded] = useState(false);
+  const [requestLogResponse, setRequestLogResponse] = useState<UsageEventRequestLogResponse | null>(null);
+  const [requestLogError, setRequestLogError] = useState('');
+  const [requestLogLoadingEventId, setRequestLogLoadingEventId] = useState<string | null>(null);
+  const [requestLogDownloading, setRequestLogDownloading] = useState(false);
+  const requestLogAccessEnabled = status?.cpa_request_log_access_enabled === true;
+  const requestLogDownloadGenerationRef = useRef(0);
   const eventsRequestControllerRef = useRef<AbortController | null>(null);
   const eventsFilterOptionsRequestControllerRef = useRef<AbortController | null>(null);
+  const requestLogControllerRef = useRef<AbortController | null>(null);
   const [manualRefreshLoading, setManualRefreshLoading] = useState(false);
   const [pageVisible, setPageVisible] = useState(isUsagePageVisible);
   const showTopNotice = useCallback((kind: TopNoticeKind, message: string) => {
@@ -1461,6 +1636,71 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     }
   }, [eventsModelFilter, eventsResultFilter, eventsSourceFilter, getEventQueryWindow, onAuthRequired, selectedApiKeyId, showTopNotice, t, timeRange]);
 
+  const handleRequestLogOpen = useCallback(async (event: UsageEvent) => {
+    if (!requestLogAccessEnabled) return;
+    const eventId = String(event.id ?? '').trim();
+    if (!eventId) {
+      setRequestLogResponse(null);
+      setRequestLogError(t('usage_stats.request_events_log_missing_event'));
+      return;
+    }
+    requestLogControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestLogControllerRef.current = controller;
+    setRequestLogLoadingEventId(eventId);
+    setRequestLogResponse(null);
+    setRequestLogError('');
+    try {
+      const response = await fetchUsageEventRequestLog(eventId, controller.signal);
+      if (requestLogControllerRef.current !== controller) return;
+      setRequestLogResponse(response);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequired?.();
+        return;
+      }
+      const missing = error instanceof ApiError && error.status === 404;
+      setRequestLogError(
+        missing
+          ? t('usage_stats.request_events_log_unavailable')
+          : t('usage_stats.request_events_log_load_failed')
+      );
+    } finally {
+      if (requestLogControllerRef.current === controller) {
+        requestLogControllerRef.current = null;
+        setRequestLogLoadingEventId(null);
+      }
+    }
+  }, [onAuthRequired, requestLogAccessEnabled, t]);
+
+  const handleRequestLogClose = useCallback(() => {
+    requestLogDownloadGenerationRef.current += 1;
+    requestLogControllerRef.current?.abort();
+    requestLogControllerRef.current = null;
+    setRequestLogLoadingEventId(null);
+    setRequestLogResponse(null);
+    setRequestLogError('');
+    setRequestLogDownloading(false);
+  }, []);
+
+  const handleRequestLogDownload = useCallback(async (eventId: string) => {
+    if (!requestLogAccessEnabled) return;
+    requestLogDownloadGenerationRef.current += 1;
+    await runUsageEventRequestLogDownload({
+      eventId,
+      generationRef: requestLogDownloadGenerationRef,
+      setDownloading: setRequestLogDownloading,
+      showDownloadError: (error) => {
+        if (error instanceof ApiError && error.status === 401) {
+          onAuthRequired?.();
+          return;
+        }
+        showTopNotice('error', t('notification.download_failed'));
+      },
+    });
+  }, [onAuthRequired, requestLogAccessEnabled, showTopNotice, t]);
+
   const refreshActiveTab = useCallback(async () => {
     if (activeTab === 'events') {
       await Promise.all([loadEventFilterOptions(), loadEvents()]);
@@ -1570,26 +1810,45 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     onRefreshError: handleAutoRefreshError,
   }), [autoRefreshEnabled, handleAutoRefreshError, refreshAutoRefreshTab]);
 
-  useHeaderRefresh(refreshActiveTab);
+	  useHeaderRefresh(refreshActiveTab);
+
+  useEffect(() => () => {
+    requestLogDownloadGenerationRef.current += 1;
+    requestLogControllerRef.current?.abort();
+    requestLogControllerRef.current = null;
+  }, []);
+
+	  useEffect(() => {
+	    if (activeTab === 'events') return;
+	    handleRequestLogClose();
+	  }, [activeTab, handleRequestLogClose]);
+
+	  useEffect(() => {
+	    if (activeTab !== 'events') {
+      eventsFilterOptionsRequestControllerRef.current?.abort();
+      eventsFilterOptionsRequestControllerRef.current = null;
+      return;
+    }
+    void loadEventFilterOptions();
+    return () => {
+      eventsFilterOptionsRequestControllerRef.current?.abort();
+      eventsFilterOptionsRequestControllerRef.current = null;
+    };
+  }, [activeTab, loadEventFilterOptions]);
 
   useEffect(() => {
     if (activeTab !== 'events') {
       eventsRequestControllerRef.current?.abort();
       eventsRequestControllerRef.current = null;
-      eventsFilterOptionsRequestControllerRef.current?.abort();
-      eventsFilterOptionsRequestControllerRef.current = null;
       setEventsLoading(false);
       return;
     }
-    void loadEventFilterOptions();
     void loadEvents();
     return () => {
       eventsRequestControllerRef.current?.abort();
       eventsRequestControllerRef.current = null;
-      eventsFilterOptionsRequestControllerRef.current?.abort();
-      eventsFilterOptionsRequestControllerRef.current = null;
     };
-  }, [activeTab, loadEventFilterOptions, loadEvents]);
+  }, [activeTab, loadEvents]);
 
   useEffect(() => {
     if (activeTab !== 'analysis') {
@@ -1685,7 +1944,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     tokensSparkline,
     rpmSparkline,
     tpmSparkline,
-    cachedRateSparkline,
+    cacheReadRateSparkline,
     costSparkline
   } = useSparklines({ usage, loading });
 
@@ -1989,7 +2248,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                     tokens: tokensSparkline,
                     rpm: rpmSparkline,
                     tpm: tpmSparkline,
-                    cachedRate: cachedRateSparkline,
+                    cacheReadRate: cacheReadRateSparkline,
                     cost: costSparkline
                   }}
                 />
@@ -2041,6 +2300,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   onResultFilterChange={handleEventsResultFilterChange}
                   onExport={handleEventsExport}
                   onVisibleColumnIdsChange={setEventsVisibleColumnIds}
+                  requestLogAccessEnabled={requestLogAccessEnabled}
+                  onRequestLogOpen={handleRequestLogOpen}
+                  requestLogLoadingEventId={requestLogLoadingEventId}
+                  requestLogResponse={requestLogResponse}
+                  requestLogError={requestLogError}
+                  onRequestLogClose={handleRequestLogClose}
+                  onRequestLogDownload={handleRequestLogDownload}
+                  requestLogDownloading={requestLogDownloading}
                 />
               </>
             )}

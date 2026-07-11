@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"cpa-usage-keeper/internal/timeutil"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type usageEventsResponse struct {
@@ -50,6 +53,7 @@ type usageEventPayload struct {
 	SourceRaw       string                 `json:"source_raw,omitempty"`
 	SourceType      string                 `json:"source_type,omitempty"`
 	AuthIndex       string                 `json:"auth_index,omitempty"`
+	RequestID       string                 `json:"request_id,omitempty"`
 	IsDelete        bool                   `json:"isDelete,omitempty"`
 	Failed          bool                   `json:"failed"`
 	LatencyMS       int64                  `json:"latency_ms"`
@@ -65,10 +69,29 @@ type usageEventTokenPayload struct {
 	InputTokens         int64 `json:"input_tokens"`
 	OutputTokens        int64 `json:"output_tokens"`
 	ReasoningTokens     int64 `json:"reasoning_tokens"`
-	CachedTokens        int64 `json:"cached_tokens"`
 	CacheReadTokens     int64 `json:"cache_read_tokens"`
 	CacheCreationTokens int64 `json:"cache_creation_tokens"`
 	TotalTokens         int64 `json:"total_tokens"`
+}
+
+type usageEventRequestLogPayload struct {
+	EventID      string                        `json:"event_id"`
+	RequestID    string                        `json:"request_id,omitempty"`
+	Filename     string                        `json:"filename,omitempty"`
+	Available    bool                          `json:"available"`
+	Previewable  bool                          `json:"previewable"`
+	TooLarge     bool                          `json:"too_large,omitempty"`
+	Downloadable bool                          `json:"downloadable,omitempty"`
+	Sections     []usageEventRequestLogSection `json:"sections"`
+}
+
+type usageEventRequestLogSection struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+type usageEventRequestLogDownloadTokenPayload struct {
+	DownloadURL string `json:"download_url"`
 }
 
 type usageEventExportPayload struct {
@@ -93,10 +116,9 @@ type usageEventExportPayload struct {
 	InputTokens         int64    `json:"input_tokens"`
 	OutputTokens        int64    `json:"output_tokens"`
 	ReasoningTokens     int64    `json:"reasoning_tokens"`
-	CachedTokens        int64    `json:"cached_tokens"`
 	CacheReadTokens     int64    `json:"cache_read_tokens"`
 	CacheCreationTokens int64    `json:"cache_creation_tokens"`
-	CacheRate           *float64 `json:"cache_rate"`
+	CacheReadRate       *float64 `json:"cache_read_rate"`
 	TotalTokens         int64    `json:"total_tokens"`
 	CostUSD             float64  `json:"cost_usd"`
 }
@@ -108,6 +130,9 @@ func registerUsageEventsRoute(
 	usageProvider service.UsageProvider,
 	usageIdentityProvider service.UsageIdentityProvider,
 	cpaAPIKeyProvider service.CPAAPIKeyProvider,
+	requestLogProvider service.RequestLogProvider,
+	requestLogDownloadTokens *requestLogDownloadTokenStore,
+	requestLogAccessEnabled bool,
 ) {
 	router.GET("/usage/events/filters/models", func(c *gin.Context) {
 		models, err := loadUsageEventModelFilterOptions(c, usageProvider)
@@ -168,6 +193,55 @@ func registerUsageEventsRoute(
 		})
 	})
 
+	router.GET("/usage/events/:id/request-log", func(c *gin.Context) {
+		if !requestLogAccessEnabled {
+			writeUsageEventRequestLogAccessDisabled(c)
+			return
+		}
+		if requestLogProvider == nil {
+			writeInternalError(c, "request log provider is not configured", nil)
+			return
+		}
+		eventID, ok := parseUsageEventRequestLogEventID(c)
+		if !ok {
+			return
+		}
+		response, err := requestLogProvider.GetUsageEventRequestLog(c.Request.Context(), eventID)
+		if err != nil {
+			writeUsageEventRequestLogError(c, err)
+			return
+		}
+		setNoStoreHeaders(c)
+		c.JSON(http.StatusOK, buildUsageEventRequestLogPayload(response))
+	})
+
+	router.POST("/usage/events/:id/request-log/download-token", func(c *gin.Context) {
+		if !requestLogAccessEnabled {
+			writeUsageEventRequestLogAccessDisabled(c)
+			return
+		}
+		if requestLogProvider == nil {
+			writeInternalError(c, "request log provider is not configured", nil)
+			return
+		}
+		if requestLogDownloadTokens == nil {
+			writeInternalError(c, "request log download token store is not configured", nil)
+			return
+		}
+		eventID, ok := parseUsageEventRequestLogEventID(c)
+		if !ok {
+			return
+		}
+		token, err := requestLogDownloadTokens.issue(eventID)
+		if err != nil {
+			writeInternalError(c, "issue request log download token failed", err)
+			return
+		}
+		downloadURL := strings.TrimSuffix(c.Request.URL.Path, "/download-token") + "/download-file?token=" + url.QueryEscape(token)
+		setNoStoreHeaders(c)
+		c.JSON(http.StatusOK, usageEventRequestLogDownloadTokenPayload{DownloadURL: downloadURL})
+	})
+
 	router.GET("/usage/events/export", func(c *gin.Context) {
 		format := strings.ToLower(strings.TrimSpace(c.Query("format")))
 		if format == "" {
@@ -220,6 +294,82 @@ func registerUsageEventsRoute(
 	})
 }
 
+func registerUsageEventRequestLogDownloadTokenRoutes(
+	router gin.IRoutes,
+	requestLogProvider service.RequestLogProvider,
+	requestLogDownloadTokens *requestLogDownloadTokenStore,
+	requestLogAccessEnabled bool,
+) {
+	router.GET("/usage/events/:id/request-log/download-file", func(c *gin.Context) {
+		if !requestLogAccessEnabled {
+			writeUsageEventRequestLogAccessDisabled(c)
+			return
+		}
+		if requestLogProvider == nil {
+			writeInternalError(c, "request log provider is not configured", nil)
+			return
+		}
+		if requestLogDownloadTokens == nil {
+			writeInternalError(c, "request log download token store is not configured", nil)
+			return
+		}
+		eventID, ok := parseUsageEventRequestLogEventID(c)
+		if !ok {
+			return
+		}
+		if !requestLogDownloadTokens.consume(strings.TrimSpace(c.Query("token")), eventID) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired request log download token"})
+			return
+		}
+		streamUsageEventRequestLogDownload(c, requestLogProvider, eventID)
+	})
+}
+
+func writeUsageEventRequestLogAccessDisabled(c *gin.Context) {
+	c.JSON(http.StatusForbidden, gin.H{"error": "CPA request log access is disabled"})
+}
+
+func parseUsageEventRequestLogEventID(c *gin.Context) (int64, bool) {
+	eventID, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || eventID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid usage event id"})
+		return 0, false
+	}
+	return eventID, true
+}
+
+func streamUsageEventRequestLogDownload(c *gin.Context, requestLogProvider service.RequestLogProvider, eventID int64) {
+	response, err := requestLogProvider.DownloadUsageEventRequestLog(c.Request.Context(), eventID)
+	if err != nil {
+		writeUsageEventRequestLogError(c, err)
+		return
+	}
+	contentType := strings.TrimSpace(response.ContentType)
+	if contentType == "" {
+		contentType = "text/plain; charset=utf-8"
+	}
+	filename := strings.TrimSpace(response.Filename)
+	if filename == "" {
+		requestID := strings.TrimSpace(response.RequestID)
+		if requestID == "" {
+			requestID = strconv.FormatInt(eventID, 10)
+		}
+		filename = "request-log-" + requestID + ".log"
+	}
+	if response.Body == nil {
+		writeInternalError(c, "request log download body is empty", nil)
+		return
+	}
+	defer response.Body.Close()
+	contentLength := int64(-1)
+	if response.ContentLength > 0 {
+		contentLength = response.ContentLength
+	}
+	setNoStoreHeaders(c)
+	c.Header("Content-Disposition", requestLogAttachmentDisposition(filename))
+	c.DataFromReader(http.StatusOK, contentLength, contentType, response.Body, nil)
+}
+
 // Source 下拉提交的是 usage identity；为了兼容前端命名，API 收 source，但进入仓储前只转换成 auth_index 查询。
 func applyUsageEventsSourceFilter(filter *servicedto.UsageFilter) error {
 	if filter == nil {
@@ -260,6 +410,7 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 			Source:          source,
 			SourceType:      identity.Type,
 			AuthIndex:       row.AuthIndex,
+			RequestID:       strings.TrimSpace(row.RequestID),
 			IsDelete:        isDelete,
 			Failed:          row.Failed,
 			LatencyMS:       row.LatencyMS,
@@ -272,7 +423,6 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 				InputTokens:         row.InputTokens,
 				OutputTokens:        row.OutputTokens,
 				ReasoningTokens:     row.ReasoningTokens,
-				CachedTokens:        row.CachedTokens,
 				CacheReadTokens:     row.CacheReadTokens,
 				CacheCreationTokens: row.CacheCreationTokens,
 				TotalTokens:         row.TotalTokens,
@@ -280,6 +430,43 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 		})
 	}
 	return payload
+}
+
+func buildUsageEventRequestLogPayload(response service.RequestLogResponse) usageEventRequestLogPayload {
+	eventID := ""
+	if response.EventID != 0 {
+		eventID = strconv.FormatInt(response.EventID, 10)
+	}
+	sections := make([]usageEventRequestLogSection, 0, len(response.Sections))
+	for _, section := range response.Sections {
+		sections = append(sections, usageEventRequestLogSection{
+			Title:   strings.TrimSpace(section.Title),
+			Content: section.Content,
+		})
+	}
+	return usageEventRequestLogPayload{
+		EventID:      eventID,
+		RequestID:    strings.TrimSpace(response.RequestID),
+		Filename:     strings.TrimSpace(response.Filename),
+		Available:    response.Available,
+		Previewable:  response.Previewable,
+		TooLarge:     response.TooLarge,
+		Downloadable: response.Downloadable,
+		Sections:     sections,
+	}
+}
+
+func writeUsageEventRequestLogError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "usage event not found"})
+	case errors.Is(err, service.ErrRequestLogMissingID):
+		c.JSON(http.StatusNotFound, gin.H{"error": "usage event request id missing"})
+	case errors.Is(err, service.ErrRequestLogUnavailable):
+		c.JSON(http.StatusNotFound, gin.H{"error": "request log unavailable"})
+	default:
+		writeInternalError(c, "load usage event request log failed", err)
+	}
 }
 
 func buildUsageEventExportPayload(row servicedto.UsageEventRecord, resolver usageIdentityResolver, apiKeyInfos map[string]analysisAPIKeyInfo) usageEventExportPayload {
@@ -315,10 +502,9 @@ func buildUsageEventExportPayload(row servicedto.UsageEventRecord, resolver usag
 		InputTokens:         row.InputTokens,
 		OutputTokens:        row.OutputTokens,
 		ReasoningTokens:     row.ReasoningTokens,
-		CachedTokens:        row.CachedTokens,
 		CacheReadTokens:     row.CacheReadTokens,
 		CacheCreationTokens: row.CacheCreationTokens,
-		CacheRate:           usageEventCacheRate(row),
+		CacheReadRate:       usageEventCacheReadRate(row),
 		TotalTokens:         row.TotalTokens,
 		CostUSD:             row.CostUSD,
 	}
@@ -337,11 +523,11 @@ func usageEventSpeedTPS(row servicedto.UsageEventRecord) *float64 {
 	return &speed
 }
 
-func usageEventCacheRate(row servicedto.UsageEventRecord) *float64 {
+func usageEventCacheReadRate(row servicedto.UsageEventRecord) *float64 {
 	if row.InputTokens <= 0 {
 		return nil
 	}
-	rate := float64(row.CachedTokens) / float64(row.InputTokens) * 100
+	rate := float64(row.CacheReadTokens) / float64(row.InputTokens) * 100
 	return &rate
 }
 
@@ -367,10 +553,9 @@ var usageEventsExportCSVHeader = []string{
 	"input_tokens",
 	"output_tokens",
 	"reasoning_tokens",
-	"cached_tokens",
 	"cache_read_tokens",
 	"cache_creation_tokens",
-	"cache_rate",
+	"cache_read_rate",
 	"total_tokens",
 	"cost_usd",
 }
@@ -485,6 +670,59 @@ func usageEventsExportFilename(format string) string {
 	return "usage-events-" + timestamp + "." + format
 }
 
+func sanitizeAttachmentFilename(filename string) string {
+	filename = strings.TrimSpace(filename)
+	var builder strings.Builder
+	for _, r := range filename {
+		if r < 0x20 || r == 0x7f || r > 0x7e {
+			builder.WriteByte('_')
+			continue
+		}
+		switch r {
+		case '\\', '/', '"', ';', ':':
+			builder.WriteByte('_')
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	sanitized := strings.TrimSpace(builder.String())
+	if sanitized == "" {
+		return "request-log.log"
+	}
+	return sanitized
+}
+
+func sanitizeAttachmentFilenameStar(filename string) string {
+	filename = strings.TrimSpace(filename)
+	var builder strings.Builder
+	for _, r := range filename {
+		if r < 0x20 || r == 0x7f {
+			builder.WriteByte('_')
+			continue
+		}
+		switch r {
+		case '\\', '/', '"', ';', ':':
+			builder.WriteByte('_')
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	sanitized := strings.TrimSpace(builder.String())
+	if sanitized == "" {
+		return "request-log.log"
+	}
+	return sanitized
+}
+
+func requestLogAttachmentDisposition(filename string) string {
+	original := strings.TrimSpace(filename)
+	fallback := sanitizeAttachmentFilename(original)
+	if original == "" {
+		original = fallback
+	}
+	return `attachment; filename="` + fallback + `"; filename*=UTF-8''` + url.PathEscape(sanitizeAttachmentFilenameStar(original))
+}
+
 func usageEventExportCSVRecord(event usageEventExportPayload) []string {
 	return []string{
 		event.ID,
@@ -508,10 +746,9 @@ func usageEventExportCSVRecord(event usageEventExportPayload) []string {
 		strconv.FormatInt(event.InputTokens, 10),
 		strconv.FormatInt(event.OutputTokens, 10),
 		strconv.FormatInt(event.ReasoningTokens, 10),
-		strconv.FormatInt(event.CachedTokens, 10),
 		strconv.FormatInt(event.CacheReadTokens, 10),
 		strconv.FormatInt(event.CacheCreationTokens, 10),
-		formatOptionalFloat64(event.CacheRate),
+		formatOptionalFloat64(event.CacheReadRate),
 		strconv.FormatInt(event.TotalTokens, 10),
 		strconv.FormatFloat(event.CostUSD, 'f', -1, 64),
 	}

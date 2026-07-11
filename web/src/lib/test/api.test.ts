@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appPath, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
+import { appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -381,6 +381,42 @@ describe('fetchUsageEvents', () => {
     expect(analysisUrl.searchParams.get('api_key_id')).toBe('9007199254740993');
   });
 
+  it('loads a usage event request log by event id', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ event_id: '42', request_id: 'req-log-42', available: true, sections: [] }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    const response = await fetchUsageEventRequestLog('42', signal);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+
+    expect(parsed.pathname).toBe('/api/v1/usage/events/42/request-log');
+    expect(init).toMatchObject({ credentials: 'include', signal, cache: 'no-store' });
+    expect(response.request_id).toBe('req-log-42');
+  });
+
+  it('creates a usage event request log download URL without fetching the file into memory', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ download_url: '/api/v1/usage/events/42/request-log/download-file?token=abc' }),
+    } as Response);
+
+    const url = await createUsageEventRequestLogDownloadURL('42');
+    const parsed = new URL(url, 'http://localhost');
+    const [requestURL, init] = fetchMock.mock.calls[0];
+
+    expect(new URL(String(requestURL), 'http://localhost').pathname).toBe('/api/v1/usage/events/42/request-log/download-token');
+    expect(init).toMatchObject({ method: 'POST', credentials: 'include', cache: 'no-store' });
+    expect(parsed.pathname).toBe('/api/v1/usage/events/42/request-log/download-file');
+    expect(parsed.searchParams.get('token')).toBe('abc');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('passes credential page filters and sorting as query params', async () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
@@ -431,7 +467,7 @@ describe('fetchUsageEvents', () => {
             input_tokens: 10,
             output_tokens: 20,
             reasoning_tokens: 0,
-            cached_tokens: 0,
+            cache_read_tokens: 0,
             total_tokens: 30,
             last_aggregated_usage_event_id: '9',
             is_deleted: false,

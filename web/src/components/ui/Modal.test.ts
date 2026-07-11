@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const modalSource = readFileSync(new URL('./Modal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const componentsStyles = readFileSync(new URL('../../styles/components.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 describe('Modal scroll lock', () => {
   it('does not mutate body layout while the modal is open', () => {
@@ -27,5 +28,18 @@ describe('Modal scroll lock', () => {
   it('notifies the parent close state before waiting for the close animation', () => {
     expect(modalSource).toMatch(/if \(notifyParent\) \{\n\s+onClose\(\);\n\s+\}\n\s+closeTimerRef\.current = window\.setTimeout/);
     expect(modalSource).not.toMatch(/window\.setTimeout\(\(\) => \{[\s\S]*?if \(notifyParent\) \{\n\s+onClose\(\);/);
+  });
+
+  it('keeps the last rendered presentation while the close animation runs', () => {
+    expect(modalSource).toContain('interface ModalRenderSnapshot');
+    expect(modalSource).toContain('const [renderSnapshot, setRenderSnapshot] = useState<ModalRenderSnapshot>(currentSnapshot);');
+    expect(modalSource).toContain('startClose(true, currentSnapshot);');
+    expect(modalSource).toContain('const activeSnapshot = open ? currentSnapshot : renderSnapshot;');
+    expect(modalSource).toContain("style={{ width: activeSnapshot.width, maxWidth: '100%' }}");
+    expect(modalSource).toContain('activeSnapshot.children');
+  });
+
+  it('disables modal interactions while the close animation runs', () => {
+    expect(componentsStyles).toMatch(/\.modal-overlay-closing[\s\S]*?\.modal[\s\S]*?pointer-events:\s*none;/);
   });
 });

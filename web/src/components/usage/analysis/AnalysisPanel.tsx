@@ -5,7 +5,7 @@ import { Interaction, Tooltip } from 'chart.js';
 import type { Chart, ChartData, ChartOptions, InteractionItem, InteractionModeFunction, Plugin, ScriptableContext, TooltipModel, TooltipPositionerFunction } from 'chart.js';
 import { Bar, Doughnut, Scatter } from 'react-chartjs-2';
 import type { AnalysisCompositionItem, AnalysisCostBreakdown, AnalysisHeatmapCell, AnalysisLatencyDiagnostics, AnalysisModelEfficiencyItem, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
-import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber, formatDurationMs, formatUsd } from '@/utils/usage';
+import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber, formatDurationMs, formatPerMinuteValue, formatUsd } from '@/utils/usage';
 import styles from './AnalysisPanel.module.scss';
 
 interface AnalysisPanelProps {
@@ -21,7 +21,8 @@ type ChartRow = {
   output: number;
   rawInput: number;
   rawOutput: number;
-  cached: number;
+  cacheRead: number;
+  cacheWrite: number;
   reasoning: number;
   total: number;
   requests: number;
@@ -78,7 +79,7 @@ type ChartTooltipPointer = {
   chartY: number;
   viewport?: ViewportPoint;
 };
-type CostBreakdownSegmentKey = 'input' | 'output' | 'cached';
+type CostBreakdownSegmentKey = 'input' | 'cacheRead' | 'cacheWrite' | 'output';
 type CostBreakdownSegment = {
   key: CostBreakdownSegmentKey;
   label: string;
@@ -147,7 +148,8 @@ const CHART_COLORS: GradientColor[] = [
 const TOKEN_COLORS = {
   input: { base: '#2563eb', light: '#93c5fd' },
   output: { base: '#16a34a', light: '#86efac' },
-  cached: { base: '#d97706', light: '#fde68a' },
+  cacheRead: { base: '#d97706', light: '#fde68a' },
+  cacheWrite: { base: '#e11d48', light: '#fda4af' },
   reasoning: { base: '#8b5cf6', light: '#d8b4fe' },
   requests: '#ff5a40',
   cost: '#14b8a6',
@@ -227,7 +229,8 @@ Tooltip.positioners.analysisCompositionCursor = analysisCompositionCursorPositio
 type TokenLabels = {
   input: string;
   output: string;
-  cached: string;
+  cacheRead: string;
+  cacheWrite: string;
   reasoning: string;
   total: string;
   average: string;
@@ -293,19 +296,10 @@ type DoughnutArcProps = {
 };
 
 type DoughnutArcElement = {
-  options?: {
-    spacing?: unknown;
-    borderWidth?: unknown;
-  };
   getProps: (props: Array<keyof DoughnutArcProps>, useFinalPosition?: boolean) => Partial<DoughnutArcProps>;
 };
 
 const normalizeRadians = (angle: number): number => ((angle % FULL_CIRCLE) + FULL_CIRCLE) % FULL_CIRCLE;
-
-const getRadiansDistance = (first: number, second: number): number => {
-  const distance = Math.abs(normalizeRadians(first) - normalizeRadians(second));
-  return Math.min(distance, FULL_CIRCLE - distance);
-};
 
 const isAngleWithinArc = (angle: number, startAngle: number, endAngle: number, circumference: number): boolean => {
   if (Math.abs(circumference) >= FULL_CIRCLE - 0.0001) return true;
@@ -352,33 +346,39 @@ const isPointerInsidePaintedArc = (item: InteractionItem, event: unknown, useFin
   if (pointerX === undefined || pointerY === undefined) return false;
   const arc = getDoughnutArcProps(item.element, useFinalPosition);
   if (!arc) return false;
-  const { element, props } = arc;
+  const { props } = arc;
   const deltaX = pointerX - props.x;
   const deltaY = pointerY - props.y;
   const radius = Math.hypot(deltaX, deltaY);
   if (radius < props.innerRadius || radius > props.outerRadius) return false;
   const angle = Math.atan2(deltaY, deltaX);
-  if (!isAngleWithinArc(angle, props.startAngle, props.endAngle, props.circumference)) return false;
-  if (Math.abs(props.circumference) >= FULL_CIRCLE - 0.0001) return true;
+  return isAngleWithinArc(angle, props.startAngle, props.endAngle, props.circumference);
+};
 
-  const midRadius = (props.innerRadius + props.outerRadius) / 2;
-  if (midRadius <= 0) return true;
-  const spacing = toFiniteNumber(element.options?.spacing) ?? COMPOSITION_DONUT_SPACING;
-  const borderWidth = toFiniteNumber(element.options?.borderWidth) ?? 0;
-  const boundaryPadding = Math.min(
-    Math.abs(props.circumference) / 3,
-    ((spacing + borderWidth) / midRadius) * 1.2,
-  );
-  if (boundaryPadding <= 0) return true;
-
-  // Chart.js 的 nearest 负责小扇区候选；这里只剔除视觉切缝附近未绘制的像素。
-  return getRadiansDistance(angle, props.startAngle) > boundaryPadding
-    && getRadiansDistance(angle, props.endAngle) > boundaryPadding;
+const getFullCircleCompositionItems = (chart: Chart, event: unknown, useFinalPosition?: boolean): InteractionItem[] => {
+  const items: InteractionItem[] = [];
+  chart.getSortedVisibleDatasetMetas().forEach((meta) => {
+    if (meta.type !== 'doughnut') return;
+    meta.data.forEach((element, index) => {
+      const item = { element, datasetIndex: meta.index, index } as InteractionItem;
+      const arc = getDoughnutArcProps(element, useFinalPosition);
+      if (!arc || Math.abs(arc.props.circumference) < FULL_CIRCLE - 0.0001) return;
+      if (isPointerInsidePaintedArc(item, event, useFinalPosition)) {
+        items.push(item);
+      }
+    });
+  });
+  return items;
 };
 
 const analysisCompositionArcMode: InteractionModeFunction = (chart, event, options, useFinalPosition) => {
   const candidateItems = Interaction.modes.nearest(chart, event, { ...options, axis: 'r', intersect: false }, useFinalPosition);
-  return candidateItems.filter((item) => isPointerInsidePaintedArc(item, event, useFinalPosition));
+  if (candidateItems.length > 0) {
+    return candidateItems.filter((item) => isPointerInsidePaintedArc(item, event, useFinalPosition));
+  }
+
+  // Chart.js 径向 nearest 不把 start/end 归一后相等的 360° 扇区视作 full circle，这里只兜底单扇区候选丢失。
+  return getFullCircleCompositionItems(chart, event, useFinalPosition);
 };
 
 Interaction.modes.analysisCompositionArc = analysisCompositionArcMode;
@@ -763,7 +763,8 @@ function buildTokenUsageRows(buckets: AnalysisTokenUsageBucket[], granularity: A
     label: formatBucketLabel(bucket.bucket, granularity, timezone),
     input: calculateDisplayInputTokens({
       inputTokens: bucket.input_tokens,
-      cachedTokens: bucket.cached_tokens,
+      cacheReadTokens: bucket.cache_read_tokens,
+      cacheCreationTokens: bucket.cache_creation_tokens,
     }),
     output: calculateDisplayOutputTokens({
       outputTokens: bucket.output_tokens,
@@ -771,7 +772,8 @@ function buildTokenUsageRows(buckets: AnalysisTokenUsageBucket[], granularity: A
     }),
     rawInput: toNumber(bucket.input_tokens),
     rawOutput: toNumber(bucket.output_tokens),
-    cached: toNumber(bucket.cached_tokens),
+    cacheRead: toNumber(bucket.cache_read_tokens),
+    cacheWrite: toNumber(bucket.cache_creation_tokens),
     reasoning: toNumber(bucket.reasoning_tokens),
     total: toNumber(bucket.total_tokens),
     requests: toNumber(bucket.requests),
@@ -785,6 +787,13 @@ function calculateAverageTotalTokens(rows: ChartRow[]): number {
   return rows.reduce((sum, row) => sum + row.total, 0) / rows.length;
 }
 
+function calculateAnalysisWindowMinutes(analysis: AnalysisResponse | null): number | null {
+  const start = Date.parse(analysis?.range_start ?? '');
+  const end = Date.parse(analysis?.range_end ?? '');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return (end - start) / 60_000;
+}
+
 function takeMajorComposition(items: AnalysisCompositionItem[], othersLabel: string, limit = 5): AnalysisCompositionItem[] {
   if (items.length <= limit) return items;
   const major = items.slice(0, limit);
@@ -794,12 +803,13 @@ function takeMajorComposition(items: AnalysisCompositionItem[], othersLabel: str
       requests: sum.requests + toNumber(item.requests),
       input_tokens: sum.input_tokens + toNumber(item.input_tokens),
       output_tokens: sum.output_tokens + toNumber(item.output_tokens),
-      cached_tokens: sum.cached_tokens + toNumber(item.cached_tokens),
+      cache_read_tokens: sum.cache_read_tokens + toNumber(item.cache_read_tokens),
+      cache_creation_tokens: sum.cache_creation_tokens + toNumber(item.cache_creation_tokens),
       reasoning_tokens: sum.reasoning_tokens + toNumber(item.reasoning_tokens),
       cost_usd: sum.cost_usd + toNumber(item.cost_usd),
       cost_available: sum.cost_available && item.cost_available !== false,
     }),
-    { total_tokens: 0, requests: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, reasoning_tokens: 0, cost_usd: 0, cost_available: true },
+    { total_tokens: 0, requests: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, reasoning_tokens: 0, cost_usd: 0, cost_available: true },
   );
   const total = items.reduce((sum, item) => sum + toNumber(item.total_tokens), 0);
   return [
@@ -811,7 +821,8 @@ function takeMajorComposition(items: AnalysisCompositionItem[], othersLabel: str
       requests: rest.requests,
       input_tokens: rest.input_tokens,
       output_tokens: rest.output_tokens,
-      cached_tokens: rest.cached_tokens,
+      cache_read_tokens: rest.cache_read_tokens,
+      cache_creation_tokens: rest.cache_creation_tokens,
       reasoning_tokens: rest.reasoning_tokens,
       cost_usd: rest.cost_usd,
       cost_available: rest.cost_available,
@@ -824,7 +835,8 @@ function buildTokenLegendItems(labels: TokenLabels, averageTokenTotal: number, a
   return [
     { label: labels.input, color: TOKEN_COLORS.input.base },
     { label: labels.output, color: TOKEN_COLORS.output.base },
-    { label: labels.cached, color: TOKEN_COLORS.cached.base },
+    { label: labels.cacheRead, color: TOKEN_COLORS.cacheRead.base },
+    { label: labels.cacheWrite, color: TOKEN_COLORS.cacheWrite.base },
     { label: labels.reasoning, color: TOKEN_COLORS.reasoning.base },
     { label: labels.requests, color: TOKEN_COLORS.requests },
     { label: labels.cost, color: TOKEN_COLORS.cost },
@@ -913,7 +925,8 @@ function buildAnalysisTokenChartData(rows: ChartRow[], labels: TokenLabels): Mix
     datasets: [
       { label: labels.input, data: rows.map((row) => row.input), tooltipData: rows.map((row) => row.rawInput), backgroundColor: (context) => toGradientFill(context, tokenColors.input), borderColor: tokenColors.input.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
       { label: labels.output, data: rows.map((row) => row.output), tooltipData: rows.map((row) => row.rawOutput), backgroundColor: (context) => toGradientFill(context, tokenColors.output), borderColor: tokenColors.output.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
-      { label: labels.cached, data: rows.map((row) => row.cached), tooltipData: rows.map((row) => row.cached), backgroundColor: (context) => toGradientFill(context, tokenColors.cached), borderColor: tokenColors.cached.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
+      { label: labels.cacheRead, data: rows.map((row) => row.cacheRead), tooltipData: rows.map((row) => row.cacheRead), backgroundColor: (context) => toGradientFill(context, tokenColors.cacheRead), borderColor: tokenColors.cacheRead.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
+      { label: labels.cacheWrite, data: rows.map((row) => row.cacheWrite), tooltipData: rows.map((row) => row.cacheWrite), backgroundColor: (context) => toGradientFill(context, tokenColors.cacheWrite), borderColor: tokenColors.cacheWrite.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
       { label: labels.reasoning, data: rows.map((row) => row.reasoning), tooltipData: rows.map((row) => row.reasoning), backgroundColor: (context) => toGradientFill(context, tokenColors.reasoning), borderColor: tokenColors.reasoning.base, stack: 'tokens', yAxisID: 'tokens' } as TokenTooltipDataset,
       {
         type: 'line',
@@ -1049,7 +1062,8 @@ function TokenUsageChart({ rows, loading, isDark, isMobile }: { rows: ChartRow[]
   const tokenLabels = useMemo(() => ({
     input: t('usage_stats.input_tokens'),
     output: t('usage_stats.output_tokens'),
-    cached: t('usage_stats.cached_tokens'),
+    cacheRead: t('usage_stats.cache_read_tokens'),
+    cacheWrite: t('usage_stats.cache_creation_tokens'),
     reasoning: t('usage_stats.reasoning_tokens'),
     total: t('usage_stats.total_tokens'),
     average: t('usage_stats.analysis_token_average'),
@@ -1312,7 +1326,12 @@ function CompositionMetaPill({ label, value }: { label: string; value: string })
   );
 }
 
-function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; loading: boolean; isDark: boolean }) {
+const formatCompositionRate = (value: number, windowMinutes: number | null): string => {
+  if (!windowMinutes || windowMinutes <= 0) return '--';
+  return formatPerMinuteValue(value / windowMinutes);
+};
+
+function CompositionPanel({ tabs, loading, isDark, windowMinutes }: { tabs: CompositionTab[]; loading: boolean; isDark: boolean; windowMinutes: number | null }) {
   const { t } = useTranslation();
   const [activeTabId, setActiveTabId] = useState<CompositionTab['id']>('api_key');
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
@@ -1382,6 +1401,8 @@ function CompositionPanel({ tabs, loading, isDark }: { tabs: CompositionTab[]; l
                       <CompositionMetaPill label={t('usage_stats.total_tokens')} value={formatCompactNumber(toNumber(item.total_tokens))} />
                       <CompositionMetaPill label={t('usage_stats.requests_count')} value={formatCompactNumber(toNumber(item.requests))} />
                       <CompositionMetaPill label={t('usage_stats.total_cost')} value={formatUsd(toNumber(item.cost_usd))} />
+                      <CompositionMetaPill label={t('usage_stats.rpm')} value={formatCompositionRate(toNumber(item.requests), windowMinutes)} />
+                      <CompositionMetaPill label={t('usage_stats.tpm')} value={formatCompositionRate(toNumber(item.total_tokens), windowMinutes)} />
                     </div>
                   </div>
                 );
@@ -1401,18 +1422,19 @@ function getCostRatePerMillion(cost: number, tokens: number) {
 function getCostSegmentTokens(rows: ChartRow[]): Record<CostBreakdownSegmentKey, number> {
   return rows.reduce(
     (totals, row) => ({
-      input: totals.input + Math.max(row.rawInput - row.cached, 0),
+      input: totals.input + Math.max(row.rawInput - row.cacheRead - row.cacheWrite, 0),
+      cacheRead: totals.cacheRead + row.cacheRead,
+      cacheWrite: totals.cacheWrite + row.cacheWrite,
       output: totals.output + row.rawOutput,
-      cached: totals.cached + row.cached,
     }),
-    { input: 0, output: 0, cached: 0 },
+    { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
   );
 }
 
 function CostBreakdownCard({ breakdown, rows, loading }: { breakdown: AnalysisCostBreakdown | undefined; rows: ChartRow[]; loading: boolean }) {
   const { t } = useTranslation();
   const [costTooltip, setCostTooltip] = useState<FloatingTooltipState | null>(null);
-  const safeBreakdown = breakdown ?? { input_cost_usd: 0, output_cost_usd: 0, cached_cost_usd: 0, total_cost_usd: 0, cost_available: true };
+  const safeBreakdown = breakdown ?? { uncached_input_cost_usd: 0, cache_read_cost_usd: 0, cache_write_cost_usd: 0, output_cost_usd: 0, total_cost_usd: 0, cost_available: true };
   const totalCost = toNumber(safeBreakdown.total_cost_usd);
   const totalTokens = rows.reduce((sum, row) => sum + row.total, 0);
   const segmentTokens = getCostSegmentTokens(rows);
@@ -1428,9 +1450,10 @@ function CostBreakdownCard({ breakdown, rows, loading }: { breakdown: AnalysisCo
     }));
   const rateMax = Math.max(0, ...ratePoints.map((point) => point.rate));
   const segments: CostBreakdownSegment[] = [
-    { key: 'input', label: t('usage_stats.input_tokens'), value: toNumber(safeBreakdown.input_cost_usd), color: TOKEN_COLORS.input.base, tokens: segmentTokens.input },
+    { key: 'input', label: t('usage_stats.input_tokens'), value: toNumber(safeBreakdown.uncached_input_cost_usd), color: TOKEN_COLORS.input.base, tokens: segmentTokens.input },
+    { key: 'cacheRead', label: t('usage_stats.cache_read_tokens'), value: toNumber(safeBreakdown.cache_read_cost_usd), color: TOKEN_COLORS.cacheRead.base, tokens: segmentTokens.cacheRead },
+    { key: 'cacheWrite', label: t('usage_stats.cache_creation_tokens'), value: toNumber(safeBreakdown.cache_write_cost_usd), color: TOKEN_COLORS.cacheWrite.base, tokens: segmentTokens.cacheWrite },
     { key: 'output', label: t('usage_stats.output_tokens'), value: toNumber(safeBreakdown.output_cost_usd), color: TOKEN_COLORS.output.base, tokens: segmentTokens.output },
-    { key: 'cached', label: t('usage_stats.cached_tokens'), value: toNumber(safeBreakdown.cached_cost_usd), color: TOKEN_COLORS.cached.base, tokens: segmentTokens.cached },
   ];
   const hasData = rows.length > 0 || totalCost > 0 || segments.some((segment) => segment.value > 0);
   const buildCostTooltipLines = (segment: CostBreakdownSegment, percent: number) => [
@@ -1572,7 +1595,7 @@ type EfficiencyPoint = {
   requests: number;
   cost: number;
   totalTokens: number;
-  cacheRate: number;
+  cacheReadRate: number;
 };
 
 const getEfficiencyPalette = (index: number) => {
@@ -1775,7 +1798,7 @@ function ModelEfficiencyCard({ rows, loading, isDark, isMobile }: { rows: Analys
         requests: toNumber(row.requests),
         cost: toNumber(row.cost_usd),
         totalTokens: toNumber(row.total_tokens),
-        cacheRate: toNumber(row.cache_rate),
+        cacheReadRate: toNumber(row.cache_read_rate),
       })),
       pointRadius: pointRadii,
       pointHoverRadius: pointRadii.map((radius) => Math.min(MODEL_EFFICIENCY_MAX_RADIUS + MODEL_EFFICIENCY_HOVER_RADIUS_DELTA, radius + MODEL_EFFICIENCY_HOVER_RADIUS_DELTA)),
@@ -1882,7 +1905,8 @@ function Heatmap({ cells, apiKeys, apiKeyLabels, models, loading, isDark }: { ce
     const input = toNumber(cell?.input_tokens);
     const output = toNumber(cell?.output_tokens);
     const reasoning = toNumber(cell?.reasoning_tokens);
-    const cached = toNumber(cell?.cached_tokens);
+    const cacheRead = toNumber(cell?.cache_read_tokens);
+    const cacheWrite = toNumber(cell?.cache_creation_tokens);
     const total = toNumber(cell?.total_tokens);
     const cost = toNumber(cell?.cost_usd);
     return [
@@ -1891,7 +1915,8 @@ function Heatmap({ cells, apiKeys, apiKeyLabels, models, loading, isDark }: { ce
       `${t('usage_stats.input_tokens')}: ${formatCompactNumber(input)}`,
       `${t('usage_stats.output_tokens')}: ${formatCompactNumber(output)}`,
       `${t('usage_stats.reasoning_tokens')}: ${formatCompactNumber(reasoning)}`,
-      `${t('usage_stats.cached_tokens')}: ${formatCompactNumber(cached)}`,
+      `${t('usage_stats.cache_read_tokens')}: ${formatCompactNumber(cacheRead)}`,
+      `${t('usage_stats.cache_creation_tokens')}: ${formatCompactNumber(cacheWrite)}`,
       `${t('usage_stats.total_tokens')}: ${formatCompactNumber(total)}`,
       `${t('usage_stats.total_cost')}: ${formatUsd(cost)}`,
     ];
@@ -1967,7 +1992,6 @@ function Heatmap({ cells, apiKeys, apiKeyLabels, models, loading, isDark }: { ce
                             style={{
                               background: getHeatmapCellColor(intensity, isDark),
                               color: getHeatmapCellTextColor(intensity, isDark),
-                              '--heatmap-flame-alpha': intensity.toFixed(3),
                             } as CSSProperties}
                             tabIndex={0}
                             aria-label={tooltipLines.join(', ')}
@@ -2023,6 +2047,7 @@ export function AnalysisPanel({ analysis, loading, isDark, isMobile }: AnalysisP
   const modelComposition = useMemo(() => takeMajorComposition(analysis?.model_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
   const authFilesComposition = useMemo(() => takeMajorComposition(analysis?.auth_files_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
   const aiProviderComposition = useMemo(() => takeMajorComposition(analysis?.ai_provider_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
+  const analysisWindowMinutes = useMemo(() => calculateAnalysisWindowMinutes(analysis), [analysis]);
   const compositionTabs = useMemo<CompositionTab[]>(() => [
     { id: 'api_key', label: t('usage_stats.analysis_composition_api_key_tab'), items: apiComposition },
     { id: 'model', label: t('usage_stats.analysis_composition_model_tab'), items: modelComposition },
@@ -2038,7 +2063,7 @@ export function AnalysisPanel({ analysis, loading, isDark, isMobile }: AnalysisP
         <ModelEfficiencyCard rows={analysis?.model_efficiency ?? []} loading={loading} isDark={isDark} isMobile={isMobile} />
       </div>
       <LatencyDiagnosticsCard diagnostics={analysis?.latency_diagnostics} loading={loading} isDark={isDark} isMobile={isMobile} />
-      <CompositionPanel tabs={compositionTabs} loading={loading} isDark={isDark} />
+      <CompositionPanel tabs={compositionTabs} loading={loading} isDark={isDark} windowMinutes={analysisWindowMinutes} />
       <Heatmap cells={analysis?.heatmap?.cells ?? []} apiKeys={analysis?.heatmap?.api_keys ?? []} apiKeyLabels={analysis?.heatmap?.api_key_labels ?? {}} models={analysis?.heatmap?.models ?? []} loading={loading} isDark={isDark} />
     </div>
   );

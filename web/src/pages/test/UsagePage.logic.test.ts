@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildCustomDateRangeQuery, clampCustomDateRangeToBounds, CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewDisplayLoading, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, loadUsagePageVersionInfo, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleCustomDateRangeBoundsRefresh, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration } from '../UsagePage';
+import { buildCustomDateRangeQuery, clampCustomDateRangeToBounds, CUSTOM_DATE_RANGE_BOUNDS_REFRESH_INTERVAL_MS, getBackToCPALinkURL, getCredentialSectionVisibility, getCustomDateRangeBounds, getOverviewDisplayLoading, getTimeRangeOptions, getUsageTabOptions, isCustomDateWithinBounds, isUsagePageVisible, loadRequestEventsPreferences, loadUsagePageVersionInfo, normalizeRequestEventsPreferences, normalizeUsageTabValue, openDateInputPicker, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, runUsageEventRequestLogDownload, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleCustomDateRangeBoundsRefresh, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration } from '../UsagePage';
 import { REQUEST_EVENT_COLUMN_IDS } from '@/components/usage/RequestEventsDetailsCard';
 import { ApiError } from '@/lib/api';
 import type { UsageFilterWindow, VersionResponse } from '@/lib/types';
@@ -441,7 +441,7 @@ describe('UsagePage request event preferences', () => {
     });
 
     expect(preferences).toEqual({
-      version: 3,
+      version: 5,
       pageSize: 500,
       filters: {
         model: 'claude-opus',
@@ -487,7 +487,26 @@ describe('UsagePage request event preferences', () => {
   });
 
   it('adds Speed Mode to legacy full-column request event preferences', () => {
-    const legacyFullColumnIds = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'service_tier');
+    const legacyFullColumnIds = [
+      'timestamp',
+      'api_key',
+      'source',
+      'model',
+      'reasoning_effort',
+      'result',
+      'request_type',
+      'endpoint',
+      'ttft',
+      'latency',
+      'speed',
+      'input_tokens',
+      'output_tokens',
+      'reasoning_tokens',
+      'cached_tokens',
+      'cache_rate',
+      'total_tokens',
+      'total_cost',
+    ];
     const preferences = normalizeRequestEventsPreferences({
       version: 1,
       pageSize: 100,
@@ -502,7 +521,7 @@ describe('UsagePage request event preferences', () => {
     const hiddenSpeedColumnIds = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'speed');
 
     saveRequestEventsPreferences({
-      version: 3,
+      version: 5,
       pageSize: 100,
       filters: {
         model: '__all__',
@@ -514,7 +533,7 @@ describe('UsagePage request event preferences', () => {
 
     const stored = JSON.parse(storage.value(REQUEST_EVENTS_PREFERENCES_STORAGE_KEY) ?? '');
     expect(stored).toEqual({
-      version: 3,
+      version: 5,
       pageSize: 100,
       filters: {
         model: '__all__',
@@ -531,7 +550,7 @@ describe('UsagePage request event preferences', () => {
     const hiddenSpeedModeColumnIds = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'service_tier');
 
     saveRequestEventsPreferences({
-      version: 3,
+      version: 5,
       pageSize: 100,
       filters: {
         model: '__all__',
@@ -552,7 +571,7 @@ describe('UsagePage request event preferences', () => {
     expect(loadRequestEventsPreferences(storage).pageSize).toBe(100);
 
     saveRequestEventsPreferences({
-      version: 3,
+      version: 4,
       pageSize: 50,
       filters: {
         model: 'gpt-4.1',
@@ -564,7 +583,7 @@ describe('UsagePage request event preferences', () => {
 
     expect(storage.setItem).toHaveBeenCalledTimes(1);
     expect(JSON.parse(storage.value(REQUEST_EVENTS_PREFERENCES_STORAGE_KEY) ?? '')).toEqual({
-      version: 3,
+      version: 5,
       pageSize: 50,
       filters: {
         model: 'gpt-4.1',
@@ -732,5 +751,38 @@ describe('UsagePage refresh action', () => {
 
     expect(refreshCalls).toBe(1);
     expect(syncCalls).toBe(0);
+  });
+});
+
+describe('UsagePage request log download guard', () => {
+  it('does not trigger a stale native download after the modal is closed', async () => {
+    const generationRef = { current: 0 };
+    let resolveDownloadURL: (url: string) => void = () => undefined;
+    const createDownloadURL = vi.fn(() => new Promise<string>((resolve) => {
+      resolveDownloadURL = resolve;
+    }));
+    const triggerDownload = vi.fn();
+    const setDownloading = vi.fn();
+    const showDownloadError = vi.fn();
+
+    const pendingDownload = runUsageEventRequestLogDownload({
+      eventId: ' 42 ',
+      generationRef,
+      createDownloadURL,
+      triggerDownload,
+      setDownloading,
+      showDownloadError,
+    });
+
+    expect(createDownloadURL).toHaveBeenCalledWith('42');
+    expect(setDownloading).toHaveBeenCalledWith(true);
+
+    generationRef.current += 1;
+    resolveDownloadURL('/api/v1/usage/events/42/request-log/download-file?token=abc');
+    await pendingDownload;
+
+    expect(triggerDownload).not.toHaveBeenCalled();
+    expect(showDownloadError).not.toHaveBeenCalled();
+    expect(setDownloading).toHaveBeenCalledTimes(1);
   });
 });

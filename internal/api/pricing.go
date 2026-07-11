@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -15,13 +16,13 @@ type usedModelsResponse struct {
 }
 
 type pricingEntryResponse struct {
-	Model                   string  `json:"model"`
-	PricingStyle            string  `json:"pricing_style"`
-	PromptPricePer1M        float64 `json:"prompt_price_per_1m"`
-	CompletionPricePer1M    float64 `json:"completion_price_per_1m"`
-	CachePricePer1M         float64 `json:"cache_price_per_1m"`
-	CacheCreationPricePer1M float64 `json:"cache_creation_price_per_1m"`
-	PriceMultiplier         float64 `json:"price_multiplier"`
+	Model                string  `json:"model"`
+	PricingStyle         string  `json:"pricing_style"`
+	PromptPricePer1M     float64 `json:"prompt_price_per_1m"`
+	CompletionPricePer1M float64 `json:"completion_price_per_1m"`
+	CacheReadPricePer1M  float64 `json:"cache_read_price_per_1m"`
+	CacheWritePricePer1M float64 `json:"cache_write_price_per_1m"`
+	PriceMultiplier      float64 `json:"price_multiplier"`
 }
 
 type pricingListResponse struct {
@@ -40,13 +41,15 @@ type pricingSyncResponse struct {
 }
 
 type updatePricingRequest struct {
-	Model                   string   `json:"model"`
-	PricingStyle            string   `json:"pricing_style"`
-	PromptPricePer1M        float64  `json:"prompt_price_per_1m"`
-	CompletionPricePer1M    float64  `json:"completion_price_per_1m"`
-	CachePricePer1M         float64  `json:"cache_price_per_1m"`
-	CacheCreationPricePer1M float64  `json:"cache_creation_price_per_1m"`
-	PriceMultiplier         *float64 `json:"price_multiplier"`
+	Model                         string          `json:"model"`
+	PricingStyle                  string          `json:"pricing_style"`
+	PromptPricePer1M              float64         `json:"prompt_price_per_1m"`
+	CompletionPricePer1M          float64         `json:"completion_price_per_1m"`
+	CacheReadPricePer1M           float64         `json:"cache_read_price_per_1m"`
+	CacheWritePricePer1M          float64         `json:"cache_write_price_per_1m"`
+	PriceMultiplier               *float64        `json:"price_multiplier"`
+	LegacyCachePricePer1M         json.RawMessage `json:"cache_price_per_1m"`
+	LegacyCacheCreationPricePer1M json.RawMessage `json:"cache_creation_price_per_1m"`
 }
 
 func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingProvider) {
@@ -80,13 +83,13 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 		response := make([]pricingEntryResponse, 0, len(settings))
 		for _, setting := range settings {
 			response = append(response, pricingEntryResponse{
-				Model:                   setting.Model,
-				PricingStyle:            setting.PricingStyle,
-				PromptPricePer1M:        setting.PromptPricePer1M,
-				CompletionPricePer1M:    setting.CompletionPricePer1M,
-				CachePricePer1M:         setting.CachePricePer1M,
-				CacheCreationPricePer1M: setting.CacheCreationPricePer1M,
-				PriceMultiplier:         modelPriceMultiplierValue(setting.PriceMultiplier),
+				Model:                setting.Model,
+				PricingStyle:         setting.PricingStyle,
+				PromptPricePer1M:     setting.PromptPricePer1M,
+				CompletionPricePer1M: setting.CompletionPricePer1M,
+				CacheReadPricePer1M:  setting.CacheReadPricePer1M,
+				CacheWritePricePer1M: setting.CacheWritePricePer1M,
+				PriceMultiplier:      modelPriceMultiplierValue(setting.PriceMultiplier),
 			})
 		}
 		c.JSON(http.StatusOK, pricingListResponse{Pricing: response})
@@ -193,6 +196,10 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if len(request.LegacyCachePricePer1M) > 0 || len(request.LegacyCacheCreationPricePer1M) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "legacy cache price fields are not supported"})
+		return
+	}
 
 	model := strings.TrimSpace(pathModel)
 	if model == "" {
@@ -204,13 +211,13 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 	}
 
 	setting, err := pricingProvider.UpdatePricing(c.Request.Context(), servicedto.UpdatePricingInput{
-		Model:                   model,
-		PricingStyle:            request.PricingStyle,
-		PromptPricePer1M:        request.PromptPricePer1M,
-		CompletionPricePer1M:    request.CompletionPricePer1M,
-		CachePricePer1M:         request.CachePricePer1M,
-		CacheCreationPricePer1M: request.CacheCreationPricePer1M,
-		PriceMultiplier:         request.PriceMultiplier,
+		Model:                model,
+		PricingStyle:         request.PricingStyle,
+		PromptPricePer1M:     request.PromptPricePer1M,
+		CompletionPricePer1M: request.CompletionPricePer1M,
+		CacheReadPricePer1M:  request.CacheReadPricePer1M,
+		CacheWritePricePer1M: request.CacheWritePricePer1M,
+		PriceMultiplier:      request.PriceMultiplier,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "non-negative") || strings.Contains(err.Error(), "pricing_style") || strings.Contains(err.Error(), "price_multiplier") {
@@ -222,13 +229,13 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 	}
 
 	c.JSON(http.StatusOK, pricingEntryResponse{
-		Model:                   setting.Model,
-		PricingStyle:            setting.PricingStyle,
-		PromptPricePer1M:        setting.PromptPricePer1M,
-		CompletionPricePer1M:    setting.CompletionPricePer1M,
-		CachePricePer1M:         setting.CachePricePer1M,
-		CacheCreationPricePer1M: setting.CacheCreationPricePer1M,
-		PriceMultiplier:         modelPriceMultiplierValue(setting.PriceMultiplier),
+		Model:                setting.Model,
+		PricingStyle:         setting.PricingStyle,
+		PromptPricePer1M:     setting.PromptPricePer1M,
+		CompletionPricePer1M: setting.CompletionPricePer1M,
+		CacheReadPricePer1M:  setting.CacheReadPricePer1M,
+		CacheWritePricePer1M: setting.CacheWritePricePer1M,
+		PriceMultiplier:      modelPriceMultiplierValue(setting.PriceMultiplier),
 	})
 }
 

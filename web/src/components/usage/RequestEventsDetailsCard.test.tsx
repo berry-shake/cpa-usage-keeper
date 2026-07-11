@@ -32,7 +32,6 @@ const events: UsageEvent[] = [
       input_tokens: 100,
       output_tokens: 60,
       reasoning_tokens: 20,
-      cached_tokens: 20,
       cache_read_tokens: 20,
       cache_creation_tokens: 0,
       total_tokens: 200,
@@ -183,14 +182,15 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*" title="\/chat\/completions">\/chat\/completions<\/td>/);
   });
 
-  it('renders cache rate after cached tokens with two decimal places', () => {
+  it('renders cache rate after cache read and write with two decimal places', () => {
     const html = renderCard({
-      events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 100, cached_tokens: 25 } }],
+      events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 100, cache_read_tokens: 25 } }],
     });
 
-    expect(html.indexOf('>Cached</th>')).toBeLessThan(html.indexOf('>Cache Rate</th>'));
+    expect(html.indexOf('>Cache Read</th>')).toBeLessThan(html.indexOf('>Cache Write</th>'));
+    expect(html.indexOf('>Cache Write</th>')).toBeLessThan(html.indexOf('>Cache Rate</th>'));
     expect(html.indexOf('>Cache Rate</th>')).toBeLessThan(html.indexOf('>Total Tokens</th>'));
-    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">25<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">25\.00%<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">200<\/td>/);
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">25<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">0<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">25\.00%<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">200<\/td>/);
   });
 
   it('keeps cache rate based on normalized input for all providers', () => {
@@ -198,20 +198,20 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{
         ...events[0],
         source_type: 'claude',
-        tokens: { ...events[0].tokens, input_tokens: 400, cached_tokens: 600, total_tokens: 500 },
+        tokens: { ...events[0].tokens, input_tokens: 400, cache_read_tokens: 600, total_tokens: 500 },
       }],
     });
 
-    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">600<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">150\.00%<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">500<\/td>/);
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">600<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">0<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">150\.00%<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">500<\/td>/);
     expect(html).not.toContain('60.00%');
   });
 
   it('shows a dash for cache rate when input tokens are zero', () => {
     const html = renderCard({
-      events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 0, cached_tokens: 25 } }],
+      events: [{ ...events[0], tokens: { ...events[0].tokens, input_tokens: 0, cache_read_tokens: 25 } }],
     });
 
-    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">0<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">60<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">20<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">25<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">200<\/td>/);
+    expect(html).toMatch(/<td class="[^"]*requestEventsNoWrapCell[^"]*">0<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">60<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">20<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">25<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">0<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">-<\/td><td class="[^"]*requestEventsNoWrapCell[^"]*">200<\/td>/);
   });
 
   it('stacks source value above source tags', () => {
@@ -251,6 +251,97 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('aria-label="Result"');
     expect(html).toContain('Failure');
     expect(html).not.toContain('aria-label="Credential"');
+  });
+
+  it('renders the Result badge as a request log trigger when request id is available', () => {
+    const html = renderCard({
+      events: [{ ...events[0], request_id: 'req-log-101' }],
+      requestLogAccessEnabled: true,
+      onRequestLogOpen: () => undefined,
+    });
+
+    expect(html).toContain('title="Click to view request log"');
+    expect(html).toContain('aria-label="Success. View request log"');
+    expect(html).toContain('_requestEventsResultLogButton_');
+    expect(html).toContain('_requestEventsResultLogIcon_');
+    expect(html).toMatch(/<button[^>]*>.*Success.*<\/button>/);
+  });
+
+  it('renders the Result badge as a request log trigger when the event id is missing', () => {
+    const html = renderCard({
+      events: [{ ...events[0], id: undefined, request_id: 'req-log-missing-id' }],
+      requestLogAccessEnabled: true,
+      onRequestLogOpen: () => undefined,
+    });
+
+    expect(html).toContain('title="Click to view request log"');
+    expect(html).toContain('_requestEventsResultLogButton_');
+  });
+
+  it('keeps the Result badge label stable while a request log loads', () => {
+    const html = renderCard({
+      events: [{ ...events[0], request_id: 'req-log-101' }],
+      requestLogAccessEnabled: true,
+      onRequestLogOpen: () => undefined,
+      requestLogLoadingEventId: '101',
+    });
+
+    expect(html).toContain('aria-label="Success. Loading request log"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toMatch(/<button[^>]*>.*Success.*<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*>.*Loading\.\.\..*<\/button>/);
+  });
+
+  it('renders request log content without request id or cache metadata', () => {
+    const html = renderCard({
+      requestLogResponse: {
+        event_id: '101',
+        request_id: 'req-log-101',
+        filename: 'preview-req-log-101.log',
+        available: true,
+        sections: [
+          { title: 'REQUEST INFO', content: 'URL: /v1/responses' },
+          { title: 'API RESPONSE ERROR', content: '{"error":"quota exceeded"}' },
+        ],
+      },
+      onRequestLogClose: () => undefined,
+    });
+
+    expect(html).toContain('Request Info');
+    expect(html).toContain('API Response Error');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('_requestEventsLogSectionChevron_');
+    expect(html).toContain('_requestEventsLogSectionPanel_');
+    expect(html).toContain('URL: /v1/responses');
+    expect(html).not.toContain('Request ID');
+    expect(html).not.toContain('Request ID: req-log-101');
+    expect(html).not.toContain('<span>Cached</span>');
+    expect(html).not.toContain('<span>Fresh</span>');
+    expect(html).not.toContain('preview-req-log-101.log');
+  });
+
+  it('renders a compact large-log download prompt without opening log sections', () => {
+    const html = renderCard({
+      requestLogResponse: {
+        event_id: '101',
+        request_id: 'req-log-101',
+        filename: 'large-request.log',
+        available: true,
+        previewable: false,
+        too_large: true,
+        downloadable: true,
+        sections: [],
+      },
+      onRequestLogClose: () => undefined,
+    });
+
+    expect(html).toContain('Request Log Too Large');
+    expect(html).toContain('Download Raw Log');
+    expect(html).toContain('Cancel');
+    expect(html).toContain('_requestEventsLargeLogModal_');
+    expect(html).toContain('_requestEventsLargeLogPrompt_');
+    expect(html).not.toContain('_requestEventsLogSections_');
   });
 
   it('keeps selected filters visible when backend options do not include them', () => {
@@ -299,7 +390,9 @@ describe('RequestEventsDetailsCard pagination', () => {
 
     expect(html).toContain('Clear Filters');
     expect(countOccurrences(html, '>Export<')).toBe(1);
-    expect(html.indexOf('Clear Filters')).toBeLessThan(html.indexOf('>Export<'));
+    expect(html.indexOf('aria-label="Result"')).toBeLessThan(html.indexOf('Clear Filters'));
+    expect(html.indexOf('Clear Filters')).toBeLessThan(html.indexOf('aria-label="Columns"'));
+    expect(html.indexOf('>Export<')).toBeLessThan(html.indexOf('aria-label="Result"'));
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).toContain('_requestEventsExportButton_');
     expect(html).toContain('_requestEventsExportButtonInner_');

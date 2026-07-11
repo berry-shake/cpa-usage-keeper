@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,6 +55,187 @@ func TestFetchManagementAPIKeysSendsBearerTokenAndParsesKeys(t *testing.T) {
 	}
 	if len(result.Payload.APIKeys) != 2 || result.Payload.APIKeys[0] != "sk-alpha" || result.Payload.APIKeys[1] != "sk-beta" {
 		t.Fatalf("unexpected API keys payload: %#v", result.Payload)
+	}
+}
+
+func TestFetchRequestLogByIDDownloadsFileWithBearerToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != cpaManagementRequestLogByIDEndpoint+"/req-log-42" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
+			t.Fatalf("expected management Authorization header, got %q", got)
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="error-v1-responses-req-log-42.log"`)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("=== REQUEST INFO ===\nURL: /v1/responses\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.FetchRequestLogByID(context.Background(), " req-log-42 ")
+	if err != nil {
+		t.Fatalf("FetchRequestLogByID returned error: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", result.StatusCode)
+	}
+	if result.Filename != "error-v1-responses-req-log-42.log" {
+		t.Fatalf("unexpected filename %q", result.Filename)
+	}
+	if result.ContentType != "text/plain; charset=utf-8" {
+		t.Fatalf("unexpected content type %q", result.ContentType)
+	}
+	if string(result.Body) != "=== REQUEST INFO ===\nURL: /v1/responses\n" {
+		t.Fatalf("unexpected body %q", string(result.Body))
+	}
+}
+
+func TestFetchRequestLogByIDLimitsPreviewBody(t *testing.T) {
+	previewLimit := int64(16)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="large-request.log"`)
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte("0123456789abcdefX"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.fetchRequestLogByID(context.Background(), "req-large", previewLimit)
+
+	if err != nil {
+		t.Fatalf("fetchRequestLogByID returned error: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", result.StatusCode)
+	}
+	if !result.BodyTruncated {
+		t.Fatalf("expected oversized response to be marked truncated")
+	}
+	if len(result.Body) != int(previewLimit+1) {
+		t.Fatalf("expected limited body length %d, got %d", previewLimit+1, len(result.Body))
+	}
+	if result.Filename != "large-request.log" {
+		t.Fatalf("unexpected filename %q", result.Filename)
+	}
+}
+
+func TestFetchRequestLogByIDSkipsBodyWhenContentLengthExceedsPreviewLimit(t *testing.T) {
+	previewLimit := int64(16)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="large-request.log"`)
+		w.Header().Set("Content-Length", "17")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.fetchRequestLogByID(context.Background(), "req-large", previewLimit)
+
+	if err != nil {
+		t.Fatalf("fetchRequestLogByID returned error: %v", err)
+	}
+	if !result.BodyTruncated {
+		t.Fatalf("expected content-length oversized response to be marked truncated")
+	}
+	if len(result.Body) != 0 {
+		t.Fatalf("expected oversized response body not to be read, got %d bytes", len(result.Body))
+	}
+	if result.ContentLength != 17 {
+		t.Fatalf("expected original content length 17, got %d", result.ContentLength)
+	}
+}
+
+func TestFetchRequestLogByIDKeepsUnknownContentLengthWhenPreviewBodyTruncated(t *testing.T) {
+	previewLimit := int64(16)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="large-request.log"`)
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte("0123456789abcdefX"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	result, err := client.fetchRequestLogByID(context.Background(), "req-large", previewLimit)
+
+	if err != nil {
+		t.Fatalf("fetchRequestLogByID returned error: %v", err)
+	}
+	if !result.BodyTruncated {
+		t.Fatalf("expected oversized response to be marked truncated")
+	}
+	if result.ContentLength != -1 {
+		t.Fatalf("expected unknown content length to stay -1 after truncation, got %d", result.ContentLength)
+	}
+}
+
+func TestOpenRequestLogByIDDoesNotTimeoutWhileStreamingBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="slow-request.log"`)
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		time.Sleep(80 * time.Millisecond)
+		_, _ = w.Write([]byte("late body"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 20*time.Millisecond, false)
+	stream, err := client.OpenRequestLogByID(context.Background(), "req-slow")
+	if err != nil {
+		t.Fatalf("OpenRequestLogByID returned error before streaming body: %v", err)
+	}
+	defer stream.Body.Close()
+
+	body, err := io.ReadAll(stream.Body)
+	if err != nil {
+		t.Fatalf("expected stream body read to outlive client request timeout, got %v", err)
+	}
+	if string(body) != "late body" {
+		t.Fatalf("unexpected stream body %q", string(body))
+	}
+}
+
+func TestOpenRequestLogByIDTimesOutStalledStreamBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="stalled-request.log"`)
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
+	client.streamIdleTimeout = 20 * time.Millisecond
+	stream, err := client.OpenRequestLogByID(context.Background(), "req-stalled")
+	if err != nil {
+		t.Fatalf("OpenRequestLogByID returned error before streaming body: %v", err)
+	}
+	defer stream.Body.Close()
+
+	startedAt := time.Now()
+	_, err = io.ReadAll(stream.Body)
+	if err == nil {
+		t.Fatalf("expected stalled stream body read to fail")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded error, got %v", err)
+	}
+	if time.Since(startedAt) > time.Second {
+		t.Fatalf("expected stalled stream body to fail quickly, took %s", time.Since(startedAt))
+	}
+}
+
+func TestIdleTimeoutReadCloserNilReceiver(t *testing.T) {
+	var reader *idleTimeoutReadCloser
+
+	n, err := reader.Read(make([]byte, 1))
+	if n != 0 || !errors.Is(err, io.EOF) {
+		t.Fatalf("expected nil reader to return EOF, got n=%d err=%v", n, err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("expected nil reader close to be a no-op, got %v", err)
 	}
 }
 

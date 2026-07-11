@@ -36,6 +36,7 @@ export interface StatusResponse {
   sync_running: boolean
   timezone: string
   cpa_public_url?: string
+  cpa_request_log_access_enabled?: boolean
   last_run_at?: string
   last_error?: string
   last_warning?: string
@@ -81,10 +82,11 @@ export interface UsageOverviewSummary {
   rpm: number
   tpm: number
   total_cost: number
-  cost_available: boolean
-  input_tokens: number
-  cached_tokens: number
-  reasoning_tokens: number
+	cost_available: boolean
+	input_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	reasoning_tokens: number
   daily_average_requests?: number
   daily_average_tokens?: number
   daily_average_cost?: number
@@ -97,7 +99,7 @@ export interface UsageOverviewSeries {
   rpm: Record<string, number>
   tpm: Record<string, number>
   cost: Record<string, number>
-  cache_rate: Record<string, number | null>
+	cache_read_rate: Record<string, number | null>
 }
 
 export interface UsageOverviewServiceHealthBlock {
@@ -185,10 +187,11 @@ export interface RealtimeRequestLevelPoint {
 }
 
 export interface RealtimeCacheLevelPoint {
-  bucket: string
-  cache_rate?: number | null
-  cached_tokens: number
-  input_tokens: number
+	bucket: string
+	cache_read_rate?: number | null
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	input_tokens: number
 }
 
 export interface OverviewRealtimeBlock {
@@ -216,17 +219,17 @@ export interface UsageOverviewResponse {
 }
 
 export interface UsageEventTokens {
-  input_tokens: number
-  output_tokens: number
-  reasoning_tokens: number
-  cached_tokens: number
-  cache_read_tokens: number
+	input_tokens: number
+	output_tokens: number
+	reasoning_tokens: number
+	cache_read_tokens: number
   cache_creation_tokens: number
   total_tokens: number
 }
 
 export interface UsageEvent {
   id?: string
+  request_id?: string
   timestamp: string
   api_key?: string
   model: string
@@ -262,6 +265,22 @@ export interface UsageEventsResponse {
   page: number
   page_size: number
   total_pages: number
+}
+
+export interface UsageEventRequestLogSection {
+  title: string
+  content: string
+}
+
+export interface UsageEventRequestLogResponse {
+  event_id: string
+  request_id?: string
+  filename?: string
+  available: boolean
+  previewable?: boolean
+  too_large?: boolean
+  downloadable?: boolean
+  sections: UsageEventRequestLogSection[]
 }
 
 export interface UsageEventModelFilterOptionsResponse {
@@ -354,11 +373,11 @@ export interface UsageIdentity {
   total_requests: number
   success_count: number
   failure_count: number
-  input_tokens: number
-  output_tokens: number
-  reasoning_tokens: number
-  cached_tokens: number
-  total_tokens: number
+	input_tokens: number
+	output_tokens: number
+	reasoning_tokens: number
+	cache_read_tokens: number
+	total_tokens: number
   last_aggregated_usage_event_id: string
   first_used_at?: string
   last_used_at?: string
@@ -504,11 +523,12 @@ export interface UsageQuotaRefreshResponse {
 }
 
 export interface AnalysisTokenUsageBucket {
-  bucket: string
-  input_tokens: number
-  output_tokens: number
-  cached_tokens: number
-  reasoning_tokens: number
+	bucket: string
+	input_tokens: number
+	output_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	reasoning_tokens: number
   total_tokens: number
   requests: number
   cost_usd: number
@@ -521,10 +541,11 @@ export interface AnalysisCompositionItem {
   total_tokens: number
   requests: number
   percent: number
-  input_tokens: number
-  output_tokens: number
-  cached_tokens: number
-  reasoning_tokens: number
+	input_tokens: number
+	output_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	reasoning_tokens: number
   cost_usd: number
   cost_available: boolean
 }
@@ -532,10 +553,11 @@ export interface AnalysisCompositionItem {
 export interface AnalysisHeatmapCell {
   api_key: string
   model: string
-  input_tokens: number
-  output_tokens: number
-  cached_tokens: number
-  reasoning_tokens: number
+	input_tokens: number
+	output_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	reasoning_tokens: number
   total_tokens: number
   requests: number
   cost_usd: number
@@ -551,26 +573,28 @@ export interface AnalysisHeatmapPayload {
 }
 
 export interface AnalysisCostBreakdown {
-  input_cost_usd: number
-  output_cost_usd: number
-  cached_cost_usd: number
-  total_cost_usd: number
+	uncached_input_cost_usd: number
+	cache_read_cost_usd: number
+	cache_write_cost_usd: number
+	output_cost_usd: number
+	total_cost_usd: number
   cost_available: boolean
 }
 
 export interface AnalysisModelEfficiencyItem {
   model: string
   requests: number
-  input_tokens: number
-  output_tokens: number
-  cached_tokens: number
-  reasoning_tokens: number
+	input_tokens: number
+	output_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	reasoning_tokens: number
   total_tokens: number
   cost_usd: number
   cost_available: boolean
   cost_per_request_usd: number
   output_tokens_per_request: number
-  cache_rate: number
+	cache_read_rate: number
 }
 
 export interface AnalysisLatencyPoint {
@@ -646,12 +670,12 @@ export interface CpaApiKeyOptionsResponse {
 export type PricingStyle = 'openai' | 'claude'
 
 export interface ModelPrice {
-  style: PricingStyle
-  prompt: number
-  completion: number
-  cache: number
-  cacheCreation: number
-  multiplier: number
+	style: PricingStyle
+	prompt: number
+	completion: number
+	cacheRead: number
+	cacheWrite: number
+	multiplier: number
 }
 
 export interface PricingSaveFailure {
@@ -667,12 +691,12 @@ export interface PricingSaveResult {
 
 export interface PricingEntry {
   model: string
-  pricing_style: PricingStyle
-  prompt_price_per_1m: number
-  completion_price_per_1m: number
-  cache_price_per_1m: number
-  cache_creation_price_per_1m: number
-  price_multiplier: number
+	pricing_style: PricingStyle
+	prompt_price_per_1m: number
+	completion_price_per_1m: number
+	cache_read_price_per_1m: number
+	cache_write_price_per_1m: number
+	price_multiplier: number
 }
 
 export interface UsedModelsResponse {
@@ -700,11 +724,11 @@ export interface PricingSyncMatch {
   match_type: string
   source_provider_id: string
   source_provider_name: string
-  pricing_style: PricingStyle
-  prompt_price_per_1m: number
-  completion_price_per_1m: number
-  cache_price_per_1m: number
-  cache_creation_price_per_1m: number
+	pricing_style: PricingStyle
+	prompt_price_per_1m: number
+	completion_price_per_1m: number
+	cache_read_price_per_1m: number
+	cache_write_price_per_1m: number
 }
 
 export interface PricingSyncPreviewResponse {

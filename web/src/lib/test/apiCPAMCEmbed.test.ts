@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiPath, getSession, login, loginWithCPAAPIKey, logout } from '../api';
+import { apiPath, createUsageEventRequestLogDownloadURL, getSession, login, loginWithCPAAPIKey, logout } from '../api';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -94,6 +94,24 @@ describe('apiPath CPAMC embed behavior', () => {
     expect(new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost').pathname).toBe('/keeper/api/v1/auth/api-key-login');
     expect(headerValue(fetchMock.mock.calls[1][1], 'X-CPA-Usage-Keeper-Embed-Session')).toBeNull();
     expect(headerValue(fetchMock.mock.calls[2][1], 'X-CPA-Usage-Keeper-Embed-Session')).toBe('api-key-embed-token');
+  });
+
+  it('uses embed headers when creating request log download URLs', async () => {
+    const sessionStorage = createSessionStorage();
+    sessionStorage.setItem('cpa_usage_keeper_embed_session', 'embed-token');
+    vi.stubGlobal('window', { __APP_BASE_PATH__: '/keeper/', location: { search: '?embed=cpamc' }, sessionStorage });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      download_url: '/keeper/api/v1/usage/events/42/request-log/download-file?token=abc',
+    }));
+
+    const url = await createUsageEventRequestLogDownloadURL('42');
+
+    const [requestURL, init] = fetchMock.mock.calls[0];
+    expect(new URL(String(requestURL), 'http://localhost').pathname).toBe('/keeper/api/v1/usage/events/42/request-log/download-token');
+    expect(headerValue(init, 'X-CPA-Usage-Keeper-Embed')).toBe('cpamc');
+    expect(headerValue(init, 'X-CPA-Usage-Keeper-Embed-Session')).toBe('embed-token');
+    expect(headerValue(init, 'X-CPA-Usage-Keeper-Request')).toBe('fetch');
+    expect(url).toBe('/keeper/api/v1/usage/events/42/request-log/download-file?token=abc');
   });
 
   it('does not send an existing fallback token while creating a new embed login', async () => {

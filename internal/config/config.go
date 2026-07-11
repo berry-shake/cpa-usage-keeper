@@ -50,6 +50,8 @@ type Config struct {
 	CPABaseURL string
 	// CPAManagementKey 是访问 CPA 管理数据的密钥。
 	CPAManagementKey string
+	// CPARequestLogAccessEnabled 控制是否允许通过 Keeper 访问 CPA request log。
+	CPARequestLogAccessEnabled bool
 	// RedisQueueAddr 是 CPA management data stream 的 TCP 地址，空值时按 CPA_BASE_URL 推导。
 	RedisQueueAddr string
 	// RedisQueueTLS 控制是否使用 TLS 连接 Redis 队列。
@@ -241,6 +243,10 @@ func Load(options LoadOptions) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cpaRequestLogAccessEnabled, err := getBool("CPA_REQUEST_LOG_ACCESS_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
 
 	appBasePath, err := normalizeBasePath(strings.TrimSpace(os.Getenv("APP_BASE_PATH")))
 	if err != nil {
@@ -258,6 +264,7 @@ func Load(options LoadOptions) (*Config, error) {
 		TLSKeyFile:                  strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
 		CPABaseURL:                  strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
 		CPAManagementKey:            strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
+		CPARequestLogAccessEnabled:  cpaRequestLogAccessEnabled,
 		RedisQueueAddr:              strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
 		RedisQueueTLS:               redisQueueTLS,
 		RedisQueueBatchSize:         redisQueueBatchSize,

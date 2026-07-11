@@ -1,21 +1,27 @@
 package test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 	_ "unsafe"
 
 	. "cpa-usage-keeper/internal/api"
+	"cpa-usage-keeper/internal/auth"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
+	"gorm.io/gorm"
 )
 
 type usageEventsStub struct {
@@ -30,6 +36,57 @@ type usageEventsStub struct {
 	filterOptionCalls  int
 	credentialsCalls   int
 	exportCalls        int
+}
+
+type requestLogProviderStub struct {
+	response         service.RequestLogResponse
+	err              error
+	eventID          int64
+	calls            int
+	downloadResponse service.RequestLogDownload
+	downloadErr      error
+	downloadEventID  int64
+	downloadCalls    int
+	downloadClosed   *bool
+}
+
+type requestLogDownloadTokenPayload struct {
+	DownloadURL string `json:"download_url"`
+}
+
+func (s *requestLogProviderStub) GetUsageEventRequestLog(_ context.Context, eventID int64) (service.RequestLogResponse, error) {
+	s.eventID = eventID
+	s.calls++
+	return s.response, s.err
+}
+
+func (s *requestLogProviderStub) DownloadUsageEventRequestLog(_ context.Context, eventID int64) (service.RequestLogDownload, error) {
+	s.downloadEventID = eventID
+	s.downloadCalls++
+	if s.downloadClosed != nil && s.downloadResponse.Body != nil {
+		s.downloadResponse.Body = &trackedReadCloser{Reader: s.downloadResponse.Body, closed: s.downloadClosed}
+	}
+	return s.downloadResponse, s.downloadErr
+}
+
+type trackedReadCloser struct {
+	io.Reader
+	closed *bool
+}
+
+func (r *trackedReadCloser) Close() error {
+	*r.closed = true
+	return nil
+}
+
+func assertNoStoreHeaders(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected Cache-Control no-store, got %q", response.Header().Get("Cache-Control"))
+	}
+	if response.Header().Get("Pragma") != "no-cache" || response.Header().Get("Expires") != "0" {
+		t.Fatalf("expected no-store companion headers, got Pragma=%q Expires=%q", response.Header().Get("Pragma"), response.Header().Get("Expires"))
+	}
 }
 
 func (s *usageEventsStub) GetUsageOverview(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
@@ -154,6 +211,7 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		ExecutorType:        "responses",
 		Endpoint:            "POST /v1/responses",
 		AuthType:            "apikey",
+		RequestID:           "req-log-42",
 		Provider:            "OpenAI Mirror",
 		Source:              "sk-provider-key",
 		AuthIndex:           "2",
@@ -163,7 +221,6 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		InputTokens:         10,
 		OutputTokens:        61,
 		ReasoningTokens:     2,
-		CachedTokens:        1,
 		CacheReadTokens:     3,
 		CacheCreationTokens: 4,
 		TotalTokens:         18,
@@ -202,10 +259,13 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	if !contains(body, `"auth_index":"2"`) {
 		t.Fatalf("expected auth index in response body: %s", body)
 	}
+	if !contains(body, `"request_id":"req-log-42"`) {
+		t.Fatalf("expected request_id in response body: %s", body)
+	}
 	if !contains(body, `"timestamp":"2026-04-22T19:00:00+08:00"`) {
 		t.Fatalf("expected project timezone timestamp in response body: %s", body)
 	}
-	if !contains(body, `"cache_read_tokens":3`) || !contains(body, `"cache_creation_tokens":4`) {
+	if contains(body, `"cached_tokens"`) || !contains(body, `"cache_read_tokens":3`) || !contains(body, `"cache_creation_tokens":4`) {
 		t.Fatalf("expected cache token fields in response body: %s", body)
 	}
 	if !contains(body, `"reasoning_effort":"medium"`) {
@@ -243,6 +303,379 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	}
 }
 
+func TestUsageEventRequestLogReturnsStructuredLog(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{response: service.RequestLogResponse{
+		EventID:   42,
+		RequestID: "req-log-42",
+		Filename:  "error-v1-responses-req-log-42.log",
+		Available: true,
+		Sections: []service.RequestLogSection{{
+			Title:   "REQUEST INFO",
+			Content: "URL: /v1/responses",
+		}},
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider, Status: StatusRouteConfig{CPARequestLogAccessEnabled: true}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/42/request-log", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	assertNoStoreHeaders(t, resp)
+	body := resp.Body.String()
+	if !contains(body, `"event_id":"42"`) || !contains(body, `"request_id":"req-log-42"`) || !contains(body, `"filename":"error-v1-responses-req-log-42.log"`) {
+		t.Fatalf("expected request log metadata in response: %s", body)
+	}
+	if !contains(body, `"title":"REQUEST INFO"`) || !contains(body, `"content":"URL: /v1/responses"`) {
+		t.Fatalf("expected parsed request log sections in response: %s", body)
+	}
+	if contains(body, `"raw":`) {
+		t.Fatalf("expected preview response not to include raw log body: %s", body)
+	}
+	if requestLogProvider.calls != 1 || requestLogProvider.eventID != 42 {
+		t.Fatalf("expected provider call with event id 42, got calls=%d eventID=%d", requestLogProvider.calls, requestLogProvider.eventID)
+	}
+}
+
+func TestUsageEventRequestLogReturnsForbiddenWhenAccessDisabled(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{response: service.RequestLogResponse{
+		EventID:   42,
+		RequestID: "req-log-42",
+		Available: true,
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/42/request-log", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if requestLogProvider.calls != 0 {
+		t.Fatalf("expected disabled request log access not to call provider, got %d calls", requestLogProvider.calls)
+	}
+}
+
+func TestUsageEventRequestLogReturnsNotFoundWhenEventMissing(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{err: gorm.ErrRecordNotFound}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider, Status: StatusRouteConfig{CPARequestLogAccessEnabled: true}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/404/request-log", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if !contains(resp.Body.String(), `"error":"usage event not found"`) {
+		t.Fatalf("expected not found error body, got %s", resp.Body.String())
+	}
+	if requestLogProvider.calls != 1 || requestLogProvider.eventID != 404 {
+		t.Fatalf("expected provider call with event id 404, got calls=%d eventID=%d", requestLogProvider.calls, requestLogProvider.eventID)
+	}
+}
+
+func TestUsageEventRequestLogReturnsTooLargeMetadata(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{response: service.RequestLogResponse{
+		EventID:      42,
+		RequestID:    "req-large",
+		Filename:     "large-request.log",
+		Available:    true,
+		Previewable:  false,
+		TooLarge:     true,
+		Downloadable: true,
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider, Status: StatusRouteConfig{CPARequestLogAccessEnabled: true}})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/42/request-log", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !contains(body, `"too_large":true`) || !contains(body, `"downloadable":true`) {
+		t.Fatalf("expected large log metadata in response: %s", body)
+	}
+	if contains(body, `"raw":`) || contains(body, `"sections":null`) {
+		t.Fatalf("expected too large preview response without raw body: %s", body)
+	}
+}
+
+func TestUsageEventRequestLogDownloadTokenReturnsForbiddenWhenAccessDisabled(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{downloadResponse: service.RequestLogDownload{
+		EventID:      42,
+		RequestID:    "req-log-42",
+		Body:         io.NopCloser(bytes.NewBufferString("raw log")),
+		Downloadable: true,
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/usage/events/42/request-log/download-token", nil)
+	req.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if requestLogProvider.downloadCalls != 0 {
+		t.Fatalf("expected disabled request log download token not to call provider, got %d calls", requestLogProvider.downloadCalls)
+	}
+}
+
+func TestUsageEventRequestLogDownloadFileReturnsForbiddenWhenAccessDisabled(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{downloadResponse: service.RequestLogDownload{
+		EventID:      42,
+		RequestID:    "req-log-42",
+		Body:         io.NopCloser(bytes.NewBufferString("raw log")),
+		Downloadable: true,
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/42/request-log/download-file?token=stale", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if requestLogProvider.downloadCalls != 0 {
+		t.Fatalf("expected disabled request log download file not to call provider, got %d calls", requestLogProvider.downloadCalls)
+	}
+}
+
+func TestUsageEventRequestLogDownloadTokenStreamsAttachmentOnce(t *testing.T) {
+	provider := &usageEventsStub{}
+	body := "token raw log"
+	closed := false
+	requestLogProvider := &requestLogProviderStub{downloadResponse: service.RequestLogDownload{
+		EventID:       42,
+		RequestID:     "req-log-42",
+		Filename:      "token-request.log",
+		ContentType:   "text/plain; charset=utf-8",
+		ContentLength: int64(len(body)),
+		Body:          io.NopCloser(bytes.NewBufferString(body)),
+		Downloadable:  true,
+	}, downloadClosed: &closed}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider, Status: StatusRouteConfig{CPARequestLogAccessEnabled: true}})
+	issueReq := httptest.NewRequest(http.MethodPost, "/api/v1/usage/events/42/request-log/download-token", nil)
+	issueReq.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+	issueResp := httptest.NewRecorder()
+
+	router.ServeHTTP(issueResp, issueReq)
+
+	if issueResp.Code != http.StatusOK {
+		t.Fatalf("expected token status 200, got %d body=%s", issueResp.Code, issueResp.Body.String())
+	}
+	assertNoStoreHeaders(t, issueResp)
+	var payload requestLogDownloadTokenPayload
+	if err := json.NewDecoder(issueResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	if payload.DownloadURL == "" || !contains(payload.DownloadURL, "/api/v1/usage/events/42/request-log/download-file?token=") {
+		t.Fatalf("unexpected download URL %q", payload.DownloadURL)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, payload.DownloadURL, nil)
+	downloadResp := httptest.NewRecorder()
+	router.ServeHTTP(downloadResp, downloadReq)
+
+	if downloadResp.Code != http.StatusOK {
+		t.Fatalf("expected download status 200, got %d body=%s", downloadResp.Code, downloadResp.Body.String())
+	}
+	if !contains(downloadResp.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("expected text attachment content type, got %q", downloadResp.Header().Get("Content-Type"))
+	}
+	if !contains(downloadResp.Header().Get("Content-Disposition"), `filename="token-request.log"`) {
+		t.Fatalf("expected request log attachment filename, got %q", downloadResp.Header().Get("Content-Disposition"))
+	}
+	if downloadResp.Header().Get("Content-Length") != strconv.Itoa(len(body)) {
+		t.Fatalf("expected content length %d, got %q", len(body), downloadResp.Header().Get("Content-Length"))
+	}
+	if downloadResp.Body.String() != body {
+		t.Fatalf("unexpected download body %q", downloadResp.Body.String())
+	}
+	if downloadResp.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected token request log download Cache-Control no-store, got %q", downloadResp.Header().Get("Cache-Control"))
+	}
+	if downloadResp.Header().Get("Pragma") != "no-cache" || downloadResp.Header().Get("Expires") != "0" {
+		t.Fatalf("expected request log download no-store companion headers, got Pragma=%q Expires=%q", downloadResp.Header().Get("Pragma"), downloadResp.Header().Get("Expires"))
+	}
+	if !closed {
+		t.Fatalf("expected download stream to be closed")
+	}
+	if requestLogProvider.downloadCalls != 1 || requestLogProvider.downloadEventID != 42 {
+		t.Fatalf("expected download provider call with event id 42, got calls=%d eventID=%d", requestLogProvider.downloadCalls, requestLogProvider.downloadEventID)
+	}
+
+	reuseReq := httptest.NewRequest(http.MethodGet, payload.DownloadURL, nil)
+	reuseResp := httptest.NewRecorder()
+	router.ServeHTTP(reuseResp, reuseReq)
+	if reuseResp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected reused token status 401, got %d body=%s", reuseResp.Code, reuseResp.Body.String())
+	}
+	if requestLogProvider.downloadCalls != 1 {
+		t.Fatalf("expected reused token not to call provider, got %d calls", requestLogProvider.downloadCalls)
+	}
+}
+
+func TestUsageEventRequestLogDirectDownloadRouteIsUnavailable(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{downloadResponse: service.RequestLogDownload{
+		EventID:      42,
+		RequestID:    "req-log-42",
+		Body:         io.NopCloser(bytes.NewBufferString("raw log")),
+		Downloadable: true,
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{
+		RequestLogs: requestLogProvider,
+		Status:      StatusRouteConfig{CPARequestLogAccessEnabled: true},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/42/request-log/download", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected removed direct download route status 404, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if requestLogProvider.downloadCalls != 0 {
+		t.Fatalf("expected removed direct route not to call provider, got %d calls", requestLogProvider.downloadCalls)
+	}
+}
+
+func TestUsageEventRequestLogDownloadTokenAuthBoundary(t *testing.T) {
+	provider := &usageEventsStub{}
+	requestLogProvider := &requestLogProviderStub{downloadResponse: service.RequestLogDownload{
+		EventID:      42,
+		RequestID:    "req-log-42",
+		Filename:     "token-auth-request.log",
+		ContentType:  "text/plain; charset=utf-8",
+		Body:         io.NopCloser(bytes.NewBufferString("auth token raw log")),
+		Downloadable: true,
+	}}
+	sessions := auth.NewSessionManager(time.Hour)
+	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour, BasePath: "/cpa"}
+	router := NewRouter(nil, nil, provider, nil, config, NewAuthHandler(config, sessions), "/cpa", OptionalProviders{RequestLogs: requestLogProvider, Status: StatusRouteConfig{CPARequestLogAccessEnabled: true}})
+
+	noSessionReq := httptest.NewRequest(http.MethodPost, "/cpa/api/v1/usage/events/42/request-log/download-token", nil)
+	noSessionReq.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+	noSessionResp := httptest.NewRecorder()
+	router.ServeHTTP(noSessionResp, noSessionReq)
+	if noSessionResp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated token issue status 401, got %d body=%s", noSessionResp.Code, noSessionResp.Body.String())
+	}
+
+	viewerToken, _, err := sessions.CreateAPIKeyViewer(7)
+	if err != nil {
+		t.Fatalf("create viewer session: %v", err)
+	}
+	viewerReq := httptest.NewRequest(http.MethodPost, "/cpa/api/v1/usage/events/42/request-log/download-token", nil)
+	viewerReq.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+	viewerReq.AddCookie(&http.Cookie{Name: "cpa_usage_keeper_session", Value: viewerToken})
+	viewerResp := httptest.NewRecorder()
+	router.ServeHTTP(viewerResp, viewerReq)
+	if viewerResp.Code != http.StatusForbidden {
+		t.Fatalf("expected viewer token issue status 403, got %d body=%s", viewerResp.Code, viewerResp.Body.String())
+	}
+
+	adminToken, _, err := sessions.Create()
+	if err != nil {
+		t.Fatalf("create admin session: %v", err)
+	}
+	adminReq := httptest.NewRequest(http.MethodPost, "/cpa/api/v1/usage/events/42/request-log/download-token", nil)
+	adminReq.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+	adminReq.AddCookie(&http.Cookie{Name: "cpa_usage_keeper_session", Value: adminToken})
+	adminResp := httptest.NewRecorder()
+	router.ServeHTTP(adminResp, adminReq)
+	if adminResp.Code != http.StatusOK {
+		t.Fatalf("expected admin token issue status 200, got %d body=%s", adminResp.Code, adminResp.Body.String())
+	}
+	var payload requestLogDownloadTokenPayload
+	if err := json.NewDecoder(adminResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode admin token response: %v", err)
+	}
+	if !strings.HasPrefix(payload.DownloadURL, "/cpa/api/v1/usage/events/42/request-log/download-file?token=") {
+		t.Fatalf("expected base path download URL, got %q", payload.DownloadURL)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, payload.DownloadURL, nil)
+	downloadResp := httptest.NewRecorder()
+	router.ServeHTTP(downloadResp, downloadReq)
+	if downloadResp.Code != http.StatusOK {
+		t.Fatalf("expected token-only download status 200, got %d body=%s", downloadResp.Code, downloadResp.Body.String())
+	}
+	if downloadResp.Body.String() != "auth token raw log" {
+		t.Fatalf("unexpected token-only download body %q", downloadResp.Body.String())
+	}
+	if requestLogProvider.downloadCalls != 1 {
+		t.Fatalf("expected one token-only provider download call, got %d", requestLogProvider.downloadCalls)
+	}
+}
+
+func TestUsageEventRequestLogDownloadSanitizesAttachmentFilename(t *testing.T) {
+	provider := &usageEventsStub{}
+	unsafeFilename := "bad\r\nX-Bad: yes; evil/../名.log"
+	requestLogProvider := &requestLogProviderStub{downloadResponse: service.RequestLogDownload{
+		EventID:      42,
+		RequestID:    "req-log-42",
+		Filename:     unsafeFilename,
+		ContentType:  "text/plain",
+		Body:         io.NopCloser(strings.NewReader("raw")),
+		Downloadable: true,
+	}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{RequestLogs: requestLogProvider, Status: StatusRouteConfig{CPARequestLogAccessEnabled: true}})
+	issueReq := httptest.NewRequest(http.MethodPost, "/api/v1/usage/events/42/request-log/download-token", nil)
+	issueReq.Header.Set("X-CPA-Usage-Keeper-Request", "fetch")
+	issueResp := httptest.NewRecorder()
+
+	router.ServeHTTP(issueResp, issueReq)
+
+	if issueResp.Code != http.StatusOK {
+		t.Fatalf("expected token status 200, got %d body=%s", issueResp.Code, issueResp.Body.String())
+	}
+	var payload requestLogDownloadTokenPayload
+	if err := json.NewDecoder(issueResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, payload.DownloadURL, nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	disposition := resp.Header().Get("Content-Disposition")
+	if strings.ContainsAny(disposition, "\r\n") {
+		t.Fatalf("content disposition must not contain raw CR/LF: %q", disposition)
+	}
+	match := regexp.MustCompile(`filename="([^"]+)"`).FindStringSubmatch(disposition)
+	if len(match) != 2 {
+		t.Fatalf("expected sanitized filename parameter, got %q", disposition)
+	}
+	if strings.ContainsAny(match[1], "\r\n;:/\\\"") {
+		t.Fatalf("fallback filename contains unsafe header/path characters: %q in %q", match[1], disposition)
+	}
+	if strings.Contains(disposition, "%0D") || strings.Contains(disposition, "%0A") || strings.Contains(disposition, "%2F") || strings.Contains(disposition, "%3B") {
+		t.Fatalf("filename* must not preserve encoded control/path/header separators, got %q", disposition)
+	}
+	if !contains(disposition, `filename*=UTF-8''bad__X-Bad_%20yes_%20evil_.._%E5%90%8D.log`) {
+		t.Fatalf("expected RFC5987 filename* parameter to preserve safe Unicode only, got %q", disposition)
+	}
+}
+
 func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) {
 	provider := &usageEventsStub{exportEvents: []servicedto.UsageEventRecord{{
 		ID:                  52,
@@ -263,7 +696,6 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 		InputTokens:         10,
 		OutputTokens:        61,
 		ReasoningTokens:     2,
-		CachedTokens:        1,
 		CacheReadTokens:     3,
 		CacheCreationTokens: 4,
 		TotalTokens:         18,
@@ -315,6 +747,9 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	if !contains(body, "cpa_api_key_id") || !contains(body, "auth_index") || !contains(body, "model_alias") || !contains(body, "executor_type") || !contains(body, "is_identity_deleted") {
 		t.Fatalf("expected cpa_api_key_id, auth_index, model_alias, executor_type, and is_identity_deleted columns, got %s", body)
 	}
+	if !contains(body, "cache_read_tokens,cache_creation_tokens,cache_read_rate") || !contains(body, ",3,4,30,") || contains(body, "cached_tokens") {
+		t.Fatalf("expected canonical cache token fields in csv export, got %s", body)
+	}
 	if !regexp.MustCompile(`(?m)^id,timestamp,api_key,cpa_api_key_id,source,source_type,auth_index,is_identity_deleted,model,model_alias,reasoning_effort,`).MatchString(body) {
 		t.Fatalf("expected model_alias to follow model in csv header, got %s", body)
 	}
@@ -331,24 +766,26 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 
 func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 	provider := &usageEventsStub{events: []servicedto.UsageEventRecord{{
-		ID:            53,
-		Timestamp:     time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
-		APIGroupKey:   "sk-json-export",
-		Model:         "gpt-5",
-		ModelAlias:    "gpt-json-alias",
-		ServiceTier:   "default",
-		ExecutorType:  "chat_completions",
-		Endpoint:      "GET /v1/responses",
-		AuthType:      "oauth",
-		Source:        "claude-code",
-		AuthIndex:     "auth-file-export",
-		Failed:        false,
-		LatencyMS:     300,
-		InputTokens:   9,
-		OutputTokens:  5,
-		TotalTokens:   14,
-		CostAvailable: true,
-		PricingStyle:  "openai",
+		ID:                  53,
+		Timestamp:           time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
+		APIGroupKey:         "sk-json-export",
+		Model:               "gpt-5",
+		ModelAlias:          "gpt-json-alias",
+		ServiceTier:         "default",
+		ExecutorType:        "chat_completions",
+		Endpoint:            "GET /v1/responses",
+		AuthType:            "oauth",
+		Source:              "claude-code",
+		AuthIndex:           "auth-file-export",
+		Failed:              false,
+		LatencyMS:           300,
+		InputTokens:         9,
+		OutputTokens:        5,
+		CacheReadTokens:     3,
+		CacheCreationTokens: 4,
+		TotalTokens:         14,
+		CostAvailable:       true,
+		PricingStyle:        "openai",
 	}}}
 	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "", OptionalProviders{
 		CPAAPIKeys: &authCPAAPIKeyStub{row: entities.CPAAPIKey{
@@ -383,6 +820,9 @@ func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 	}
 	if !contains(body, `"cpa_api_key_id":"9"`) || !contains(body, `"source_type":""`) || !contains(body, `"reasoning_effort":""`) || !contains(body, `"ttft_ms":null`) || !contains(body, `"speed_tps":null`) {
 		t.Fatalf("expected json export to keep a stable field set, got %s", body)
+	}
+	if contains(body, `"cached_tokens"`) || !contains(body, `"cache_read_tokens":3`) || !contains(body, `"cache_creation_tokens":4`) || !contains(body, `"cache_read_rate":33.33333333333333`) {
+		t.Fatalf("expected canonical cache token fields in json export, got %s", body)
 	}
 	if contains(body, `"is_deleted"`) {
 		t.Fatalf("expected json export to use is_identity_deleted instead of is_deleted, got %s", body)
