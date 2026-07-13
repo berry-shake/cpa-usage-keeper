@@ -107,6 +107,71 @@ describe('PriceSettingsCard', () => {
 		expect(html).toContain('$3.1250/1M');
 	});
 
+  it('renders saved model prices in natural descending model-name order', () => {
+    const prices = Object.fromEntries([
+      'gpt-5.5',
+      'gpt-5.6-sol',
+      'gpt-5.10',
+      'gpt-5.6-terra',
+      'gpt-5.9',
+    ].map((model, index) => [model, {
+      style: 'openai' as const,
+      prompt: index + 1,
+      completion: index + 2,
+      cacheRead: 0,
+      cacheWrite: 0,
+      multiplier: 1,
+    }]));
+    const html = renderToStaticMarkup(
+      <PriceSettingsCard
+        modelNames={[]}
+        modelPrices={prices}
+        onPriceSave={() => undefined}
+        onPriceDelete={() => undefined}
+        loading={false}
+      />,
+    );
+    const renderedOrder = [
+      'gpt-5.10',
+      'gpt-5.9',
+      'gpt-5.6-terra',
+      'gpt-5.6-sol',
+      'gpt-5.5',
+    ].map((model) => html.indexOf(`>${model}</span>`));
+
+    expect(renderedOrder.every((index) => index >= 0)).toBe(true);
+    expect(renderedOrder).toEqual([...renderedOrder].sort((left, right) => left - right));
+  });
+
+  it('uses an exact-name tie-break for naturally equivalent saved model names', () => {
+    const prices = Object.fromEntries([
+      'gpt-02',
+      'GPT-2',
+      'gpt-2',
+    ].map((model, index) => [model, {
+      style: 'openai' as const,
+      prompt: index + 1,
+      completion: index + 2,
+      cacheRead: 0,
+      cacheWrite: 0,
+      multiplier: 1,
+    }]));
+    const html = renderToStaticMarkup(
+      <PriceSettingsCard
+        modelNames={[]}
+        modelPrices={prices}
+        onPriceSave={() => undefined}
+        onPriceDelete={() => undefined}
+        loading={false}
+      />,
+    );
+    const renderedOrder = ['gpt-2', 'gpt-02', 'GPT-2']
+      .map((model) => html.indexOf(`>${model}</span>`));
+
+    expect(renderedOrder.every((index) => index >= 0)).toBe(true);
+    expect(renderedOrder).toEqual([...renderedOrder].sort((left, right) => left - right));
+  });
+
 	it('shows cache read and write controls for OpenAI create, edit and sync drafts', () => {
 		const html = renderToStaticMarkup(
 			<PriceSettingsCard
@@ -427,12 +492,12 @@ describe('PriceSettingsCard', () => {
 });
 
 describe('buildPricingModelOptions', () => {
-  it('keeps configured models visible but disabled', () => {
+  it('groups unconfigured models first and naturally sorts both groups descending', () => {
     const options = buildPricingModelOptions(
-      ['priced-zeta', 'unpriced-beta', 'priced-alpha', 'unpriced-alpha'],
+      ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.10', 'gpt-5.6-terra', 'gpt-5.9'],
       {
-        'priced-zeta': { style: 'openai', prompt: 3, completion: 15, cacheRead: 0.3, cacheWrite: 0, multiplier: 1 },
-        'priced-alpha': { style: 'openai', prompt: 2, completion: 8, cacheRead: 0.2, cacheWrite: 0, multiplier: 1 },
+        'gpt-5.9': { style: 'openai', prompt: 3, completion: 15, cacheRead: 0.3, cacheWrite: 0, multiplier: 1 },
+        'gpt-5.5': { style: 'openai', prompt: 2, completion: 8, cacheRead: 0.2, cacheWrite: 0, multiplier: 1 },
       },
       'Select model',
       'Configured',
@@ -440,18 +505,34 @@ describe('buildPricingModelOptions', () => {
 
     expect(options.map((option) => option.value)).toEqual([
       '',
-      'priced-alpha',
-      'priced-zeta',
-      'unpriced-alpha',
-      'unpriced-beta',
+      'gpt-5.10',
+      'gpt-5.6-terra',
+      'gpt-5.6-sol',
+      'gpt-5.9',
+      'gpt-5.5',
     ]);
-    expect(options.find((option) => option.value === 'priced-alpha')).toMatchObject({
+    expect(options.find((option) => option.value === 'gpt-5.9')).toMatchObject({
       disabled: true,
       suffixAriaLabel: 'Configured',
     });
-    expect(options.find((option) => option.value === 'priced-alpha')?.suffix).toBeTruthy();
-    expect(options.find((option) => option.value === 'unpriced-alpha')?.suffix).toBeUndefined();
-    expect(options.find((option) => option.value === 'unpriced-alpha')?.disabled).toBeUndefined();
+    expect(options.find((option) => option.value === 'gpt-5.9')?.suffix).toBeTruthy();
+    expect(options.find((option) => option.value === 'gpt-5.10')?.suffix).toBeUndefined();
+    expect(options.find((option) => option.value === 'gpt-5.10')?.disabled).toBeUndefined();
+  });
+
+  it('uses an exact-name tie-break when natural model names compare equally', () => {
+    const options = buildPricingModelOptions(
+      ['gpt-02', 'GPT-2', 'gpt-2'],
+      {},
+      'Select model',
+    );
+
+    expect(options.map((option) => option.value)).toEqual([
+      '',
+      'gpt-2',
+      'gpt-02',
+      'GPT-2',
+    ]);
   });
 });
 

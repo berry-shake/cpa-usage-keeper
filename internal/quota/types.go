@@ -29,6 +29,15 @@ type ProviderResetter interface {
 	Reset(context.Context, ProviderInput) (ProviderResetOutput, error)
 }
 
+type ProviderResetCreditsOutput struct {
+	AvailableCount *int                        `json:"availableCount"`
+	Credits        []CodexRateLimitResetCredit `json:"credits"`
+}
+
+type ProviderResetCreditLister interface {
+	ListResetCredits(context.Context, ProviderInput) (ProviderResetCreditsOutput, error)
+}
+
 type QuotaWindow struct {
 	Duration *float64 `json:"duration,omitempty"`
 	Unit     string   `json:"unit,omitempty"`
@@ -40,6 +49,9 @@ type QuotaRow struct {
 	Label             string       `json:"label,omitempty"`
 	Scope             string       `json:"scope,omitempty"`
 	Metric            string       `json:"metric,omitempty"`
+	GroupKey          string       `json:"groupKey,omitempty"`
+	GroupLabel        string       `json:"groupLabel,omitempty"`
+	GroupDescription  string       `json:"groupDescription,omitempty"`
 	PlanType          string       `json:"planType,omitempty"`
 	Used              *float64     `json:"used,omitempty"`
 	Limit             *float64     `json:"limit,omitempty"`
@@ -55,19 +67,22 @@ type QuotaRow struct {
 	WindowUsageCost   *float64     `json:"window_usage_cost,omitempty"`
 }
 
-type AntigravityQuotaInfo struct {
-	RemainingFraction float64 `json:"remainingFraction,omitempty"`
-	Remaining         float64 `json:"remaining,omitempty"`
-	ResetTime         string  `json:"resetTime,omitempty"`
+type AntigravityQuotaBucket struct {
+	BucketID          string   `json:"bucketId,omitempty"`
+	DisplayName       string   `json:"displayName,omitempty"`
+	Window            string   `json:"window,omitempty"`
+	RemainingFraction *float64 `json:"remainingFraction,omitempty"`
+	ResetTime         string   `json:"resetTime,omitempty"`
 }
 
-type AntigravityQuotaModel struct {
-	DisplayName string                `json:"displayName,omitempty"`
-	QuotaInfo   *AntigravityQuotaInfo `json:"quotaInfo,omitempty"`
+type AntigravityQuotaGroup struct {
+	DisplayName string                   `json:"displayName,omitempty"`
+	Description string                   `json:"description,omitempty"`
+	Buckets     []AntigravityQuotaBucket `json:"buckets,omitempty"`
 }
 
 type AntigravityQuotaPayload struct {
-	Models map[string]AntigravityQuotaModel `json:"models,omitempty"`
+	Groups []AntigravityQuotaGroup `json:"groups,omitempty"`
 }
 
 type CodexUsageWindow struct {
@@ -94,6 +109,13 @@ type CodexAdditionalRateLimit struct {
 
 type CodexRateLimitResetCredits struct {
 	AvailableCount *int `json:"availableCount,omitempty"`
+}
+
+type CodexRateLimitResetCredit struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	GrantedAt string `json:"grantedAt,omitempty"`
+	ExpiresAt string `json:"expiresAt"`
 }
 
 type CodexUsagePayload struct {
@@ -218,7 +240,18 @@ type KimiUsagePayload struct {
 }
 
 type XAIMoneyValue struct {
-	Val float64 `json:"val,omitempty"`
+	Val *float64 `json:"val,omitempty"`
+}
+
+type XAIBillingPeriod struct {
+	Type  string `json:"type,omitempty"`
+	Start string `json:"start,omitempty"`
+	End   string `json:"end,omitempty"`
+}
+
+type XAIBillingProductUsage struct {
+	Product      string   `json:"product,omitempty"`
+	UsagePercent *float64 `json:"usagePercent,omitempty"`
 }
 
 type XAIBillingCycle struct {
@@ -234,12 +267,16 @@ type XAIBillingHistoryItem struct {
 }
 
 type XAIBillingConfig struct {
-	MonthlyLimit       XAIMoneyValue           `json:"monthlyLimit,omitempty"`
-	Used               XAIMoneyValue           `json:"used,omitempty"`
-	OnDemandCap        XAIMoneyValue           `json:"onDemandCap,omitempty"`
-	BillingPeriodStart string                  `json:"billingPeriodStart,omitempty"`
-	BillingPeriodEnd   string                  `json:"billingPeriodEnd,omitempty"`
-	History            []XAIBillingHistoryItem `json:"history,omitempty"`
+	CurrentPeriod      *XAIBillingPeriod        `json:"currentPeriod,omitempty"`
+	CreditUsagePercent *float64                 `json:"creditUsagePercent,omitempty"`
+	ProductUsage       []XAIBillingProductUsage `json:"productUsage,omitempty"`
+	MonthlyLimit       XAIMoneyValue            `json:"monthlyLimit,omitempty"`
+	Used               XAIMoneyValue            `json:"used,omitempty"`
+	OnDemandCap        XAIMoneyValue            `json:"onDemandCap,omitempty"`
+	OnDemandUsed       XAIMoneyValue            `json:"onDemandUsed,omitempty"`
+	BillingPeriodStart string                   `json:"billingPeriodStart,omitempty"`
+	BillingPeriodEnd   string                   `json:"billingPeriodEnd,omitempty"`
+	History            []XAIBillingHistoryItem  `json:"history,omitempty"`
 }
 
 type XAIBillingPayload struct {
@@ -269,7 +306,8 @@ type KimiResult struct {
 }
 
 type XAIResult struct {
-	Billing *XAIBillingPayload `json:"billing"`
+	Weekly  *XAIBillingPayload `json:"weekly,omitempty"`
+	Monthly *XAIBillingPayload `json:"monthly,omitempty"`
 }
 
 type ProviderHandler interface {

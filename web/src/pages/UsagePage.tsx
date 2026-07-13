@@ -2098,11 +2098,18 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 ))}
               </div>
 
-              <div className={styles.toolbarActionsRight}>
-                {showRangeControls && (
-                  <div className={styles.usageFilterBar}>
-                    {shouldShowApiKeyFilter(activeTab) && (
-                      <div className={styles.apiKeyFilterGroup}>
+              <div className={`${styles.toolbarActionsRight} ${!isEmbeddedInCPAMC ? styles.toolbarActionsRightAnimated : ''}`.trim()}>
+                {/* 普通模式保留筛选区节点以执行过渡；CPAMC 继续按需挂载，维持既有布局。 */}
+                {(!isEmbeddedInCPAMC || showRangeControls) && (
+                  <div
+                    className={`${styles.usageFilterTransition} ${isEmbeddedInCPAMC ? styles.usageFilterTransitionImmediate : ''} ${showRangeControls ? styles.usageFilterTransitionOpen : ''}`.trim()}
+                    aria-hidden={!showRangeControls}
+                    inert={!showRangeControls}
+                  >
+                    <div className={styles.usageFilterTransitionInner}>
+                      <div className={styles.usageFilterBar}>
+                        {shouldShowApiKeyFilter(activeTab) && (
+                          <div className={styles.apiKeyFilterGroup}>
                     <label className={`${styles.usageFilterField} ${styles.apiKeyFilterField}`.trim()}>
                       <span className={styles.usageFilterLabel}>{t('usage_stats.api_key_filter')}</span>
                       <Select
@@ -2200,6 +2207,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                     {isCustomRange && customRangeError && (
                       <span className={styles.customRangeError}>{customRangeError}</span>
                     )}
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div className={styles.usageRefreshSlot}>

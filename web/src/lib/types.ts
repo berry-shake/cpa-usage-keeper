@@ -418,6 +418,9 @@ export interface UsageQuotaRow {
   label?: string
   scope?: string
   metric?: string
+  groupKey?: string
+  groupLabel?: string
+  groupDescription?: string
   planType?: string
   used?: number
   limit?: number
@@ -443,6 +446,19 @@ export interface UsageQuotaResetResponse {
   authIndex: string
   code?: string
   windowsReset?: number
+}
+
+export interface UsageQuotaResetCredit {
+  id: string
+  status: string
+  grantedAt?: string
+  expiresAt: string
+}
+
+export interface UsageQuotaResetCreditsResponse {
+  authIndex: string
+  availableCount: number | null
+  credits: UsageQuotaResetCredit[]
 }
 
 export interface UsageQuotaCacheItem {

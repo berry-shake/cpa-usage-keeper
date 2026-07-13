@@ -306,6 +306,52 @@ describe('AuthFileCredentialsSection quota usage mode rendering', () => {
     expect(estimatedHtml).toContain('$2.50')
   })
 
+  it('renders Antigravity group metadata below the standard quota label', () => {
+    const groupedRow = {
+      ...row,
+      displayQuotas: [{
+        ...quota,
+        key: 'bucket.gemini-5h',
+        label: '5h',
+        scope: 'quota_group',
+        groupKey: 'antigravity-group-1',
+        groupLabel: 'Gemini Models',
+        groupDescription: 'Models within this group: Gemini Flash, Gemini Pro',
+        windowUsage: undefined,
+        windowUsageEstimate: undefined,
+        resetText: '2026-05-09T12:00:00Z',
+      }],
+    } as AuthFileCredentialRow
+
+    const html = renderToStaticMarkup(createElement(AuthFileQuotaPanel, { row: groupedRow, quotaUsageMode: 'current' }))
+
+    expect(html).toContain('>5h<')
+    expect(html).toContain('credentialQuotaGroupLabel')
+    expect(html).toContain('Gemini Models')
+    expect(html).toContain('credentialQuotaGroupTooltipTarget')
+    expect(html).toContain('role="tooltip"')
+    expect(html).toContain('aria-describedby=')
+    expect(html).toContain('Models within this group: Gemini Flash, Gemini Pro')
+    expect(html).not.toContain('title="Models within this group: Gemini Flash, Gemini Pro"')
+    expect(html.indexOf('Gemini Models')).toBeGreaterThan(html.indexOf('credentialQuotaTrack'))
+  })
+
+  it('anchors reset time on the right when Codex has no token or cost usage', () => {
+    const noUsageRow = {
+      ...row,
+      displayQuotas: [{
+        ...quota,
+        windowUsage: undefined,
+        windowUsageEstimate: undefined,
+        resetText: '2026-05-09T12:00:00Z',
+      }],
+    } as AuthFileCredentialRow
+
+    const html = renderToStaticMarkup(createElement(AuthFileQuotaPanel, { row: noUsageRow, quotaUsageMode: 'current' }))
+
+    expect(html).toContain('credentialQuotaResetTime')
+  })
+
   it('renders xai billing spend without token usage metrics', () => {
     const billingRow = {
       ...row,
@@ -328,6 +374,24 @@ describe('AuthFileCredentialsSection quota usage mode rendering', () => {
     expect(html.match(/<img/g)).toHaveLength(1)
     expect(html.indexOf('<img')).toBeLessThan(html.indexOf('$1.67'))
     expect(html).not.toContain('1.00M')
+  })
+
+  it('renders xai weekly before monthly in the existing quota grid', () => {
+    const xaiRow = {
+      ...row,
+      displayQuotas: [
+        { ...quota, key: 'billing.weekly', label: 'Weekly', percent: 25, barPercent: 75 },
+        { ...quota, key: 'billing.monthly', label: 'Monthly Spend', percent: 50, barPercent: 50, billingUsage: { used: '$5.00', limit: '$10.00', remaining: '$5.00' }, windowUsage: undefined },
+        { ...quota, key: 'billing.on_demand', label: 'Pay-as-you-go', percent: 20, barPercent: 80, billingUsage: { used: '$1.00', limit: '$5.00', remaining: '$4.00' }, windowUsage: undefined },
+        { ...quota, key: 'billing.weekly.product.grok+4', label: 'Grok 4 Usage', percent: 80, barPercent: 20 },
+      ],
+    } as AuthFileCredentialRow
+
+    const html = renderToStaticMarkup(createElement(AuthFileQuotaPanel, { row: xaiRow, quotaUsageMode: 'current' }))
+
+    expect(html.indexOf('Weekly')).toBeLessThan(html.indexOf('Monthly Spend'))
+    expect(html.indexOf('Monthly Spend')).toBeLessThan(html.indexOf('Pay-as-you-go'))
+    expect(html.indexOf('Pay-as-you-go')).toBeLessThan(html.indexOf('Grok 4 Usage'))
   })
 })
 
