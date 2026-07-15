@@ -6,7 +6,7 @@ import (
 
 	"cpa-usage-keeper/internal/repository/migration"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
