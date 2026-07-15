@@ -346,6 +346,7 @@ const formatSpeedTPS = (speedTPS: number | null): string => {
 };
 
 const REQUEST_SPEED_MODE_LABEL_KEYS: Record<string, string> = {
+  auto: 'usage_stats.speed_mode_auto',
   default: 'usage_stats.speed_mode_standard',
   standard: 'usage_stats.speed_mode_standard',
   priority: 'usage_stats.speed_mode_fast',
@@ -353,7 +354,7 @@ const REQUEST_SPEED_MODE_LABEL_KEYS: Record<string, string> = {
   flex: 'usage_stats.speed_mode_flex',
 };
 
-const formatResponseSpeedMode = (rawMode: unknown, t: (key: string) => string): string => {
+const formatSpeedMode = (rawMode: unknown, t: (key: string) => string): string => {
   const value = String(rawMode ?? '').trim();
   if (!value) return '-';
 
@@ -941,7 +942,7 @@ export function RequestEventsDetailsCard({
       const modelAliasValue = String(event.model_alias ?? '').trim();
       const modelAlias = modelAliasValue && modelAliasValue !== modelValue ? modelAliasValue : '-';
       const reasoningEffort = String(event.reasoning_effort ?? '').trim() || '-';
-      const speedMode = formatResponseSpeedMode(event.response_service_tier, t);
+      const speedMode = formatSpeedMode(event.service_tier, t);
       const endpointFields = parseRequestEndpoint(event.endpoint);
       const inputTokens = Math.max(toNumber(event.tokens?.input_tokens), 0);
       const outputTokens = Math.max(toNumber(event.tokens?.output_tokens), 0);

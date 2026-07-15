@@ -33,16 +33,3 @@ type RedisInboxPullResult struct {
 	Status       string
 	InsertedRows int
 }
-
-// ProviderMetadataInput 是 provider metadata 拉平后的服务层输入。
-type ProviderMetadataInput struct {
-	LookupKey    string
-	Prefix       string
-	ProviderType string
-	DisplayName  string
-	AuthIndex    string
-	BaseURL      string
-	Priority     *int
-	Disabled     *bool
-	Note         *string
-}
