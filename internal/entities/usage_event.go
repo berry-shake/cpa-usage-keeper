@@ -15,6 +15,7 @@ type UsageEvent struct {
 	ModelAlias          *string   `gorm:"column:model_alias"`
 	ReasoningEffort     string    `gorm:"column:reasoning_effort;not null;default:''"`
 	ServiceTier         string    `gorm:"column:service_tier;not null;default:''"`
+	ResponseServiceTier string    `gorm:"column:response_service_tier;not null;default:''"`
 	ExecutorType        string    `gorm:"column:executor_type;not null;default:''"`
 	Timestamp           time.Time `gorm:"serializer:storageTime;index:idx_usage_events_timestamp_id,sort:desc,priority:1;index:idx_usage_events_auth_index_timestamp_id,priority:2"`
 	Source              string
@@ -27,6 +28,7 @@ type UsageEvent struct {
 	ReasoningTokens     int64
 	CachedTokens        int64
 	CacheReadTokens     int64 `gorm:"not null;default:0"`
+	CacheReadPresent    bool  `gorm:"-" json:"-"` // 仅在 Redis 入库归一化期间区分 CPA canonical zero 与旧 payload。
 	CacheCreationTokens int64 `gorm:"not null;default:0"`
 	TotalTokens         int64
 	CreatedAt           time.Time `gorm:"serializer:storageTime"`

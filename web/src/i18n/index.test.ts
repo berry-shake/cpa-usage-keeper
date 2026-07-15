@@ -126,12 +126,15 @@ describe('i18n resources', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.speed_mode')).toBe('Speed Mode');
     expect(i18n.getResource('en', 'translation', 'usage_stats.speed_mode_standard')).toBe('Standard');
     expect(i18n.getResource('en', 'translation', 'usage_stats.speed_mode_fast')).toBe('Fast');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.speed_mode_flex')).toBe('Flex');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.speed_mode')).toBe('速度模式');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.speed_mode_standard')).toBe('标准');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.speed_mode_fast')).toBe('快速');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.speed_mode_flex')).toBe('弹性');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.speed_mode')).toBe('速度模式');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.speed_mode_standard')).toBe('標準');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.speed_mode_fast')).toBe('快速');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.speed_mode_flex')).toBe('彈性');
   });
 
   it('keeps Analysis heatmap copy focused on hover details', () => {
@@ -140,17 +143,14 @@ describe('i18n resources', () => {
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_heatmap_subtitle')).toBe('顯示 API Key 與模型組合下的 Token 分布，懸浮查看明細。');
   });
 
-  it('labels Analysis cost blended rate metrics', () => {
+  it('labels Analysis cost metrics', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_per_million_tokens')).toBe('Cost / 1M Tokens');
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_blended_rate')).toBe('Blended Rate');
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_share')).toBe('Cost Share');
-    expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_rate_sparkline_hint')).toBe('Recent Cost / 1M Tokens by time bucket');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_blended_rate')).toBe('混合费率');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_cost_share')).toBe('成本占比');
-    expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_cost_rate_sparkline_hint')).toBe('按时间桶展示最近的每 1M Token 成本');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_blended_rate')).toBe('混合費率');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_cost_share')).toBe('成本占比');
-    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_cost_rate_sparkline_hint')).toBe('按時間桶顯示最近的每 1M Token 成本');
   });
 
   it('removes obsolete Analysis API and model stats labels', () => {

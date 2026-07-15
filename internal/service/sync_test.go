@@ -925,7 +925,7 @@ func TestProcessRedisUsageInboxNormalizesAPIKeyTokensByUsageIdentityType(t *test
 		RawMessage: `{
 			"timestamp":"2026-04-27T08:00:00Z",
 			"provider":"Team Display Name",
-			"auth_type":"apikey",
+			"auth_type":"api_key",
 			"auth_index":"provider-auth-index",
 			"model":"claude-sonnet",
 			"request_id":"apikey-claude-cache",
@@ -995,42 +995,6 @@ func TestProcessRedisUsageInboxNormalizesGeminiFamilyToCodexTokenFormat(t *testi
 	event := loadUsageEventByKey(t, db, "gemini-thinking")
 	if event.InputTokens != 11 || event.OutputTokens != 10 || event.ReasoningTokens != 3 || event.CachedTokens != 5 || event.TotalTokens != 21 {
 		t.Fatalf("expected Gemini family tokens to be normalized to Codex format, got %+v", event)
-	}
-}
-
-func TestNormalizeRedisUsageEventsResolvesAPIKeyAuthTypeAlias(t *testing.T) {
-	db := openSyncTestDatabase(t)
-	if err := db.Create(&entities.UsageIdentity{
-		Name:         "Claude Provider",
-		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
-		AuthTypeName: "apikey",
-		Identity:     "provider-auth-index",
-		Type:         "claude",
-		Provider:     "Team Display Name",
-	}).Error; err != nil {
-		t.Fatalf("seed usage identity: %v", err)
-	}
-	events := []entities.UsageEvent{{
-		AuthType:            "api_key",
-		AuthIndex:           "provider-auth-index",
-		Model:               "claude-sonnet",
-		InputTokens:         100,
-		OutputTokens:        30,
-		CacheReadTokens:     20,
-		CacheCreationTokens: 10,
-		TotalTokens:         160,
-	}}
-
-	normalized, err := normalizeRedisUsageEvents(context.Background(), db, events)
-	if err != nil {
-		t.Fatalf("normalizeRedisUsageEvents returned error: %v", err)
-	}
-	if len(normalized) != 1 {
-		t.Fatalf("expected one normalized event, got %d", len(normalized))
-	}
-	event := normalized[0]
-	if event.InputTokens != 130 || event.CachedTokens != 20 || event.CacheReadTokens != 20 || event.CacheCreationTokens != 10 || event.OutputTokens != 30 || event.TotalTokens != 160 {
-		t.Fatalf("expected api_key alias to resolve Claude identity type, got %+v", event)
 	}
 }
 
@@ -1226,7 +1190,8 @@ func TestProcessRedisUsageInboxUsesStrictTokensForKimiAndMissingType(t *testing.
 			t.Fatalf("expected %s to use strict token normalization, got %+v", eventKey, event)
 		}
 	}
-	if output := logs.String(); !strings.Contains(output, "usage identity type not found for redis usage event") || !strings.Contains(output, "missing-auth-index") {
+	// Token 入站日志不再输出可能对应邮箱或凭证标识的 auth_index，改用安全 event_key 定位该条事件。
+	if output := logs.String(); !strings.Contains(output, "usage identity type not found for redis usage event") || !strings.Contains(output, "missing-type-default-style") {
 		t.Fatalf("expected missing type warning log, got:\n%s", output)
 	}
 }
