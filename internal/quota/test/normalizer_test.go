@@ -46,6 +46,60 @@ func TestNormalizeClaudeQuotaRows(t *testing.T) {
 	assertBoolField(t, extra.Allowed, true, "extra_usage allowed")
 }
 
+func TestNormalizeClaudeQuotaRowsWithScopedLimits(t *testing.T) {
+	utilization := 25.0
+	sessionPercent := 6.0
+	weeklyPercent := 1.0
+	fablePercent := 2.0
+	rows := quota.NormalizeQuotaRows(quota.ProviderOutput{Provider: "claude", Result: quota.ClaudeResult{
+		Usage: &quota.ClaudeUsagePayload{
+			FiveHour:   &quota.ClaudeUsageWindow{Utilization: 6, ResetsAt: "2026-07-16T09:09:59Z"},
+			SevenDay:   &quota.ClaudeUsageWindow{Utilization: 1, ResetsAt: "2026-07-17T19:59:59Z"},
+			ExtraUsage: &quota.ClaudeExtraUsage{IsEnabled: true, MonthlyLimit: 1000, UsedCredits: 250, Utilization: &utilization},
+			Limits: []quota.ClaudeLimitItem{
+				{Kind: "session", Group: "session", Percent: &sessionPercent, Severity: "normal", ResetsAt: "2026-07-16T09:09:59Z", IsActive: true},
+				{Kind: "weekly_all", Group: "weekly", Percent: &weeklyPercent, Severity: "normal", ResetsAt: "2026-07-17T19:59:59Z"},
+				{Kind: "weekly_scoped", Group: "weekly", Percent: &fablePercent, Severity: "normal", ResetsAt: "2026-07-17T19:59:59.887422+00:00", ScopeModelName: "Fable"},
+			},
+		},
+	}})
+
+	// 无 scope 的 session/weekly_all 与 five_hour/seven_day 是同一份数据，不能重复成行。
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 quota rows, got %#v", rows)
+	}
+	// 前端按行序展示，顺序必须是 5h、Weekly、Fable、Extra Usage。
+	expectedKeys := []string{"five_hour", "seven_day", "limits.weekly_scoped.fable", "extra_usage"}
+	for index, expectedKey := range expectedKeys {
+		if rows[index].Key != expectedKey {
+			t.Fatalf("unexpected row order: got %#v want keys %v", rows, expectedKeys)
+		}
+	}
+	fable := findQuotaRow(t, rows, "limits.weekly_scoped.fable")
+	assertQuotaText(t, fable, "Fable", "model", "")
+	assertFloatField(t, fable.UsedPercent, 2, "fable usedPercent")
+	if fable.ResetAt != "2026-07-17T19:59:59.887422+00:00" {
+		t.Fatalf("unexpected fable resetAt: %#v", fable)
+	}
+	assertIntField(t, fable.Window.Seconds, 604800, "fable window seconds")
+}
+
+func TestNormalizeClaudeQuotaRowsSkipsScopedLimitWithoutModelName(t *testing.T) {
+	percent := 3.0
+	rows := quota.NormalizeQuotaRows(quota.ProviderOutput{Provider: "claude", Result: quota.ClaudeResult{
+		Usage: &quota.ClaudeUsagePayload{
+			FiveHour: &quota.ClaudeUsageWindow{Utilization: 6, ResetsAt: "2026-07-16T09:09:59Z"},
+			Limits: []quota.ClaudeLimitItem{
+				{Kind: "weekly_scoped", Group: "weekly", Percent: &percent, ResetsAt: "2026-07-17T19:59:59Z"},
+			},
+		},
+	}})
+
+	if len(rows) != 1 || rows[0].Key != "five_hour" {
+		t.Fatalf("expected scoped limit without model name to be skipped, got %#v", rows)
+	}
+}
+
 func TestNormalizeCodexQuotaRows(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")

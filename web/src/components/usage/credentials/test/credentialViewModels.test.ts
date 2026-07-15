@@ -393,6 +393,22 @@ describe('credentialViewModels', () => {
     expect(rows.map((row) => row.displayQuotas[0]?.status)).toEqual(['ok', 'warning', 'danger'])
   })
 
+  it('keeps Claude scoped model limit labels like Fable in backend order', () => {
+    const quotas = new Map<string, UsageQuotaCheckResponse>([
+      ['auth-1', quotaResponse('auth-1', [
+        { key: 'five_hour', label: '5h', scope: 'window', usedPercent: 6, window: { seconds: 18000 }, resetAt: '2026-07-16T09:09:59Z' },
+        { key: 'seven_day', label: 'Weekly', scope: 'window', usedPercent: 1, window: { seconds: 604800 }, resetAt: '2026-07-17T19:59:59Z' },
+        { key: 'limits.weekly_scoped.fable', label: 'Fable', scope: 'model', usedPercent: 2, window: { seconds: 604800 }, resetAt: '2026-07-17T19:59:59Z' },
+        { key: 'extra_usage', label: 'Extra Usage', scope: 'extra_usage', used: 250, limit: 1000, usedPercent: 25 },
+      ])],
+    ])
+
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'auth-1' })], quotas)
+
+    expect(rows[0].displayQuotas.map((quota) => quota.label)).toEqual(['5h', 'Weekly', 'Fable', 'Extra Usage'])
+    expect(rows[0].displayQuotas[2]).toMatchObject({ percent: 2, percentKind: 'used' })
+  })
+
   it('uses quota window duration instead of raw key when classifying Codex windows', () => {
     const quotas = new Map<string, UsageQuotaCheckResponse>([
       ['auth-1', quotaResponse('auth-1', [

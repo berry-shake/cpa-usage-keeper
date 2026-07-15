@@ -80,6 +80,7 @@ func normalizeClaudeQuotaRows(result ClaudeResult) []QuotaRow {
 	rows = appendClaudeWindowQuotaRow(rows, "seven_day_sonnet", "7d Sonnet", "model", result.Usage.SevenDaySonnet)
 	rows = appendClaudeWindowQuotaRow(rows, "seven_day_cowork", "7d Cowork", "window", result.Usage.SevenDayCowork)
 	rows = appendClaudeWindowQuotaRow(rows, "iguana_necktie", "Iguana Necktie", "window", result.Usage.IguanaNecktie)
+	rows = appendClaudeScopedLimitQuotaRows(rows, result.Usage.Limits)
 	if result.Usage.ExtraUsage != nil {
 		rows = append(rows, QuotaRow{
 			Key:         "extra_usage",
@@ -90,6 +91,31 @@ func normalizeClaudeQuotaRows(result ClaudeResult) []QuotaRow {
 			UsedPercent: result.Usage.ExtraUsage.Utilization,
 			Allowed:     boolPtr(result.Usage.ExtraUsage.IsEnabled),
 		})
+	}
+	return rows
+}
+
+func appendClaudeScopedLimitQuotaRows(rows []QuotaRow, limits []ClaudeLimitItem) []QuotaRow {
+	// limits 里的 session/weekly_all 与 five_hour/seven_day 固定窗口是同一份数据，只取带模型 scope 的行，避免重复展示。
+	for _, limit := range limits {
+		modelName := strings.TrimSpace(limit.ScopeModelName)
+		if modelName == "" {
+			continue
+		}
+		row := QuotaRow{
+			Key: "limits." + limit.Kind + "." + strings.ToLower(modelName),
+			// 展示名直接用模型名（如 Fable），窗口语义由 window seconds 表达，不再拼 Weekly 前缀。
+			Label:       modelName,
+			Scope:       "model",
+			UsedPercent: limit.Percent,
+			ResetAt:     limit.ResetsAt,
+		}
+		if strings.HasPrefix(limit.Kind, "weekly") || limit.Group == "weekly" {
+			row.Window = &QuotaWindow{Seconds: intPtr(quotaWindowSevenDaySeconds)}
+		} else if limit.Kind == "session" || limit.Group == "session" {
+			row.Window = &QuotaWindow{Seconds: intPtr(quotaWindowFiveHourSeconds)}
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }

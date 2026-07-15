@@ -176,6 +176,19 @@ type ClaudeUsagePayload struct {
 	SevenDayCowork    *ClaudeUsageWindow `json:"sevenDayCowork,omitempty"`
 	IguanaNecktie     *ClaudeUsageWindow `json:"iguanaNecktie,omitempty"`
 	ExtraUsage        *ClaudeExtraUsage  `json:"extraUsage,omitempty"`
+	Limits            []ClaudeLimitItem  `json:"limits,omitempty"`
+}
+
+type ClaudeLimitItem struct {
+	Kind             string   `json:"kind,omitempty"`
+	Group            string   `json:"group,omitempty"`
+	Percent          *float64 `json:"percent,omitempty"`
+	Severity         string   `json:"severity,omitempty"`
+	ResetsAt         string   `json:"resetsAt,omitempty"`
+	ScopeModelName   string   `json:"scopeModelName,omitempty"`
+	ScopeModelID     string   `json:"scopeModelId,omitempty"`
+	ScopeSurfaceName string   `json:"scopeSurfaceName,omitempty"`
+	IsActive         bool     `json:"isActive,omitempty"`
 }
 
 type ClaudeProfileAccount struct {

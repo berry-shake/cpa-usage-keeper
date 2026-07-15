@@ -195,7 +195,43 @@ func parseClaudeUsagePayload(response *apicall.Response) (*ClaudeUsagePayload, e
 		SevenDayCowork:    parseClaudeUsageWindow(objectField(object, "seven_day_cowork", "sevenDayCowork")),
 		IguanaNecktie:     parseClaudeUsageWindow(objectField(object, "iguana_necktie", "iguanaNecktie")),
 		ExtraUsage:        parseClaudeExtraUsage(objectField(object, "extra_usage", "extraUsage")),
+		Limits:            parseClaudeLimits(arrayField(object, "limits")),
 	}, nil
+}
+
+func parseClaudeLimits(items []json.RawMessage) []ClaudeLimitItem {
+	if len(items) == 0 {
+		return nil
+	}
+	limits := make([]ClaudeLimitItem, 0, len(items))
+	for _, raw := range items {
+		object := rawObject(raw)
+		if object == nil {
+			continue
+		}
+		limit := ClaudeLimitItem{
+			Kind:     stringField(object, "kind"),
+			Group:    stringField(object, "group"),
+			Percent:  floatPtrField(object, "percent"),
+			Severity: stringField(object, "severity"),
+			ResetsAt: stringField(object, "resets_at", "resetsAt"),
+			IsActive: boolField(object, "is_active", "isActive"),
+		}
+		if scope := objectField(object, "scope"); scope != nil {
+			if model := objectField(scope, "model"); model != nil {
+				limit.ScopeModelID = stringField(model, "id")
+				limit.ScopeModelName = stringField(model, "display_name", "displayName")
+			}
+			if surface := objectField(scope, "surface"); surface != nil {
+				limit.ScopeSurfaceName = stringField(surface, "display_name", "displayName")
+			}
+		}
+		limits = append(limits, limit)
+	}
+	if len(limits) == 0 {
+		return nil
+	}
+	return limits
 }
 
 func parseClaudeUsageWindow(object map[string]json.RawMessage) *ClaudeUsageWindow {
