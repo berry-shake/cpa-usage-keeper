@@ -203,6 +203,73 @@ func TestAttachWindowUsageStatsOnlyBackfillsMissingKnownWindowScopeRows(t *testi
 	}
 }
 
+func TestAttachWindowUsageStatsBackfillsFableModelRowWithModelFilteredUsage(t *testing.T) {
+	db := openQuotaUsageStatsTestDB(t)
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	defer service.StopRefreshTasks()
+	weeklySeconds := int64(7 * 24 * 60 * 60)
+	resetAt := time.Date(2026, 6, 2, 5, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 6, 2, 3, 0, 0, 0, time.UTC)
+
+	if _, err := repository.UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-fable-5", PromptPricePer1M: 10}); err != nil {
+		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
+	}
+	if _, err := repository.UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-sonnet-5", PromptPricePer1M: 20}); err != nil {
+		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
+	}
+	events := []entities.UsageEvent{
+		{AuthIndex: "auth-fable", Model: "claude-fable-5", Timestamp: now.Add(-time.Hour), InputTokens: 1_000_000, TotalTokens: 1_000_000},
+		{AuthIndex: "auth-fable", Model: "claude-sonnet-5", Timestamp: now.Add(-time.Hour), InputTokens: 2_000_000, TotalTokens: 2_000_000},
+	}
+	if err := db.Create(&events).Error; err != nil {
+		t.Fatalf("seed usage events: %v", err)
+	}
+
+	response := attachWindowUsageStats(service, context.Background(), "auth-fable", CheckResponse{ID: "auth-fable", Quota: []QuotaRow{
+		{
+			Key:     "seven_day",
+			Label:   "Weekly",
+			Scope:   "window",
+			Window:  &QuotaWindow{Seconds: &weeklySeconds},
+			ResetAt: timeutil.FormatStorageTime(resetAt),
+		},
+		{
+			Key:                     "limits.weekly_scoped.fable",
+			Label:                   "Fable",
+			Scope:                   "model",
+			WindowUsageModelKeyword: "fable",
+			Window:                  &QuotaWindow{Seconds: &weeklySeconds},
+			ResetAt:                 timeutil.FormatStorageTime(resetAt),
+		},
+		{
+			Key:     "seven_day_opus",
+			Label:   "7d Opus",
+			Scope:   "model",
+			Window:  &QuotaWindow{Seconds: &weeklySeconds},
+			ResetAt: timeutil.FormatStorageTime(resetAt),
+		},
+	}}, now)
+
+	weekly := findQuotaUsageStatsRow(t, response.Quota, "seven_day")
+	if weekly.WindowUsageTokens == nil || *weekly.WindowUsageTokens != 3_000_000 {
+		t.Fatalf("expected weekly window to keep full auth usage, got %#v", weekly.WindowUsageTokens)
+	}
+	if weekly.WindowUsageCost == nil || math.Abs(*weekly.WindowUsageCost-50) > 0.000000001 {
+		t.Fatalf("expected weekly window cost from all models, got %#v", weekly.WindowUsageCost)
+	}
+	fable := findQuotaUsageStatsRow(t, response.Quota, "limits.weekly_scoped.fable")
+	if fable.WindowUsageTokens == nil || *fable.WindowUsageTokens != 1_000_000 {
+		t.Fatalf("expected fable row to backfill fable-model usage only, got %#v", fable.WindowUsageTokens)
+	}
+	if fable.WindowUsageCost == nil || math.Abs(*fable.WindowUsageCost-10) > 0.000000001 {
+		t.Fatalf("expected fable row cost from fable-model usage only, got %#v", fable.WindowUsageCost)
+	}
+	opus := findQuotaUsageStatsRow(t, response.Quota, "seven_day_opus")
+	if opus.WindowUsageTokens != nil || opus.WindowUsageCost != nil {
+		t.Fatalf("expected model row without usage keyword to stay empty, got tokens=%#v cost=%#v", opus.WindowUsageTokens, opus.WindowUsageCost)
+	}
+}
+
 func TestAttachWindowUsageStatsBackfillsBothFieldsWhenProviderWindowUsageIncomplete(t *testing.T) {
 	db := openQuotaUsageStatsTestDB(t)
 	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))

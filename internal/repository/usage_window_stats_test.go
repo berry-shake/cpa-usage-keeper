@@ -46,6 +46,45 @@ func TestSumUsageWindowStatsByAuthIndexUsesAuthIndexAndWindow(t *testing.T) {
 	}
 }
 
+func TestUsageWindowStatsCalculatorSumsByModelKeyword(t *testing.T) {
+	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-window-stats-model-keyword.db")})
+	if err != nil {
+		t.Fatalf("OpenDatabase returned error: %v", err)
+	}
+	closeTestDatabase(t, db)
+	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-fable-5", PromptPricePer1M: 10}); err != nil {
+		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
+	}
+	start := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	alias := "Fable-Preview"
+	events := []entities.UsageEvent{
+		{AuthIndex: "auth-1", Model: "claude-fable-5", Timestamp: start.Add(10 * time.Minute), InputTokens: 1_000_000, TotalTokens: 1_000_000},
+		{AuthIndex: "auth-1", Model: "claude-sonnet-5", Timestamp: start.Add(15 * time.Minute), InputTokens: 2_000_000, TotalTokens: 2_000_000},
+		{AuthIndex: "auth-1", Model: "custom-endpoint", ModelAlias: &alias, Timestamp: start.Add(20 * time.Minute), TotalTokens: 3_000_000},
+		{AuthIndex: "auth-2", Model: "claude-fable-5", Timestamp: start.Add(25 * time.Minute), TotalTokens: 9_000_000},
+	}
+	if err := db.Create(&events).Error; err != nil {
+		t.Fatalf("seed usage events: %v", err)
+	}
+	calculator, err := NewUsageWindowStatsCalculator(context.Background(), db)
+	if err != nil {
+		t.Fatalf("NewUsageWindowStatsCalculator returned error: %v", err)
+	}
+
+	stats, err := calculator.SumByAuthIndexAndModelKeyword(context.Background(), "auth-1", "fable", start, &end)
+	if err != nil {
+		t.Fatalf("SumByAuthIndexAndModelKeyword returned error: %v", err)
+	}
+	if stats.Tokens != 4_000_000 {
+		t.Fatalf("expected model/alias keyword matches only, got %d tokens", stats.Tokens)
+	}
+	wantCost := 1.0 * 10
+	if math.Abs(stats.Cost-wantCost) > 0.000000001 {
+		t.Fatalf("expected cost %.2f from fable-priced rows only, got %.8f", wantCost, stats.Cost)
+	}
+}
+
 func TestSumUsageWindowStatsByAuthIndexCalculatesClaudeCacheReadAndCreationCost(t *testing.T) {
 	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-window-stats-claude.db")})
 	if err != nil {

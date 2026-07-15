@@ -72,6 +72,42 @@ func (c *UsageWindowStatsCalculator) SumByAuthIndex(ctx context.Context, authInd
 	return usageWindowStatsFromTokenStats(rows, c.costResolver), nil
 }
 
+func (c *UsageWindowStatsCalculator) SumByAuthIndexAndModelKeyword(ctx context.Context, authIndex string, modelKeyword string, start time.Time, end *time.Time) (UsageWindowStats, error) {
+	if c == nil || c.db == nil {
+		return UsageWindowStats{}, fmt.Errorf("usage window stats calculator is nil")
+	}
+	authIndex = strings.TrimSpace(authIndex)
+	if authIndex == "" {
+		return UsageWindowStats{}, fmt.Errorf("auth_index is required")
+	}
+	// 模型关键字为空退化成 auth 级全量统计口径，与 SumByAuthIndex 保持一致。
+	modelKeyword = strings.ToLower(strings.TrimSpace(modelKeyword))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// 复用现有 model_alias/model 分组聚合，模型过滤在少量聚合行上做即可，不必下推 SQL。
+	rows, err := loadUsageWindowTokenStats(c.db.WithContext(ctx), authIndex, start, end)
+	if err != nil {
+		return UsageWindowStats{}, err
+	}
+	return usageWindowStatsFromTokenStats(filterUsageWindowTokenStatsByModelKeyword(rows, modelKeyword), c.costResolver), nil
+}
+
+func filterUsageWindowTokenStatsByModelKeyword(rows []usageWindowTokenStats, modelKeyword string) []usageWindowTokenStats {
+	if modelKeyword == "" {
+		return rows
+	}
+	filtered := make([]usageWindowTokenStats, 0, len(rows))
+	for _, row := range rows {
+		// 上游 scoped limit 只给模型展示名（如 Fable），本地事件记录的是真实 ID（如 claude-fable-5）
+		// 或用户自定义别名，所以对 model 和 model_alias 都做大小写不敏感的包含匹配。
+		if strings.Contains(strings.ToLower(row.Model), modelKeyword) || strings.Contains(strings.ToLower(row.ModelAlias), modelKeyword) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
 func SumUsageWindowStatsByAuthIndex(ctx context.Context, db *gorm.DB, authIndex string, start time.Time, end *time.Time) (UsageWindowStats, error) {
 	// 数据库句柄为空时直接返回错误，避免后续查询 panic。
 	if db == nil {

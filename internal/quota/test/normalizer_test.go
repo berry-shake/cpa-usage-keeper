@@ -82,6 +82,26 @@ func TestNormalizeClaudeQuotaRowsWithScopedLimits(t *testing.T) {
 		t.Fatalf("unexpected fable resetAt: %#v", fable)
 	}
 	assertIntField(t, fable.Window.Seconds, 604800, "fable window seconds")
+	// Fable 行要参与本地 usage_events 的模型过滤兜底，其它 scoped 模型行暂不点亮。
+	if fable.WindowUsageModelKeyword != "fable" {
+		t.Fatalf("expected fable usage keyword, got %#v", fable)
+	}
+}
+
+func TestNormalizeClaudeQuotaRowsScopedLimitKeywordOnlyForFable(t *testing.T) {
+	percent := 3.0
+	rows := quota.NormalizeQuotaRows(quota.ProviderOutput{Provider: "claude", Result: quota.ClaudeResult{
+		Usage: &quota.ClaudeUsagePayload{
+			Limits: []quota.ClaudeLimitItem{
+				{Kind: "weekly_scoped", Group: "weekly", Percent: &percent, ResetsAt: "2026-07-17T19:59:59Z", ScopeModelName: "Opus"},
+			},
+		},
+	}})
+
+	opus := findQuotaRow(t, rows, "limits.weekly_scoped.opus")
+	if opus.WindowUsageModelKeyword != "" {
+		t.Fatalf("expected non-fable scoped limit to stay without usage keyword, got %#v", opus)
+	}
 }
 
 func TestNormalizeClaudeQuotaRowsSkipsScopedLimitWithoutModelName(t *testing.T) {

@@ -12,10 +12,13 @@ import (
 type quotaUsageWindowKey struct {
 	start time.Time
 	end   time.Time
+	// modelKeyword 参与缓存 key，避免同窗口的模型过滤统计和全量统计互相串值。
+	modelKeyword string
 }
 
 type usageWindowStatsProvider interface {
 	SumByAuthIndex(context.Context, string, time.Time, *time.Time) (repository.UsageWindowStats, error)
+	SumByAuthIndexAndModelKeyword(context.Context, string, string, time.Time, *time.Time) (repository.UsageWindowStats, error)
 }
 
 func (s *Service) attachWindowUsageStats(ctx context.Context, authIndex string, response CheckResponse, now time.Time) CheckResponse {
@@ -54,8 +57,10 @@ func (s *Service) attachWindowUsageStatsWithProvider(ctx context.Context, authIn
 			// 跳过后该 row 不展示窗口 token/cost。
 			continue
 		}
-		// start/end 组成窗口缓存 key，避免同一响应内重复查同一窗口。
-		key := quotaUsageWindowKey{start: windowStart, end: windowEnd}
+		// 模型过滤关键字统一小写，保证缓存 key 与查询口径一致。
+		modelKeyword := strings.ToLower(strings.TrimSpace(response.Quota[index].WindowUsageModelKeyword))
+		// start/end/modelKeyword 组成窗口缓存 key，避免同一响应内重复查同一窗口。
+		key := quotaUsageWindowKey{start: windowStart, end: windowEnd, modelKeyword: modelKeyword}
 		// 先尝试复用本次响应内已经查询过的窗口统计。
 		stats, ok := statsByWindow[key]
 		// 没有缓存时才真正查询 repository。
@@ -63,7 +68,12 @@ func (s *Service) attachWindowUsageStatsWithProvider(ctx context.Context, authIn
 			// repository 内部会按窗口长度选择 raw group by 或 hourly rollup。
 			var err error
 			// 调用窗口统计查询，end 使用半开区间避免重复累计边界事件。
-			stats, err = statsProvider.SumByAuthIndex(ctx, authIndex, windowStart, &windowEnd)
+			if modelKeyword != "" {
+				// 带模型关键字的 row（如 Fable scoped limit）只累计匹配模型的本地用量。
+				stats, err = statsProvider.SumByAuthIndexAndModelKeyword(ctx, authIndex, modelKeyword, windowStart, &windowEnd)
+			} else {
+				stats, err = statsProvider.SumByAuthIndex(ctx, authIndex, windowStart, &windowEnd)
+			}
 			// 统计失败不影响 quota 主结果，只跳过当前窗口用量展示。
 			if err != nil {
 				// 当前 row 不写 token/cost，继续处理其它 row。
@@ -88,8 +98,8 @@ func shouldBackfillWindowUsageStats(row QuotaRow) bool {
 	if row.WindowUsageTokens != nil && row.WindowUsageCost != nil {
 		return false
 	}
-	// 本地 usage_events 兜底只适用于普通 5h/Weekly/Monthly window scope。
-	if !strings.EqualFold(strings.TrimSpace(row.Scope), "window") {
+	// 本地 usage_events 兜底适用于普通 window scope，以及显式声明了模型过滤关键字的 model scope（如 Fable）。
+	if !strings.EqualFold(strings.TrimSpace(row.Scope), "window") && strings.TrimSpace(row.WindowUsageModelKeyword) == "" {
 		return false
 	}
 	if row.Window == nil || row.Window.Seconds == nil {

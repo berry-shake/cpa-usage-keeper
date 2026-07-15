@@ -65,6 +65,8 @@ type QuotaRow struct {
 	ResetAfterSeconds *int64       `json:"resetAfterSeconds,omitempty"`
 	WindowUsageTokens *int64       `json:"window_usage_tokens,omitempty"`
 	WindowUsageCost   *float64     `json:"window_usage_cost,omitempty"`
+	// WindowUsageModelKeyword 标记该 row 的本地窗口用量按模型关键字过滤统计（如 fable），仅服务端内部使用不下发前端。
+	WindowUsageModelKeyword string `json:"-"`
 }
 
 type AntigravityQuotaBucket struct {

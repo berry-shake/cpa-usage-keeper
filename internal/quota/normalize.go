@@ -115,6 +115,10 @@ func appendClaudeScopedLimitQuotaRows(rows []QuotaRow, limits []ClaudeLimitItem)
 		} else if limit.Kind == "session" || limit.Group == "session" {
 			row.Window = &QuotaWindow{Seconds: intPtr(quotaWindowFiveHourSeconds)}
 		}
+		// 目前只点亮 Fable 行的本地 token/cost 兜底；其它 scoped 模型行先保持只显示百分比。
+		if strings.EqualFold(modelName, "Fable") {
+			row.WindowUsageModelKeyword = strings.ToLower(modelName)
+		}
 		rows = append(rows, row)
 	}
 	return rows
