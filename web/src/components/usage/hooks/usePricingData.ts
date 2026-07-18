@@ -40,7 +40,6 @@ export interface UsePricingDataReturn {
   error: string;
   syncingPrices: boolean;
   syncMeta: PricingSyncMeta | null;
-  lastRefreshedAt: Date | null;
   loadPricing: () => Promise<void>;
   saveModelPrice: (model: string, price: ModelPrice) => Promise<void>;
   deleteModelPrice: (model: string) => Promise<void>;
@@ -116,7 +115,6 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
   const [error, setError] = useState('');
   const [syncingPrices, setSyncingPrices] = useState(false);
   const [syncMeta, setSyncMeta] = useState<PricingSyncMeta | null>(null);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   const onAuthRequiredRef = useRef(onAuthRequired);
 
@@ -129,7 +127,6 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
       pricingResponse.pricing.map((entry) => [entry.model, pricingToModelPrice(entry)])
     );
     setModelPricesState(prices);
-    setLastRefreshedAt(new Date());
   }, []);
 
   const loadPricing = useCallback(async () => {
@@ -188,7 +185,6 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
         ...current,
         [model]: price,
       }));
-      setLastRefreshedAt(new Date());
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequiredRef.current?.();
@@ -211,7 +207,6 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
         delete nextPrices[model];
         return nextPrices;
       });
-      setLastRefreshedAt(new Date());
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequiredRef.current?.();
@@ -253,7 +248,6 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
         unmatchedModels: response.unmatched_models,
         syncedAt: response.synced_at,
       });
-      setLastRefreshedAt(new Date());
 
       if (response.matched_count > 0) {
         showNotification(t('usage_stats.model_price_sync_success', { count: response.matched_count }));
@@ -286,7 +280,6 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
         }
         return nextPrices;
       });
-      setLastRefreshedAt(new Date());
     }
     if (result.failures.some((failure) => failure.error instanceof ApiError && failure.error.status === 401)) {
       onAuthRequiredRef.current?.();
@@ -312,7 +305,6 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
     error,
     syncingPrices,
     syncMeta,
-    lastRefreshedAt,
     loadPricing,
     saveModelPrice,
     deleteModelPrice,
