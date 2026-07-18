@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { IconCheck, IconCircleAlert, IconRefreshCw } from '@/components/ui/icons';
 import type { PricingSyncMeta } from '@/components/usage/hooks/usePricingData';
+import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment';
 import type {
   ModelPrice,
   PricingSaveResult,
@@ -298,6 +299,7 @@ export function PriceSettingsCard({
   loading = false
 }: PriceSettingsCardProps) {
   const { t } = useTranslation();
+  const pricesGridRef = useRef<HTMLDivElement | null>(null);
 
   // 新增价格表单先暂存输入值，保存成功后再合并当前模型的价格。
   const [selectedModel, setSelectedModel] = useState('');
@@ -567,6 +569,7 @@ export function PriceSettingsCard({
       .sort(([left], [right]) => compareModelNamesDescending(left, right)),
     [modelPrices]
   );
+  useScrollBoundaryContainment(pricesGridRef, sortedModelPrices.length > 0);
   const selectedSyncCount = useMemo(
     () => syncDrafts.filter((draft) => draft.selected).length,
     [syncDrafts]
@@ -711,7 +714,7 @@ export function PriceSettingsCard({
               <div className={styles.pricesList}>
                 <h4 className={styles.pricesTitle}>{t('usage_stats.saved_prices')}</h4>
                 {sortedModelPrices.length > 0 ? (
-                  <div className={styles.pricesGrid}>
+                  <div ref={pricesGridRef} className={styles.pricesGrid}>
                     {sortedModelPrices.map(([model, price]) => (
                       <div key={model} className={styles.priceItem}>
                         <div className={styles.priceInfo}>
