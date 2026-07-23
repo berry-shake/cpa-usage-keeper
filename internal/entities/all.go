@@ -10,8 +10,10 @@ func All() []any {
 		&CPAAPIKey{},
 		&UsageOverviewHourlyStat{},
 		&UsageOverviewDailyStat{},
-		&UsageOverviewHealthStat{},
 		&UsageOverviewAggregationCheckpoint{},
+		// Activity 统计与独立 checkpoint 必须随全新数据库直接创建。
+		&UsageActivityStat{},
+		&UsageActivityAggregationCheckpoint{},
 		&AuthSession{},
 		&AppSetting{},
 	}

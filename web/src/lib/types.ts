@@ -101,24 +101,41 @@ export interface UsageOverviewSeries {
 	cache_read_rate: Record<string, number | null>
 }
 
-export interface UsageOverviewServiceHealthBlock {
+export type UsageActivityWindow = '24h' | '7d' | '30d' | '1y'
+
+export interface UsageActivityBlock {
   start_time: string
   end_time: string
   success: number
   failure: number
   rate: number
+	input_tokens: number
+	output_tokens: number
+	reasoning_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	total_tokens: number
 }
 
-export interface UsageOverviewServiceHealth {
+export interface UsageActivityResponse {
+  window: UsageActivityWindow
+  grain: 'short' | 'medium' | 'long' | 'daily'
+  timezone?: string
   total_success: number
   total_failure: number
   success_rate: number
-  rows?: number
-  columns?: number
-  bucket_seconds?: number
-  window_start?: string
-  window_end?: string
-  block_details: UsageOverviewServiceHealthBlock[]
+	input_tokens: number
+	output_tokens: number
+	reasoning_tokens: number
+	cache_read_tokens: number
+	cache_creation_tokens: number
+	total_tokens: number
+  rows: number
+  columns: number
+  bucket_seconds: number
+  window_start: string
+  window_end: string
+  blocks: UsageActivityBlock[]
 }
 
 export type OverviewRealtimeWindow = '15m' | '30m' | '60m'
@@ -211,7 +228,6 @@ export interface UsageOverviewResponse {
   usage: UsageOverviewUsageSnapshot
   summary?: UsageOverviewSummary
   series?: UsageOverviewSeries
-  service_health?: UsageOverviewServiceHealth
   timezone?: string
   range_start?: string
   range_end?: string
@@ -651,7 +667,6 @@ export interface AnalysisResponse {
   heatmap: AnalysisHeatmapPayload
   cost_breakdown: AnalysisCostBreakdown
   model_efficiency: AnalysisModelEfficiencyItem[]
-  latency_diagnostics: AnalysisLatencyDiagnostics
 }
 
 export interface CpaApiKeyDisplayItem {
@@ -776,6 +791,10 @@ export interface UsageRangeRequest {
 	unit?: UsageCustomRangeUnit
 	start?: string
 	end?: string
+}
+
+export type UsageActivityRequest = UsageRangeRequest | {
+	window: 'today' | 'yesterday' | '1y'
 }
 
 export interface UsageFilterWindow {

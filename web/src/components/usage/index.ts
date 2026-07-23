@@ -9,8 +9,14 @@ export { AiProviderCredentialsSection, AuthFileCredentialsSection, CredentialPro
 export { CredentialStatsCard } from './CredentialStatsCard';
 export { RequestEventsDetailsCard } from './RequestEventsDetailsCard';
 export { ServiceHealthCard } from './ServiceHealthCard';
+export { TokenActivityCard } from './TokenActivityCard';
+export { ActivityHeatmapGrid } from './ActivityHeatmapGrid';
+export { OverviewActivityCards } from './OverviewActivityCards';
+export { RecentActivityPanel } from './RecentActivityPanel';
 export { TimeRangeControl } from './TimeRangeControl';
 export { useUsageData } from './hooks/useUsageData';
+export { useRecentActivityWindow } from './hooks/useRecentActivityWindow';
+export { useUsageActivityData } from './hooks/useUsageActivityData';
 export { useOverviewRealtimeData } from './hooks/useOverviewRealtimeData';
 export { usePricingData } from './hooks/usePricingData';
 export { useSparklines } from './hooks/useSparklines';

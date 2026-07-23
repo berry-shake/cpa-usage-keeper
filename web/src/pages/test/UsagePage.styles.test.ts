@@ -23,6 +23,9 @@ const sessionSettingsSource = readSource(new URL('../../components/usage/Session
 const analysisPanelSource = readSource(new URL('../../components/usage/analysis/AnalysisPanel.tsx', import.meta.url))
 const analysisPanelStyles = readSource(new URL('../../components/usage/analysis/AnalysisPanel.module.scss', import.meta.url))
 const overviewRealtimePanelSource = readSource(new URL('../../components/usage/OverviewRealtimePanel.tsx', import.meta.url))
+const overviewActivityCardsSource = readSource(new URL('../../components/usage/OverviewActivityCards.tsx', import.meta.url))
+const activityHeatmapGridSource = readSource(new URL('../../components/usage/ActivityHeatmapGrid.tsx', import.meta.url))
+const serviceHealthCardSource = readSource(new URL('../../components/usage/ServiceHealthCard.tsx', import.meta.url))
 const statCardsSource = readSource(new URL('../../components/usage/StatCards.tsx', import.meta.url))
 const dailyAveragePanelSource = readSource(new URL('../../components/usage/DailyAveragePanel.tsx', import.meta.url))
 const timeRangeControlSource = readSource(new URL('../../components/usage/TimeRangeControl.tsx', import.meta.url))
@@ -119,6 +122,7 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).toContain('customRange={customRange}')
     expect(usagePageSource).toContain('onChange={handleTimeRangeChange}')
     expect(usagePageSource).toContain('fetchAnalysis(usageRangeQuery, controller.signal, selectedApiKeyId)')
+    expect(usagePageSource).toContain('fetchAnalysisLatency(usageRangeQuery, controller.signal, selectedApiKeyId)')
     expect(usagePageSource).toContain('fetchUsageEvents(usageRangeQuery, controller.signal, {')
     expect(usagePageSource).toContain('exportUsageEvents(usageRangeQuery, format, {')
 
@@ -358,10 +362,29 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toContain('@media (prefers-reduced-motion: reduce)')
   })
 
-  it('renders the realtime overview panel below Request Health Timeline with the planned responsive grid', () => {
+  it('renders Recent Activity between the stat cards and realtime metrics', () => {
     expect(usagePageSource).toContain('<OverviewRealtimePanel')
     expect(keyOverviewPageSource).toContain('<OverviewRealtimePanel')
-    expect(usagePageSource.indexOf('<ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />')).toBeLessThan(usagePageSource.indexOf('<OverviewRealtimePanel'))
+    expect(usagePageSource).toContain('<RecentActivityPanel')
+    expect(keyOverviewPageSource).toContain('<RecentActivityPanel')
+    expect(usagePageSource.indexOf('<StatCards')).toBeLessThan(usagePageSource.indexOf('<RecentActivityPanel'))
+    expect(usagePageSource.indexOf('<RecentActivityPanel')).toBeLessThan(usagePageSource.indexOf('<OverviewRealtimePanel'))
+    expect(keyOverviewPageSource.indexOf('<StatCards')).toBeLessThan(keyOverviewPageSource.indexOf('<RecentActivityPanel'))
+    expect(keyOverviewPageSource.indexOf('<RecentActivityPanel')).toBeLessThan(keyOverviewPageSource.indexOf('<OverviewRealtimePanel'))
+    expect(usagePageStyles).toMatch(/\.recentActivityTitle\s*\{[\s\S]*?font-size:\s*17px;[\s\S]*?font-weight:\s*800;/)
+    expect(usagePageStyles).toMatch(/\.recentActivityWindowSwitcher\s*\{[\s\S]*?border-radius:\s*999px;/)
+    expect(usagePageStyles).toMatch(/\.recentActivityGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 530px\), 1fr\)\);/)
+    expect(overviewActivityCardsSource.indexOf('<TokenActivityCard')).toBeLessThan(overviewActivityCardsSource.indexOf('<ServiceHealthCard'))
+    expect(overviewActivityCardsSource).not.toContain('fetchUsageActivity')
+    expect(overviewActivityCardsSource).not.toContain('useUsageActivityData')
+    expect(activityHeatmapGridSource).toContain('aria-rowcount={ACTIVITY_GRID_ROWS}')
+    expect(activityHeatmapGridSource).toContain('aria-colcount={ACTIVITY_GRID_COLUMNS}')
+    expect(usagePageStyles).toContain('--token-activity-level-1: #dbeafe;')
+    expect(usagePageStyles).toContain('--token-activity-level-2: #93c5fd;')
+    expect(usagePageStyles).toContain('--token-activity-level-3: #60a5fa;')
+    expect(usagePageStyles).toContain('--token-activity-level-4: #3b82f6;')
+    expect(usagePageStyles).toContain('--token-activity-level-5: #1d4ed8;')
+    expect(usagePageStyles).toMatch(/:global\(\[data-theme='dark'\]\) \.tokenActivityCard\s*\{[\s\S]*?--token-activity-level-1:\s*#172554;/)
     expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/)
     expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
     expect(usagePageStyles).toMatch(/\.overviewRealtimeCardFull\s*\{[\s\S]*?grid-column:\s*1 \/ -1;/)
@@ -373,6 +396,23 @@ describe('UsagePage toolbar styles', () => {
     expect(keyOverviewPageSource).toContain("value === '15m' || value === '30m' || value === '60m'")
     expect(usagePageSource).not.toContain("value === '5m'")
     expect(keyOverviewPageSource).not.toContain("value === '5m'")
+  })
+
+  it('keeps Recent Activity summaries consistent across desktop and mobile', () => {
+    const rangeRule = styleRuleBlock(usagePageStyles, '.recentActivityRange')
+    const detailsRule = styleRuleBlock(usagePageStyles, '.activitySummaryDetails')
+    const healthCountRule = styleRuleBlock(usagePageStyles, '.healthCountRow')
+    const tokenValueRule = styleRuleBlock(usagePageStyles, '.tokenActivitySummaryValue')
+
+    expect(rangeRule).not.toMatch(/\b(border|background|border-radius|min-height|padding):/)
+    expect(rangeRule).toContain('white-space: nowrap;')
+    expect(detailsRule).toContain('font-size: 10px;')
+    expect(healthCountRule).toContain('font-size: 10px;')
+    expect(tokenValueRule).toContain('color: #3b82f6;')
+    expect(serviceHealthCardSource).not.toContain('styles.requestActivityCard')
+    expect(typesSource).toMatch(/UsageActivityRequest\s*=\s*UsageRangeRequest\s*\|\s*\{\s*window:\s*'today'\s*\|\s*'yesterday'\s*\|\s*'1y'/)
+    expect(usagePageStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.activitySummary\s*\{[\s\S]*?justify-items:\s*start;[\s\S]*?text-align:\s*left;/)
+    expect(usagePageStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.activitySummaryDetails\s*\{[\s\S]*?justify-content:\s*flex-start;/)
   })
 
   it('keeps realtime overview empty and metadata states explicit without stale legend styles', () => {
@@ -491,15 +531,21 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).not.toContain('.apiKeyFilterGroupHidden')
   })
 
-  it('uses the new Analysis panel and endpoint instead of the old detail tables', () => {
+  it('loads core and latency Analysis sections through independent endpoints', () => {
     expect(usagePageSource).toContain('fetchAnalysis')
+    expect(usagePageSource).toContain('fetchAnalysisLatency')
     expect(usagePageSource).toContain('<AnalysisPanel')
+    expect(usagePageSource).toContain('latencyDiagnostics={analysisLatencyData}')
+    expect(usagePageSource).toContain('latencyLoading={analysisLatencyLoading}')
+    expect(usagePageSource).toContain('latencyError={analysisLatencyError}')
     expect(usagePageSource).not.toContain('fetchUsageAnalysis')
     expect(usagePageSource).not.toContain('<ApiDetailsCard')
     expect(usagePageSource).not.toContain('<ModelStatsCard')
     expect(apiIndexSource).not.toContain('ApiDetailsCard')
     expect(apiIndexSource).not.toContain('ModelStatsCard')
     expect(apiClientSource).toContain("apiPath('/usage/analysis')")
+    expect(apiClientSource).toContain("apiPath('/usage/analysis/latency')")
+    expect(typesSource).not.toContain('latency_diagnostics: AnalysisLatencyDiagnostics')
   })
 
   it('renames the Analysis tab label and places it before Request Events', () => {
@@ -792,7 +838,7 @@ describe('UsagePage toolbar styles', () => {
     const heatmapRowLabelBlock = [...analysisPanelStyles.matchAll(/\.heatmapRowLabel\s*\{([\s\S]*?)\n\}/g)]
       .map((match) => match[1])
       .find((block) => block.includes('display: flex;')) ?? ''
-    expect(heatmapRowLabelBlock).toContain('height: 30px;')
+    expect(heatmapRowLabelBlock).toContain('height: 34px;')
     expect(heatmapRowLabelBlock).toContain('align-self: center;')
     expect(analysisPanelStyles).toMatch(/\.heatmapModelLabel\s*\{[\s\S]*?-webkit-line-clamp:\s*2;/)
     expect(analysisPanelStyles).toMatch(/\.heatmapModelLabel\s*\{[\s\S]*?overflow-wrap:\s*anywhere;/)
@@ -840,8 +886,12 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).toContain('error={displayRealtimeError}')
   })
 
-  it('removes the Overview Request Health Timeline label instead of toggling it off', () => {
-    expect(usagePageSource).toContain('<ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />')
+  it('loads both Activity cards through one independent Recent Activity request', () => {
+    expect(usagePageSource).toContain('useUsageActivityData({')
+    expect(usagePageSource).toContain('useRecentActivityWindow(usageRangeQuery)')
+    expect(usagePageSource).toContain('await Promise.all([loadUsage(), loadActivity(), loadRealtime()])')
+    expect(usagePageSource).toContain('await Promise.all([loadUsage(), loadActivity({ skipIfInFlight: true }), loadRealtime()])')
+    expect(usagePageSource).not.toContain('<ServiceHealthCard')
     expect(usagePageSource).not.toContain('showEyebrow')
   })
 

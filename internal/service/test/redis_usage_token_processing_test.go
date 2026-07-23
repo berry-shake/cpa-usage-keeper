@@ -36,12 +36,13 @@ type tokenProcessorHeaderRecorder struct {
 	snapshots []quota.UsageHeaderSnapshot
 }
 
-func (r *tokenProcessorHeaderRecorder) TryAppendUsageHeaderSnapshots(snapshots []quota.UsageHeaderSnapshot) bool {
+func (r *tokenProcessorHeaderRecorder) NotifyUsageEventsCommitted(_ []entities.UsageEvent, snapshots []quota.UsageHeaderSnapshot) {
 	// 只记录事务提交后真正通知的 snapshot，用于证明 unresolved 行没有提前泄漏。
 	r.calls++
 	r.snapshots = append(r.snapshots, snapshots...)
-	return true
 }
+
+func (r *tokenProcessorHeaderRecorder) NotifyUsageIdentitiesChanged() {}
 
 func TestProcessRedisUsageInboxKnownExecutorBypassesIdentityLookup(t *testing.T) {
 	db := openOpenAITokenNormalizationTestDatabase(t)
@@ -84,7 +85,11 @@ func TestProcessRedisUsageInboxKnownExecutorBypassesIdentityLookup(t *testing.T)
 		t.Fatalf("expected executor contract to correct nonzero Total to 120, got %+v", event)
 	}
 
-	// Overview rollup 必须消费同一条已纠正事件，不能继续保存原始错误 Total=125。
+	// 模拟后台 runner 追平 Overview，验证异步 rollup 仍消费同一条已纠正事件。
+	if err := repository.AggregateUsageOverviewStats(context.Background(), db, event.Timestamp.Add(time.Minute)); err != nil {
+		t.Fatalf("aggregate corrected event overview: %v", err)
+	}
+	// Overview rollup 最终不能继续保存原始错误 Total=125。
 	var hourly entities.UsageOverviewHourlyStat
 	if err := db.Where("model = ?", "gpt-5.6").First(&hourly).Error; err != nil {
 		t.Fatalf("load overview hourly stat: %v", err)
@@ -156,9 +161,9 @@ func TestProcessRedisUsageInboxCommitsReadyItemsWhenIdentityLookupFails(t *testi
 	recent := &tokenProcessorRecentRecorder{}
 	headers := &tokenProcessorHeaderRecorder{}
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
-		BaseURL:           "https://cpa.example.com",
-		RecentUsageEvents: recent,
-		UsageHeaderQuota:  headers,
+		BaseURL:                  "https://cpa.example.com",
+		RecentUsageEvents:        recent,
+		UsageAggregationNotifier: headers,
 	})
 
 	result, err := syncService.ProcessRedisUsageInbox(context.Background())

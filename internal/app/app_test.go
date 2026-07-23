@@ -122,6 +122,9 @@ func TestNewWithConfigBuildsRedisIngestAndRouter(t *testing.T) {
 	if app.RedisProcess == nil {
 		t.Fatal("expected redis process runner to be initialized")
 	}
+	if app.UsageAggregation == nil {
+		t.Fatal("expected usage aggregation runner to be initialized")
+	}
 	if app.Router == nil {
 		t.Fatal("expected router to be initialized")
 	}
@@ -241,7 +244,8 @@ func TestNewWithConfigExposesConfiguredCPAPublicURL(t *testing.T) {
 	}
 }
 
-func TestNewWithConfigAggregatesExistingOverviewStatsBeforeRunnersStart(t *testing.T) {
+func TestNewWithConfigLeavesExistingUsageForBackgroundAggregationRunner(t *testing.T) {
+	// 准备：创建包含未聚合历史事件的旧数据库，并关闭 seed 连接模拟真实重启。
 	dbPath := filepath.Join(t.TempDir(), "app-startup-overview-catchup.db")
 	seedDB, err := repository.OpenDatabase(config.Config{SQLitePath: dbPath})
 	if err != nil {
@@ -262,6 +266,7 @@ func TestNewWithConfigAggregatesExistingOverviewStatsBeforeRunnersStart(t *testi
 
 	logDir := t.TempDir()
 
+	// 执行：构造 App，但不启动后台 Runner。
 	cfg := testAppConfig(t)
 	cfg.SQLitePath = dbPath
 	cfg.LogFileEnabled = true
@@ -272,19 +277,17 @@ func TestNewWithConfigAggregatesExistingOverviewStatsBeforeRunnersStart(t *testi
 	}
 	defer app.Close()
 
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
-	if err := app.DB.Where("name = ?", "overview").First(&checkpoint).Error; err != nil {
-		t.Fatalf("load overview checkpoint returned error: %v", err)
+	// 断言：构造阶段不做同步 catch-up，工作保留给 App.Run 启动的后台任务。
+	var checkpointCount int64
+	if err := app.DB.Model(&entities.UsageOverviewAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; err != nil {
+		t.Fatalf("count overview checkpoints returned error: %v", err)
 	}
-	if checkpoint.LastAggregatedUsageEventID == 0 {
-		t.Fatalf("expected startup catch-up to aggregate legacy usage events, got checkpoint %+v", checkpoint)
+	if checkpointCount != 0 {
+		t.Fatalf("expected constructor not to block on overview catch-up, got %d checkpoints", checkpointCount)
 	}
 	logContent := readAppLogFile(t, logDir)
-	if !strings.Contains(logContent, "starting usage overview aggregation catch-up") {
-		t.Fatalf("expected startup catch-up start log, got %s", logContent)
-	}
-	if !strings.Contains(logContent, "completed usage overview aggregation catch-up") {
-		t.Fatalf("expected startup catch-up completion log, got %s", logContent)
+	if strings.Contains(logContent, "usage overview aggregation catch-up") {
+		t.Fatalf("expected constructor log without synchronous catch-up, got %s", logContent)
 	}
 }
 
@@ -369,10 +372,12 @@ func TestNewWithConfigCreatesIndependentMaintenanceRunner(t *testing.T) {
 }
 
 func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
+	// 准备：为每个后台 runner 配置独立启动信号，并使用非法端口让 HTTP 立即返回。
 	cfg := testAppConfig(t)
 	cfg.AppPort = "invalid-port"
 	pullStarted := make(chan struct{})
 	processStarted := make(chan struct{})
+	aggregationStarted := make(chan struct{})
 	maintenanceStarted := make(chan struct{})
 	metadataStarted := make(chan struct{}, 1)
 	backupStarted := make(chan struct{})
@@ -400,14 +405,17 @@ func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
 		Poller:            statusProvider,
 		RedisIngest:       &appRunStub{started: pullStarted},
 		RedisProcess:      &appRunStub{started: processStarted},
+		UsageAggregation:  &appRunStub{started: aggregationStarted},
 		Maintenance:       maintenance,
 		MetadataSync:      metadataRunner,
 		BackupMaintenance: backupRunner,
 	}
 
+	// 执行：启动 App，让所有后台任务共享同一生命周期 context。
 	if err := app.Run(); err == nil {
 		t.Fatal("expected Run to return an error for invalid port")
 	}
+	// 断言：ingest、process、aggregation、maintenance、metadata 与 backup 都已独立启动。
 	select {
 	case <-pullStarted:
 	case <-time.After(time.Second):
@@ -417,6 +425,11 @@ func TestRunStartsPollerAndMaintenanceIndependently(t *testing.T) {
 	case <-processStarted:
 	case <-time.After(time.Second):
 		t.Fatal("expected redis process runner to start")
+	}
+	select {
+	case <-aggregationStarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected usage aggregation runner to start")
 	}
 	select {
 	case <-statusProvider.started:

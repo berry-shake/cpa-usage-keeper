@@ -227,6 +227,18 @@ describe('Credential section styles', () => {
     expect(aiProviderSectionSource).toContain('row.priorityLabel')
   })
 
+  it('uses a portal-based floating tooltip for credential expiry badges', () => {
+    expect(authFileSectionSource).toContain('createPortal')
+    expect(authFileSectionSource).toContain('className={styles.credentialRemainingDaysBadge}')
+    expect(authFileSectionSource).toContain('className={styles.credentialExpiryTooltip}')
+    expect(authFileSectionSource).toContain('role="tooltip"')
+    expect(credentialStyles).toMatch(/\.credentialExpiryTooltip\s*\{[\s\S]*?position:\s*fixed;/)
+    expect(credentialStyles).toMatch(/\.credentialExpiryTooltip\s*\{[\s\S]*?z-index:\s*2100;/)
+    expect(credentialStyles).toMatch(/\.credentialExpiryTooltip\s*\{[\s\S]*?pointer-events:\s*none;/)
+    expect(credentialStyles).toMatch(/\.credentialExpiryTooltip\s*\{[\s\S]*?white-space:\s*nowrap;/)
+    expect(cssBlock('.credentialExpiryTooltip')).not.toContain('overflow-wrap:')
+  })
+
   it('keeps credential alias edit buttons in a fixed name-cell action slot', () => {
     expect(credentialStyles).toMatch(/\.credentialDisplayName\s*\{[\s\S]*?width:\s*100%;/)
     expect(credentialStyles).toMatch(/\.credentialAliasEditor\s*\{[\s\S]*?width:\s*100%;/)

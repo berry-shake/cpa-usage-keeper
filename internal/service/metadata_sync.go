@@ -10,7 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// SyncMetadata 同步三类 CPA metadata，并只在三类数据库写入都成功后追平 identity 历史统计。
+// SyncMetadata 同步三类 CPA metadata，并只在三类数据库写入都成功后通知后台 identity 聚合。
 func (s *SyncService) SyncMetadata(ctx context.Context) error {
 	// metadata 入口仍复用原 validate，并保留老构造器的 client 回填行为。
 	if err := s.validate(syncMetadataRequired); err != nil {
@@ -19,7 +19,7 @@ func (s *SyncService) SyncMetadata(ctx context.Context) error {
 	}
 	// 开始日志保持原有 debug 级别和 message。
 	logrus.Debug("metadata sync started")
-	// 同一轮 Auth Files、管理 key、provider 和统计补算共用一个规范化时间。
+	// 同一轮 metadata 写入与兼容同步补算共用该时间；后台 Runner 使用自己的事务时间。
 	fetchedAt := timeutil.NormalizeStorageTime(s.now())
 	// Auth Files 先读取，但失败不跳过后续两类 metadata。
 	authFilesResult, authFilesErr := s.metadataFetcher.FetchAuthFiles(ctx)
@@ -35,19 +35,24 @@ func (s *SyncService) SyncMetadata(ctx context.Context) error {
 	providerSyncErr, providerWarningErr := persistProviderMetadata(ctx, s.db, providerSnapshot, providerFetchErr, fetchedAt)
 	// 三类持久化错误按 Auth Files、管理 key、provider 的既有顺序合并。
 	upsertErr := joinErrors(authSyncErr, apiKeySyncErr, providerSyncErr)
-	// aggregateErr 默认为空，只有全部 metadata 写入成功才可能赋值。
+	// aggregateErr 只承接没有 notifier 的兼容同步补算错误。
 	var aggregateErr error
-	// 任一数据库写入失败都阻止基于半成品 identity 做历史补算。
+	// 任一数据库写入失败都阻止基于半成品 identity 发送通知或执行兼容补算。
 	if upsertErr == nil {
-		// provider fetch warning 不属于持久化失败，因此仍允许成功 identity 追平历史 usage_events。
-		aggregateErr = repository.AggregateUsageIdentityStats(ctx, s.db, fetchedAt)
-		// 聚合失败继续保持独立错误分类。
-		if aggregateErr != nil {
-			// 包装文本保持原有 service 对外错误语义。
-			aggregateErr = fmt.Errorf("aggregate usage identity stats: %w", aggregateErr)
+		// provider fetch warning 不属于持久化失败，因此仍允许已提交 identity 唤醒后台 runner。
+		if s.usageAggregation != nil {
+			// notifier 只写内存并发 wake，不在 metadata 热路径执行 SQLite 聚合事务。
+			s.usageAggregation.NotifyUsageIdentitiesChanged()
+		} else {
+			// 没有 notifier 的既有构造路径继续在返回前补算历史 identity 事件。
+			aggregateErr = repository.AggregateUsageIdentityStats(ctx, s.db, fetchedAt)
+			// 错误包装保持 main 对兼容调用方的稳定文本。
+			if aggregateErr != nil {
+				aggregateErr = fmt.Errorf("aggregate usage identity stats: %w", aggregateErr)
+			}
 		}
 	}
-	// 最终顺序保持 upsert、aggregate、provider warning，provider persistence 失败时 warning 已由持久化入口抑制。
+	// 最终顺序保持 persistence、兼容 aggregate、provider warning；生产后台聚合仍有独立生命周期。
 	err := joinErrors(upsertErr, aggregateErr, providerWarningErr)
 	// 完成日志默认沿用 completed 状态。
 	fields := logrus.Fields{

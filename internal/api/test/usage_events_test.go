@@ -96,6 +96,10 @@ func (s *usageEventsStub) GetUsageOverview(_ context.Context, filter servicedto.
 	return nil, nil
 }
 
+func (s *usageEventsStub) GetUsageActivity(context.Context, servicedto.UsageFilter) (*servicedto.UsageActivitySnapshot, error) {
+	return nil, s.err
+}
+
 func (s *usageEventsStub) GetUsageOverviewRealtime(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewRealtime, error) {
 	return nil, nil
 }
@@ -140,6 +144,10 @@ func (s *usageEventsStub) ListUsageCredentialStats(_ context.Context, filter ser
 }
 
 func (s *usageEventsStub) GetAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisSnapshot, error) {
+	return nil, s.err
+}
+
+func (s *usageEventsStub) GetAnalysisLatency(context.Context, servicedto.UsageFilter) (*servicedto.AnalysisLatencyDiagnostics, error) {
 	return nil, s.err
 }
 
@@ -287,7 +295,7 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	if !contains(body, `"ttft_ms":45`) {
 		t.Fatalf("expected ttft_ms in response body: %s", body)
 	}
-	if !contains(body, `"speed_tps":29`) {
+	if !contains(body, `"speed_tps":30.5`) {
 		t.Fatalf("expected speed_tps in response body: %s", body)
 	}
 	if !contains(body, `"executor_type":"responses"`) {
@@ -1248,23 +1256,23 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 		want *float64
 	}{
 		{
-			name: "uses output tokens after first token over generation duration",
+			name: "uses output tokens over generation duration",
 			row: servicedto.UsageEventRecord{
 				LatencyMS:    2045,
 				TTFTMS:       usageEventInt64Ptr(45),
 				OutputTokens: 61,
 			},
-			want: usageEventFloat64Ptr(30),
+			want: usageEventFloat64Ptr(30.5),
 		},
 		{
-			name: "uses visible output tokens after first token over generation duration",
+			name: "does not subtract reasoning tokens",
 			row: servicedto.UsageEventRecord{
 				LatencyMS:       2045,
 				TTFTMS:          usageEventInt64Ptr(45),
 				OutputTokens:    61,
 				ReasoningTokens: 2,
 			},
-			want: usageEventFloat64Ptr(29),
+			want: usageEventFloat64Ptr(30.5),
 		},
 		{
 			name: "omits speed without ttft",
@@ -1282,20 +1290,29 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 			},
 		},
 		{
-			name: "omits speed when only first token is present",
+			name: "uses a single output token",
 			row: servicedto.UsageEventRecord{
 				LatencyMS:    2045,
 				TTFTMS:       usageEventInt64Ptr(45),
 				OutputTokens: 1,
 			},
+			want: usageEventFloat64Ptr(0.5),
 		},
 		{
-			name: "omits speed when only first visible token is present",
+			name: "uses full output tokens when reasoning is present",
 			row: servicedto.UsageEventRecord{
 				LatencyMS:       2045,
 				TTFTMS:          usageEventInt64Ptr(45),
 				OutputTokens:    4,
 				ReasoningTokens: 3,
+			},
+			want: usageEventFloat64Ptr(2),
+		},
+		{
+			name: "omits speed without output tokens",
+			row: servicedto.UsageEventRecord{
+				LatencyMS: 2045,
+				TTFTMS:    usageEventInt64Ptr(45),
 			},
 		},
 	}

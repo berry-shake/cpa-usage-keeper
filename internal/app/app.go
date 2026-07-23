@@ -48,12 +48,14 @@ type QuotaRunner interface {
 }
 
 type App struct {
-	Config            *config.Config
-	DB                *gorm.DB
-	Router            *gin.Engine
-	Poller            StatusProvider
-	RedisIngest       Runner
-	RedisProcess      Runner
+	Config       *config.Config
+	DB           *gorm.DB
+	Router       *gin.Engine
+	Poller       StatusProvider
+	RedisIngest  Runner
+	RedisProcess Runner
+	// UsageAggregation 是唯一串行调度三类派生聚合事务的后台 runner。
+	UsageAggregation  Runner
 	Maintenance       *StorageCleanupRunner
 	MetadataSync      *MetadataSyncRunner
 	QuotaService      QuotaRunner
@@ -99,16 +101,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		_ = logCloser.Close()
 		return nil, err
 	}
-	// migrations 完成后、后台 runner 启动前先追平 Overview 增量表，避免首个 Overview 请求触发大批量聚合。
-	logrus.Info("starting usage overview aggregation catch-up")
-	if err := repository.AggregateUsageOverviewStats(context.Background(), db, time.Now()); err != nil {
-		_ = closeGormDB(db)
-		_ = logCloser.Close()
-		return nil, err
-	}
-	logrus.Info("completed usage overview aggregation catch-up")
-
-	// 最近事件缓存只在增量表追平后创建，确保启动时能加载完整的最近 70 分钟事件投影。
+	// 最近事件缓存直接从 raw usage_events 加载，不再等待派生聚合追平。
 	recentUsageCache, err := newUsageRecentEventCache(db, repository.UsageRecentEventCacheOptions{})
 	if err != nil {
 		// 缓存初始化失败会让 realtime/最近边界降级到 DB，但不影响核心写入和查询能力。
@@ -118,6 +111,8 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
 	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{RefreshWorkerLimit: cfg.QuotaRefreshWorkerLimit})
+	// 单 writer aggregation runner 复用同一个数据库和 quota appender，并在 App.Run 时主动追平。
+	usageAggregationRunner := poller.NewUsageAggregationRunner(db, quotaService)
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
 		BaseURL:                   cfg.CPABaseURL,
@@ -125,8 +120,8 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		CleanupUsageEventsEnabled: cfg.CleanupUsageEventsEnabled,
 		// usage_events 事务提交后通过这个缓存做非阻塞增量追加，供 Overview realtime 和右边界补偿复用。
 		RecentUsageEvents: recentUsageCache,
-		// Redis usage response_headers 提交后异步 patch quota cache，不参与 usage_events 入库事务。
-		UsageHeaderQuota: quotaService,
+		// usage 与 metadata 提交后只唤醒单 writer runner，不在前台链路执行派生聚合。
+		UsageAggregationNotifier: usageAggregationRunner,
 	})
 	// metadataSyncRunner 提前创建，保证控制消息和后台任务使用同一个调度器实例。
 	metadataSyncRunner := NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval)
@@ -218,6 +213,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		// Redis ingest/process 分成两个后台 runner，避免远端订阅拉取和本地 SQLite 处理互相等待。
 		RedisIngest:       redisIngestRunner,
 		RedisProcess:      redisProcessRunner,
+		UsageAggregation:  usageAggregationRunner,
 		Maintenance:       NewStorageCleanupRunner(syncService),
 		MetadataSync:      metadataSyncRunner,
 		QuotaService:      quotaService,
@@ -333,6 +329,15 @@ func (a *App) Run() error {
 		a.startBackgroundTask(func() {
 			if err := a.RedisProcess.Run(ctx); err != nil {
 				logrus.Errorf("redis process stopped: %v", err)
+			}
+		})
+	}
+	if a.UsageAggregation != nil {
+		// 聚合 runner 使用独立 App 生命周期 goroutine，但内部始终串行执行一个 SQLite writer。
+		a.startBackgroundTask(func() {
+			// runner 错误只终止该后台任务，不影响 HTTP 或已提交 usage 数据。
+			if err := a.UsageAggregation.Run(ctx); err != nil {
+				logrus.Errorf("usage aggregation stopped: %v", err)
 			}
 		})
 	}

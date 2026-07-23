@@ -18,6 +18,18 @@ describe('i18n resources', () => {
     }
   });
 
+  it('localizes Token Activity and density labels in every supported language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.token_activity_title')).toBe('Token Activity');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.token_activity_less')).toBe('Less');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.token_activity_more')).toBe('More');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.token_activity_title')).toBe('Token 活动');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.token_activity_less')).toBe('较少');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.token_activity_more')).toBe('较多');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.token_activity_title')).toBe('Token 活動');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.token_activity_less')).toBe('較少');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.token_activity_more')).toBe('較多');
+  });
+
   it('keeps Auth Files display mode labels available in every language', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_auth_files_display_mode_aria')).toBe('Auth file display mode');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_auth_files_display_mode_aria')).toBe('认证文件显示模式');
@@ -113,6 +125,12 @@ describe('i18n resources', () => {
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.latency')).toBe('總延遲');
   });
 
+  it('describes request event speed using full output tokens', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.speed_hint')).toBe('Average output tokens per second after TTFT');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.speed_hint')).toBe('首字后输出 token 的平均速度');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.speed_hint')).toBe('首字後輸出 token 的平均速度');
+  });
+
   it('uses compact Chinese labels for request event type column', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.request_type')).toBe('Type');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.request_type')).toBe('类型');
@@ -144,6 +162,9 @@ describe('i18n resources', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_heatmap_subtitle')).toBe('Token distribution across API keys and models with hover details.');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_heatmap_subtitle')).toBe('展示 API Key 与模型组合下的 Token 分布，悬浮查看明细。');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_heatmap_subtitle')).toBe('顯示 API Key 與模型組合下的 Token 分布，懸浮查看明細。');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_heatmap_total')).toBeUndefined();
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_heatmap_total')).toBeUndefined();
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_heatmap_total')).toBeUndefined();
   });
 
   it('labels Analysis cost metrics', () => {

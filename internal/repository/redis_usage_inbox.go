@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"cpa-usage-keeper/internal/repository/dto"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"strings"
@@ -9,9 +9,33 @@ import (
 	"unicode/utf8"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
 )
+
+// HasProcessableRedisUsageInbox 只判断是否存在需要前台优先处理的 inbox 行。
+func HasProcessableRedisUsageInbox(ctx context.Context, db *gorm.DB) (bool, error) {
+	// nil 数据库无法执行 inbox 优先级检查。
+	if db == nil {
+		return false, fmt.Errorf("database is nil")
+	}
+	// marker 只承接一行常量，不读取 raw_message 等大字段。
+	var marker int
+	// pending 和 process_failed 与实际 process runner 的可处理集合保持一致。
+	err := db.WithContext(ctx).
+		Model(&entities.RedisUsageInbox{}).
+		Select("1").
+		Where("status = ? OR status = ?", RedisUsageInboxStatusPending, RedisUsageInboxStatusProcessFailed).
+		Limit(1).
+		Scan(&marker).Error
+	// 查询失败时 runner 不得猜测 inbox 为空。
+	if err != nil {
+		return false, fmt.Errorf("check processable redis usage inbox: %w", err)
+	}
+	// 读到常量 1 表示前台仍有可处理行，聚合必须立即让路。
+	return marker == 1, nil
+}
 
 const redisUsageInboxProcessingColumns = "id, source, raw_message, status, attempt_count, usage_event_key, popped_at"
 

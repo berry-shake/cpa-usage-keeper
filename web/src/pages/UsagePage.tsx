@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
-import type { AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
+import { ApiError, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, logout, revokeAuthSession, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { Select } from '@/components/ui/Select';
@@ -14,6 +14,7 @@ import { useThemeStore } from '@/stores';
 import {
   StatCards,
   DailyAveragePanel,
+  RecentActivityPanel,
   OverviewRealtimePanel,
   AnalysisPanel,
   ApiKeySettingsCard,
@@ -23,9 +24,10 @@ import {
   AiProviderCredentialsSection,
   CredentialStatsCard,
   CredentialProviderFilterBar,
-  ServiceHealthCard,
   TimeRangeControl,
   useUsageData,
+  useRecentActivityWindow,
+  useUsageActivityData,
   useOverviewRealtimeData,
   usePricingData,
   useSparklines,
@@ -77,6 +79,29 @@ const CPA_MANAGEMENT_PAGE = 'management.html';
 const ABSOLUTE_HTTP_URL_PATTERN = /^https?:\/\//i;
 const EXPLICIT_URL_SCHEME_PATTERN = /^[a-z][a-z\d+.-]*:/i;
 const BARE_HOST_WITH_PORT_PATTERN = /^[a-z0-9.-]+:\d+(?:[/?#]|$)/i;
+
+type AnalysisSectionLoadOptions<TCore, TLatency> = {
+  loadCore: () => Promise<TCore>;
+  loadLatency: () => Promise<TLatency>;
+  onCoreLoaded: (value: TCore) => void;
+  onCoreError: (error: unknown) => void;
+  onLatencyLoaded: (value: TLatency) => void;
+  onLatencyError: (error: unknown) => void;
+};
+
+// 两个 Analysis 数据源同时启动，但各自完成后立即更新对应卡片，避免慢接口阻塞快接口展示。
+export const loadAnalysisSections = async <TCore, TLatency>({
+  loadCore,
+  loadLatency,
+  onCoreLoaded,
+  onCoreError,
+  onLatencyLoaded,
+  onLatencyError,
+}: AnalysisSectionLoadOptions<TCore, TLatency>) => {
+  const coreRequest = loadCore().then(onCoreLoaded, onCoreError);
+  const latencyRequest = loadLatency().then(onLatencyLoaded, onLatencyError);
+  await Promise.all([coreRequest, latencyRequest]);
+};
 
 export const getCredentialSectionVisibility = (tab: UsageTab) => ({
   enabled: tab === 'auth-files' || tab === 'ai-provider',
@@ -745,6 +770,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     customStart: customRange?.start,
     customEnd: customRange?.end,
   }), [customRange?.end, customRange?.start, customRange?.unit, timeRange]);
+  const {
+    request: activityRangeRequest,
+    manualWindow: manualActivityWindow,
+    setWindow: setActivityWindow,
+  } = useRecentActivityWindow(usageRangeQuery);
 
   const {
     usage,
@@ -761,6 +791,22 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     enabled: activeTab === 'overview',
     apiKeyId: selectedApiKeyId,
   });
+  const {
+    activity,
+    activityMatchesRequest,
+    loading: activityLoading,
+    error: activityError,
+    requestIdentity: activityRequestIdentity,
+    loadActivity,
+  } = useUsageActivityData({
+    viewer: 'admin',
+    request: activityRangeRequest,
+    apiKeyId: selectedApiKeyId,
+    enabled: activeTab === 'overview' && usageRangeQuery.valid,
+    onAuthRequired,
+  });
+  const activityWindow = manualActivityWindow ?? activity?.window ?? null;
+  const activityWindowIsCurrent = manualActivityWindow !== null || activityMatchesRequest;
   const rangeTimeZone = status?.timezone ?? usage?.timezone ?? timeRangeState.timeZone;
   const handleTimeRangeChange = useCallback((range: UsageTimeRange, nextCustomRange?: UsageCustomRange) => {
     pendingLegacyCustomRangeRef.current = null;
@@ -867,6 +913,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
+  const [analysisLatencyLoading, setAnalysisLatencyLoading] = useState(false);
+  const [analysisLatencyError, setAnalysisLatencyError] = useState('');
+  const [analysisLatencyData, setAnalysisLatencyData] = useState<AnalysisLatencyDiagnostics | null>(null);
   const analysisRequestControllerRef = useRef<AbortController | null>(null);
   const [credentialStatsLoading, setCredentialStatsLoading] = useState(false);
   const [credentialStatsError, setCredentialStatsError] = useState('');
@@ -1061,29 +1110,47 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setAnalysisLoading(true);
     setAnalysisError('');
     setAnalysisData(null);
-    try {
-      const response = await fetchAnalysis(usageRangeQuery, controller.signal, selectedApiKeyId);
-      if (analysisRequestControllerRef.current !== controller) {
-        return;
-      }
-      setAnalysisData(response);
-    } catch (error) {
-      if (controller.signal.aborted) {
-        return;
-      }
-      if (analysisRequestControllerRef.current === controller) {
-        setAnalysisData(null);
-      }
-      if (error instanceof ApiError && error.status === 401) {
-        onAuthRequired?.();
-        return;
-      }
-      setAnalysisError(error instanceof Error ? error.message : 'Failed to load usage analysis');
-    } finally {
-      if (analysisRequestControllerRef.current === controller) {
+    setAnalysisLatencyLoading(true);
+    setAnalysisLatencyError('');
+    setAnalysisLatencyData(null);
+
+    await loadAnalysisSections({
+      loadCore: () => fetchAnalysis(usageRangeQuery, controller.signal, selectedApiKeyId),
+      loadLatency: () => fetchAnalysisLatency(usageRangeQuery, controller.signal, selectedApiKeyId),
+      onCoreLoaded: (response) => {
+        if (analysisRequestControllerRef.current !== controller) return;
+        setAnalysisData(response);
         setAnalysisLoading(false);
-        analysisRequestControllerRef.current = null;
-      }
+      },
+      onCoreError: (error) => {
+        if (controller.signal.aborted || analysisRequestControllerRef.current !== controller) return;
+        setAnalysisData(null);
+        setAnalysisLoading(false);
+        if (error instanceof ApiError && error.status === 401) {
+          onAuthRequired?.();
+          return;
+        }
+        setAnalysisError(error instanceof Error ? error.message : 'Failed to load usage analysis');
+      },
+      onLatencyLoaded: (response) => {
+        if (analysisRequestControllerRef.current !== controller) return;
+        setAnalysisLatencyData(response);
+        setAnalysisLatencyLoading(false);
+      },
+      onLatencyError: (error) => {
+        if (controller.signal.aborted || analysisRequestControllerRef.current !== controller) return;
+        setAnalysisLatencyData(null);
+        setAnalysisLatencyLoading(false);
+        if (error instanceof ApiError && error.status === 401) {
+          onAuthRequired?.();
+          return;
+        }
+        setAnalysisLatencyError(error instanceof Error ? error.message : 'Failed to load analysis latency');
+      },
+    });
+
+    if (analysisRequestControllerRef.current === controller) {
+      analysisRequestControllerRef.current = null;
     }
   }, [onAuthRequired, selectedApiKeyId, usageRangeQuery]);
 
@@ -1493,8 +1560,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await Promise.all([loadAuthSessions(), loadApiKeySettings(), loadPricing()]);
       return;
     }
-    await Promise.all([loadUsage(), loadRealtime()]);
-  }, [activeTab, credentialSectionVisibility.enabled, loadAnalysis, loadApiKeySettings, loadAuthSessions, loadCredentialStats, loadEventFilterOptions, loadEvents, loadPricing, loadRealtime, loadUsage, refreshCredentials]);
+    await Promise.all([loadUsage(), loadActivity(), loadRealtime()]);
+  }, [activeTab, credentialSectionVisibility.enabled, loadActivity, loadAnalysis, loadApiKeySettings, loadAuthSessions, loadCredentialStats, loadEventFilterOptions, loadEvents, loadPricing, loadRealtime, loadUsage, refreshCredentials]);
 
   const refreshAutoRefreshTab = useCallback(async () => {
     if (activeTab === 'events') {
@@ -1505,8 +1572,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       await Promise.all([refreshCredentials(), loadCredentialStats()]);
       return;
     }
-    await Promise.all([loadUsage(), loadRealtime()]);
-  }, [activeTab, credentialSectionVisibility.enabled, loadCredentialStats, loadEvents, loadRealtime, loadUsage, refreshCredentials]);
+    await Promise.all([loadUsage(), loadActivity({ skipIfInFlight: true }), loadRealtime()]);
+  }, [activeTab, credentialSectionVisibility.enabled, loadActivity, loadCredentialStats, loadEvents, loadRealtime, loadUsage, refreshCredentials]);
 
   const handleAutoRefreshError = useCallback((error: unknown) => {
     if (error instanceof ApiError && error.status === 401) {
@@ -1630,6 +1697,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       analysisRequestControllerRef.current?.abort();
       analysisRequestControllerRef.current = null;
       setAnalysisLoading(false);
+      setAnalysisLatencyLoading(false);
       return;
     }
     void loadAnalysis();
@@ -1950,7 +2018,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   }}
                 />
 
-                <ServiceHealthCard usage={usage} loading={overviewDisplayLoading} />
+                <RecentActivityPanel
+                  activity={activity}
+                  loading={activityLoading}
+                  error={activityError}
+                  window={activityWindow}
+                  windowIsCurrent={activityWindowIsCurrent}
+                  requestIdentity={activityRequestIdentity}
+                  onWindowChange={setActivityWindow}
+                />
 
                 <OverviewRealtimePanel
                   realtime={currentRealtime ?? undefined}
@@ -1968,7 +2044,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
             {activeTab === 'analysis' && (
               <>
                 {analysisError && <div className={styles.errorBox}>{analysisError}</div>}
-                <AnalysisPanel analysis={analysisData} loading={analysisLoading} isDark={isDark} isMobile={isMobile} />
+                <AnalysisPanel
+                  analysis={analysisData}
+                  loading={analysisLoading}
+                  latencyDiagnostics={analysisLatencyData}
+                  latencyLoading={analysisLatencyLoading}
+                  latencyError={analysisLatencyError}
+                  isDark={isDark}
+                  isMobile={isMobile}
+                />
               </>
             )}
 

@@ -20,8 +20,11 @@ func TestAllIncludesCoreModels(t *testing.T) {
 		&CPAAPIKey{},
 		&UsageOverviewHourlyStat{},
 		&UsageOverviewDailyStat{},
-		&UsageOverviewHealthStat{},
 		&UsageOverviewAggregationCheckpoint{},
+		// Activity 统计必须随核心模型注册，确保全新数据库直接得到新表。
+		&UsageActivityStat{},
+		// Activity checkpoint 必须独立注册，不能复用 Overview cursor。
+		&UsageActivityAggregationCheckpoint{},
 		&AuthSession{},
 		&AppSetting{},
 	}

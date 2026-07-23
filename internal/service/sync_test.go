@@ -52,20 +52,23 @@ func (r *recordingRecentUsageAppender) TryAppend(events []entities.UsageEvent) b
 	return r.allowed
 }
 
-func (r *recordingUsageHeaderQuotaAppender) TryAppendUsageHeaderSnapshots(snapshots []quota.UsageHeaderSnapshot) bool {
+func (r *recordingUsageHeaderQuotaAppender) NotifyUsageEventsCommitted(_ []entities.UsageEvent, snapshots []quota.UsageHeaderSnapshot) {
 	r.calls++
 	r.snapshots = append(r.snapshots, snapshots...)
-	return r.allowed
 }
 
-func (r *aggregationAwareUsageHeaderQuotaAppender) TryAppendUsageHeaderSnapshots(snapshots []quota.UsageHeaderSnapshot) bool {
+func (r *recordingUsageHeaderQuotaAppender) NotifyUsageIdentitiesChanged() {}
+
+func (r *aggregationAwareUsageHeaderQuotaAppender) NotifyUsageEventsCommitted(_ []entities.UsageEvent, snapshots []quota.UsageHeaderSnapshot) {
 	r.calls++
 	r.snapshots = append(r.snapshots, snapshots...)
 	r.countErr = r.db.Model(&entities.UsageOverviewHourlyStat{}).Where("auth_index = ?", "codex-auth").Count(&r.hourlyStatsAtAppend).Error
-	return true
 }
 
+func (r *aggregationAwareUsageHeaderQuotaAppender) NotifyUsageIdentitiesChanged() {}
+
 func TestProcessRedisUsageInboxPersistsEventsWithoutSnapshot(t *testing.T) {
+	// 准备：生产异步路径显式注入 notifier，即使消息本身没有 header snapshot。
 	db := openSyncTestDatabase(t)
 	rows, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
 		Source:     redisUsageInboxTestSource,
@@ -75,10 +78,13 @@ func TestProcessRedisUsageInboxPersistsEventsWithoutSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed inbox row: %v", err)
 	}
+	notifier := &recordingUsageHeaderQuotaAppender{allowed: true}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL: "https://cpa.example.com",
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: notifier,
 	})
 
+	// 执行：处理一条不包含 header snapshot 的正常 usage inbox。
 	result, err := service.ProcessRedisUsageInbox(context.Background())
 	if err != nil {
 		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
@@ -103,12 +109,13 @@ func TestProcessRedisUsageInboxPersistsEventsWithoutSnapshot(t *testing.T) {
 	if inbox.Status != repository.RedisUsageInboxStatusProcessed || inbox.UsageEventKey != "process-only" {
 		t.Fatalf("expected processed inbox row without snapshot link, got %+v", inbox)
 	}
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
-	if err := db.Where("name = ?", "overview").First(&checkpoint).Error; err != nil {
-		t.Fatalf("expected overview aggregation checkpoint after processing inbox: %v", err)
+	// 断言：有 notifier 的生产路径只发送事件通知，不在前台创建 Overview checkpoint。
+	var checkpointCount int64
+	if err := db.Model(&entities.UsageOverviewAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; err != nil {
+		t.Fatalf("count overview aggregation checkpoint: %v", err)
 	}
-	if checkpoint.LastAggregatedUsageEventID != event.ID {
-		t.Fatalf("expected overview checkpoint to aggregate through event %d, got %+v", event.ID, checkpoint)
+	if checkpointCount != 0 {
+		t.Fatalf("expected process path to leave overview aggregation to runner, got %d checkpoints", checkpointCount)
 	}
 }
 
@@ -271,8 +278,8 @@ func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterTransactionCommit(t 
 	}
 	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
 	})
 
 	result, err := service.ProcessRedisUsageInbox(context.Background())
@@ -294,7 +301,7 @@ func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterTransactionCommit(t 
 	}
 }
 
-func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterOverviewAggregation(t *testing.T) {
+func TestProcessRedisUsageInboxNotifiesAggregationRunnerBeforeOverviewAggregation(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
 		Source: redisUsageInboxTestSource,
@@ -318,9 +325,9 @@ func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterOverviewAggregation(
 	}
 	appender := &aggregationAwareUsageHeaderQuotaAppender{db: db}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
-		Now:              func() time.Time { return time.Date(2026, 6, 22, 11, 15, 0, 0, time.Local) },
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
+		Now:                      func() time.Time { return time.Date(2026, 6, 22, 11, 15, 0, 0, time.Local) },
 	})
 
 	result, err := service.ProcessRedisUsageInbox(context.Background())
@@ -336,8 +343,8 @@ func TestProcessRedisUsageInboxNotifiesUsageHeaderQuotaAfterOverviewAggregation(
 	if appender.countErr != nil {
 		t.Fatalf("count hourly stats during header notification: %v", appender.countErr)
 	}
-	if appender.hourlyStatsAtAppend == 0 {
-		t.Fatal("expected usage overview hourly stats to be aggregated before header quota notification")
+	if appender.hourlyStatsAtAppend != 0 {
+		t.Fatalf("expected notifier before background overview aggregation, got %d hourly rows", appender.hourlyStatsAtAppend)
 	}
 }
 
@@ -403,8 +410,8 @@ func TestProcessRedisUsageInboxCoalescesUsageHeaderQuotaSnapshotsByAuthIndex(t *
 	}
 	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
 	})
 
 	result, err := service.ProcessRedisUsageInbox(context.Background())
@@ -472,8 +479,8 @@ func TestProcessRedisUsageInboxIgnoresIncompleteUsageHeaderQuotaSnapshotDuringCo
 	}
 	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
 	})
 
 	result, err := service.ProcessRedisUsageInbox(context.Background())
@@ -518,8 +525,8 @@ func TestProcessRedisUsageInboxDoesNotNotifyUsageHeaderQuotaOnRollback(t *testin
 	}
 	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
 	})
 
 	_, err := service.ProcessRedisUsageInbox(context.Background())
@@ -531,7 +538,7 @@ func TestProcessRedisUsageInboxDoesNotNotifyUsageHeaderQuotaOnRollback(t *testin
 	}
 }
 
-func TestProcessRedisUsageInboxIgnoresUsageHeaderQuotaOverflow(t *testing.T) {
+func TestProcessRedisUsageInboxNotifiesAggregationRunnerWithoutWaiting(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
 		Source: redisUsageInboxTestSource,
@@ -555,23 +562,23 @@ func TestProcessRedisUsageInboxIgnoresUsageHeaderQuotaOverflow(t *testing.T) {
 	}
 	appender := &recordingUsageHeaderQuotaAppender{allowed: false}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
 	})
 
 	result, err := service.ProcessRedisUsageInbox(context.Background())
 	if err != nil {
-		t.Fatalf("ProcessRedisUsageInbox should ignore usage header quota overflow, got %v", err)
+		t.Fatalf("ProcessRedisUsageInbox should return after notifier call, got %v", err)
 	}
 	if result == nil || result.Status != "completed" || result.InsertedEvents != 1 {
 		t.Fatalf("unexpected process result: %+v", result)
 	}
 	if appender.calls != 1 {
-		t.Fatalf("expected overflow appender to be attempted once, got %d", appender.calls)
+		t.Fatalf("expected aggregation notifier once, got %d", appender.calls)
 	}
 }
 
-func TestProcessRedisUsageInboxSkipsRowsWithoutUsageHeaderQuotaSnapshot(t *testing.T) {
+func TestProcessRedisUsageInboxNotifiesEventsWithoutUsageHeaderQuotaSnapshot(t *testing.T) {
 	db := openSyncTestDatabase(t)
 	if _, err := repository.InsertRedisUsageInboxMessages(db, []dto.RedisInboxInsert{{
 		Source:     redisUsageInboxTestSource,
@@ -582,8 +589,8 @@ func TestProcessRedisUsageInboxSkipsRowsWithoutUsageHeaderQuotaSnapshot(t *testi
 	}
 	appender := &recordingUsageHeaderQuotaAppender{allowed: true}
 	service := NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:          "https://cpa.example.com",
-		UsageHeaderQuota: appender,
+		BaseURL:                  "https://cpa.example.com",
+		UsageAggregationNotifier: appender,
 	})
 
 	result, err := service.ProcessRedisUsageInbox(context.Background())
@@ -593,8 +600,8 @@ func TestProcessRedisUsageInboxSkipsRowsWithoutUsageHeaderQuotaSnapshot(t *testi
 	if result == nil || result.InsertedEvents != 1 {
 		t.Fatalf("unexpected process result: %+v", result)
 	}
-	if appender.calls != 0 || len(appender.snapshots) != 0 {
-		t.Fatalf("expected rows without response_headers to skip quota notification, got calls=%d snapshots=%+v", appender.calls, appender.snapshots)
+	if appender.calls != 1 || len(appender.snapshots) != 0 {
+		t.Fatalf("expected event wake without quota snapshots, got calls=%d snapshots=%+v", appender.calls, appender.snapshots)
 	}
 }
 
@@ -645,15 +652,18 @@ func TestProcessRedisUsageInboxSkipsAggregationWhenInboxAndEventsAreEmpty(t *tes
 	}
 }
 
-func TestProcessRedisUsageInboxRetriesOverviewAggregationWhenInboxIsEmpty(t *testing.T) {
+func TestProcessRedisUsageInboxLeavesOverviewCatchUpToRunnerWhenInboxIsEmpty(t *testing.T) {
+	// 准备：插入尚未聚合的 raw event，并显式注入生产 aggregation notifier。
 	db := openSyncTestDatabase(t)
 	if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{
 		EventKey: "stale-event", APIGroupKey: "provider-a", Model: "claude-sonnet", Timestamp: time.Date(2026, 4, 27, 8, 0, 0, 0, time.UTC), TotalTokens: 10,
 	}}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com"})
+	notifier := &recordingUsageHeaderQuotaAppender{allowed: true}
+	service := NewSyncServiceWithOptions(db, SyncServiceOptions{BaseURL: "https://cpa.example.com", UsageAggregationNotifier: notifier})
 
+	// 执行：空 inbox 不替后台 Runner 追平启动前已存在的 event。
 	result, err := service.ProcessRedisUsageInbox(context.Background())
 	if err != nil {
 		t.Fatalf("ProcessRedisUsageInbox returned error: %v", err)
@@ -661,12 +671,13 @@ func TestProcessRedisUsageInboxRetriesOverviewAggregationWhenInboxIsEmpty(t *tes
 	if result == nil || !result.Empty || result.Status != "empty" {
 		t.Fatalf("unexpected empty process result: %+v", result)
 	}
-	var checkpoint entities.UsageOverviewAggregationCheckpoint
-	if err := db.Where("name = ?", "overview").First(&checkpoint).Error; err != nil {
-		t.Fatalf("expected overview aggregation checkpoint after empty process catch-up: %v", err)
+	// 断言：生产 notifier 路径保持 Overview checkpoint 不变，等待 Runner startup wake。
+	var checkpointCount int64
+	if err := db.Model(&entities.UsageOverviewAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; err != nil {
+		t.Fatalf("count overview aggregation checkpoints: %v", err)
 	}
-	if checkpoint.LastAggregatedUsageEventID == 0 {
-		t.Fatalf("expected empty process catch-up to aggregate stale usage events, got %+v", checkpoint)
+	if checkpointCount != 0 {
+		t.Fatalf("expected empty process to leave catch-up to runner, got %d checkpoints", checkpointCount)
 	}
 }
 

@@ -217,6 +217,7 @@ func TestSyncMetadataProviderWarningStillRunsHistoricalStatsCatchUp(t *testing.T
 		// 输出真实错误定位 warning 丢失。
 		t.Fatalf("provider warning = %v", err)
 	}
+	// 没有 notifier 的兼容构造路径必须在 SyncMetadata 返回前保留 main 的同步 identity catch-up。
 	// identities 读取成功 Codex 行。
 	identities := loadMetadataIdentityMap(t, db)
 	// codexRow 使用 AI Provider auth type 隔离 OAuth。
@@ -375,6 +376,10 @@ func TestSyncMetadataInteractionsRestoreCatchesUpOnlyNewHistoricalEvents(t *test
 		// 首轮全部 endpoint 成功，不应返回错误。
 		t.Fatalf("initial Interactions SyncMetadata returned error: %v", err)
 	}
+	// 模拟后台 runner 完成首次 identity 历史补算。
+	if err := repository.AggregateUsageIdentityStats(context.Background(), db, firstSyncTime); err != nil {
+		t.Fatalf("aggregate initial Interactions history: %v", err)
+	}
 	// initialRows 读取首次补算后的 identity。
 	initialRows := loadMetadataIdentityMap(t, db)
 	// initial 保存后续需要验证的 ID、统计和 cursor。
@@ -416,6 +421,10 @@ func TestSyncMetadataInteractionsRestoreCatchesUpOnlyNewHistoricalEvents(t *test
 		// 输出真实错误定位 restore/catch-up 异常。
 		t.Fatalf("restore Interactions SyncMetadata returned error: %v", err)
 	}
+	// 模拟后台 runner 从既有每行 cursor 继续补算恢复期间新增事件。
+	if err := repository.AggregateUsageIdentityStats(context.Background(), db, restoreTime); err != nil {
+		t.Fatalf("aggregate restored Interactions history: %v", err)
+	}
 	// restoredRows 读取恢复后的最终 identity。
 	restoredRows := loadMetadataIdentityMap(t, db)
 	// restored 必须命中同一数据库行而非创建重复身份。
@@ -436,6 +445,10 @@ func TestSyncMetadataInteractionsRestoreCatchesUpOnlyNewHistoricalEvents(t *test
 	if err := syncer.SyncMetadata(context.Background()); err != nil {
 		// 输出真实错误定位幂等同步异常。
 		t.Fatalf("repeat Interactions SyncMetadata returned error: %v", err)
+	}
+	// 重复后台 catch-up 必须保持每行 cursor 幂等，不得再次累计旧事件。
+	if err := repository.AggregateUsageIdentityStats(context.Background(), db, currentNow); err != nil {
+		t.Fatalf("aggregate repeated Interactions history: %v", err)
 	}
 	// repeatedRows 读取重复同步后的统计。
 	repeatedRows := loadMetadataIdentityMap(t, db)

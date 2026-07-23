@@ -128,24 +128,3 @@ func TestBuildAnalysisKeepsDailyStatsAcrossDSTBoundary(t *testing.T) {
 		t.Fatalf("expected DST-adjacent daily stat to remain included, got %+v", analysis.TokenUsage)
 	}
 }
-
-func TestBuildUsageOverviewUsesShortHealthWindowForArbitraryHourRange(t *testing.T) {
-	db, err := repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "overview-rolling-hour.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
-	end := time.Date(2026, 5, 21, 9, 14, 21, 0, time.Local)
-	start := end.Add(-13 * time.Hour)
-
-	overview, err := repository.BuildUsageOverviewWithFilter(db, repodto.UsageQueryFilter{
-		Range: "13h", StartTime: &start, EndTime: &end, QueryNow: &end,
-	})
-	if err != nil {
-		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
-	}
-	expectedStart := end.Add(-24 * time.Hour)
-	if !overview.Health.WindowStart.Equal(expectedStart) || !overview.Health.WindowEnd.Equal(end) {
-		t.Fatalf("expected arbitrary hour range health window %s - %s, got %s - %s", expectedStart, end, overview.Health.WindowStart, overview.Health.WindowEnd)
-	}
-}
