@@ -11,7 +11,7 @@ import (
 	"cpa-usage-keeper/internal/repository/migration"
 	"cpa-usage-keeper/internal/timeutil"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -252,7 +252,7 @@ func TestUsageActivityMigrationKeepsHealthWhenCapturedTargetDisappears(t *testin
 func openUsageActivityMigrationDatabase(t *testing.T, name string) *gorm.DB {
 	// 每个用例使用独立磁盘 SQLite 文件，覆盖真实 migration 事务行为。
 	t.Helper()
-	dsn := filepath.Join(t.TempDir(), name) + "?_busy_timeout=5000&_foreign_keys=on"
+	dsn := filepath.Join(t.TempDir(), name) + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) }})
 	if err != nil {
 		t.Fatalf("open migration database: %v", err)
