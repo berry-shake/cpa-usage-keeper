@@ -46,6 +46,10 @@ func (s *analysisSplitStub) ListUsageEventFilterOptions(context.Context, service
 	return nil, nil
 }
 
+func (s *analysisSplitStub) ListUsageCredentialStats(context.Context, servicedto.UsageFilter) ([]servicedto.UsageCredentialStat, error) {
+	return nil, nil
+}
+
 func (s *analysisSplitStub) GetAnalysis(_ context.Context, filter servicedto.UsageFilter) (*servicedto.AnalysisSnapshot, error) {
 	s.analysisCalls++
 	s.analysisFilter = filter
