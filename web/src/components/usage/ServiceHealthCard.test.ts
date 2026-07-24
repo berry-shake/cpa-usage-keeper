@@ -50,7 +50,7 @@ describe('ServiceHealthCard health levels', () => {
     const html = renderToStaticMarkup(createElement(ServiceHealthCard, {
       activity: buildUsageActivityFixture(),
       loading: false,
-      requestIdentity: 'admin::24h:::',
+      requestIdentity: 'admin::day:::',
     }));
 
     expect(html.match(/data-health-level=/g)).toHaveLength(6);

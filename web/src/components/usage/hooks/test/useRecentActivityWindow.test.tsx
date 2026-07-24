@@ -60,27 +60,27 @@ describe('useRecentActivityWindow', () => {
       end: '2026-07-21',
     });
 
-    selectWindow('7d');
-    expect(latest?.manualWindow).toBe('7d');
-    expect(latest?.request).toEqual({ range: '7d' });
+    selectWindow('week');
+    expect(latest?.manualWindow).toBe('week');
+    expect(latest?.request).toEqual({ window: 'week' });
   });
 
   it('keeps a manual window while the top time identity is unchanged', () => {
     const query = buildUsageRangeQuery({ range: '8h' });
     renderQuery(query);
-    selectWindow('30d');
+    selectWindow('month');
     renderQuery({ ...query });
 
-    expect(latest?.manualWindow).toBe('30d');
-    expect(latest?.request).toEqual({ range: '30d' });
+    expect(latest?.manualWindow).toBe('month');
+    expect(latest?.request).toEqual({ window: 'month' });
   });
 
   it('uses the Activity-specific query when the user selects one year', () => {
     renderQuery(buildUsageRangeQuery({ range: '30d' }));
-    selectWindow('1y');
+    selectWindow('year');
 
-    expect(latest?.manualWindow).toBe('1y');
-    expect(latest?.request).toEqual({ window: '1y' });
+    expect(latest?.manualWindow).toBe('year');
+    expect(latest?.request).toEqual({ window: 'year' });
   });
 
   it('uses dedicated calendar Activity windows for Today and Yesterday', () => {
@@ -97,7 +97,7 @@ describe('useRecentActivityWindow', () => {
     const first = buildUsageRangeQuery({ range: '8h' });
     const second = buildUsageRangeQuery({ range: '24h' });
     renderQuery(first);
-    selectWindow('7d');
+    selectWindow('week');
 
     renderQuery(second);
     expect(latest?.manualWindow).toBeNull();

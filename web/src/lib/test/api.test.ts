@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -14,6 +14,16 @@ describe('fetchUsageEvents', () => {
 
     expect(appPath('/key-overview')).toBe('/keeper/key-overview');
     expect(appPath('key-overview')).toBe('/keeper/key-overview');
+  });
+
+  it('identifies only HTTP 409 as a usage range bounds conflict', async () => {
+    const apiModule = await import('../api') as Record<string, unknown>;
+    const isUsageRangeBoundsConflict = apiModule.isUsageRangeBoundsConflict as ((error: unknown) => boolean) | undefined;
+
+    expect(isUsageRangeBoundsConflict).toBeTypeOf('function');
+    expect(isUsageRangeBoundsConflict?.(new ApiError('expired range', 409))).toBe(true);
+    expect(isUsageRangeBoundsConflict?.(new ApiError('invalid range', 400))).toBe(false);
+    expect(isUsageRangeBoundsConflict?.(new Error('network error'))).toBe(false);
   });
 
   it('posts CPA API key logins to the dedicated auth endpoint', async () => {
@@ -134,7 +144,7 @@ describe('fetchUsageEvents', () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ window: '7d', grain: 'medium', rows: 7, columns: 52, blocks: [] }),
+      json: async () => ({ window: 'week', grain: 'medium', rows: 7, columns: 52, blocks: [] }),
     } as Response);
     const signal = new AbortController().signal;
 
@@ -164,17 +174,17 @@ describe('fetchUsageEvents', () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ window: '1y', grain: 'daily', rows: 7, columns: 52, blocks: [] }),
+      json: async () => ({ window: 'year', grain: 'daily', rows: 7, columns: 52, blocks: [] }),
     } as Response);
     const signal = new AbortController().signal;
 
-    await fetchUsageActivity({ request: { window: '1y' }, apiKeyId: '42', signal });
-    await fetchKeyActivity({ request: { window: '1y' }, signal });
+    await fetchUsageActivity({ request: { window: 'year' }, apiKeyId: '42', signal });
+    await fetchKeyActivity({ request: { window: 'year' }, signal });
 
     const usageUrl = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost');
     const keyUrl = new URL(String(fetchMock.mock.calls[1][0]), 'http://localhost');
     for (const url of [usageUrl, keyUrl]) {
-      expect(url.searchParams.get('window')).toBe('1y');
+      expect(url.searchParams.get('window')).toBe('year');
       expect(url.searchParams.get('range')).toBeNull();
     }
     expect(usageUrl.searchParams.get('api_key_id')).toBe('42');
@@ -185,7 +195,7 @@ describe('fetchUsageEvents', () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ window: '24h', grain: 'short', rows: 7, columns: 52, blocks: [] }),
+      json: async () => ({ window: 'day', grain: 'short', rows: 7, columns: 52, blocks: [] }),
     } as Response);
     const signal = new AbortController().signal;
 

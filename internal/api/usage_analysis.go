@@ -118,15 +118,19 @@ type analysisLatencyDensityCell struct {
 }
 
 type analysisLatencyDiagnostics struct {
-	Points       []analysisLatencyPoint       `json:"points"`
-	Density      []analysisLatencyDensityCell `json:"density"`
-	TotalPoints  int64                        `json:"total_points"`
-	Sampled      bool                         `json:"sampled"`
-	P95TTFTMS    int64                        `json:"p95_ttft_ms"`
-	P95LatencyMS int64                        `json:"p95_latency_ms"`
-	MaxTTFTMS    int64                        `json:"max_ttft_ms"`
-	MaxLatencyMS int64                        `json:"max_latency_ms"`
+	Supported         bool                         `json:"supported"`
+	UnsupportedReason string                       `json:"unsupported_reason,omitempty"`
+	Points            []analysisLatencyPoint       `json:"points"`
+	Density           []analysisLatencyDensityCell `json:"density"`
+	TotalPoints       int64                        `json:"total_points"`
+	Sampled           bool                         `json:"sampled"`
+	P95TTFTMS         int64                        `json:"p95_ttft_ms"`
+	P95LatencyMS      int64                        `json:"p95_latency_ms"`
+	MaxTTFTMS         int64                        `json:"max_ttft_ms"`
+	MaxLatencyMS      int64                        `json:"max_latency_ms"`
 }
+
+const analysisLatencyUnsupportedReasonRangeOutsideRecentThirtyDays = "range_outside_recent_30_days"
 
 type analysisAPIKeyInfo struct {
 	ID    string
@@ -140,9 +144,9 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 			return
 		}
 
-		filter, err := parseUsageTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
+		filter, err := parseUsageAnalysisTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 
@@ -165,9 +169,14 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 			return
 		}
 
-		filter, err := parseUsageTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
+		queryNow := timeutil.NormalizeStorageTime(time.Now())
+		filter, err := parseUsageAnalysisTimeFilterQuery(c.Request, queryNow)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
+			return
+		}
+		if !analysisLatencyRangeSupported(filter, queryNow) {
+			c.JSON(http.StatusOK, unsupportedAnalysisLatencyDiagnosticsResponse())
 			return
 		}
 
@@ -200,7 +209,25 @@ func emptyAnalysisResponse() analysisResponse {
 }
 
 func emptyAnalysisLatencyDiagnosticsResponse() analysisLatencyDiagnostics {
-	return analysisLatencyDiagnostics{Points: []analysisLatencyPoint{}, Density: []analysisLatencyDensityCell{}}
+	return analysisLatencyDiagnostics{Supported: true, Points: []analysisLatencyPoint{}, Density: []analysisLatencyDensityCell{}}
+}
+
+func unsupportedAnalysisLatencyDiagnosticsResponse() analysisLatencyDiagnostics {
+	response := emptyAnalysisLatencyDiagnosticsResponse()
+	response.Supported = false
+	response.UnsupportedReason = analysisLatencyUnsupportedReasonRangeOutsideRecentThirtyDays
+	return response
+}
+
+// Latency 依赖 raw usage_events；Custom 日范围必须完整落在最近 30 个自然日内。
+func analysisLatencyRangeSupported(filter servicedto.UsageFilter, anchor time.Time) bool {
+	if filter.Range != "custom" || filter.CustomUnit != "day" || filter.StartTime == nil {
+		return true
+	}
+	localAnchor := timeutil.NormalizeStorageTime(anchor)
+	today := time.Date(localAnchor.Year(), localAnchor.Month(), localAnchor.Day(), 0, 0, 0, 0, time.Local)
+	start := timeutil.NormalizeStorageTime(*filter.StartTime)
+	return !start.Before(today.AddDate(0, 0, -29))
 }
 
 func loadCPAAPIKeyInfos(c *gin.Context, provider service.CPAAPIKeyProvider) (map[string]analysisAPIKeyInfo, error) {
@@ -288,6 +315,7 @@ func buildAnalysisLatencyDiagnosticsPayload(diagnostics servicedto.AnalysisLaten
 		})
 	}
 	return analysisLatencyDiagnostics{
+		Supported:    true,
 		Points:       points,
 		Density:      density,
 		TotalPoints:  diagnostics.TotalPoints,

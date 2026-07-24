@@ -10,7 +10,7 @@ describe('ActivityHeatmapGrid', () => {
     const html = renderToStaticMarkup(createElement(ActivityHeatmapGrid, {
       blocks: activity.blocks,
       timeZone: activity.timezone,
-      requestIdentity: 'admin::24h:::',
+      requestIdentity: 'admin::day:::',
       ariaLabel: 'Activity grid',
       isIdle: (block) => block.total_tokens === 0,
       getColor: () => undefined,

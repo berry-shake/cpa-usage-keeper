@@ -9,9 +9,12 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	_ "unsafe"
@@ -37,6 +40,13 @@ type usageEventsStub struct {
 	filterOptionCalls  int
 	credentialsCalls   int
 	exportCalls        int
+}
+
+type blockingUsageEventsExportStub struct {
+	*usageEventsStub
+	started chan struct{}
+	release <-chan struct{}
+	calls   atomic.Int32
 }
 
 type requestLogProviderStub struct {
@@ -128,6 +138,17 @@ func (s *usageEventsStub) StreamUsageEvents(_ context.Context, filter servicedto
 	return s.err
 }
 
+func (s *blockingUsageEventsExportStub) StreamUsageEvents(ctx context.Context, _ servicedto.UsageFilter, _ func(servicedto.UsageEventRecord) error) error {
+	s.calls.Add(1)
+	s.started <- struct{}{}
+	select {
+	case <-s.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (s *usageEventsStub) ListUsageEventFilterOptions(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	s.lastFilter = filter
 	s.filterOptionCalls++
@@ -201,6 +222,57 @@ func (s usageIdentitiesStub) UpdateUsageIdentityAlias(context.Context, int64, st
 		return entities.UsageIdentity{}, s.err
 	}
 	return s.items[0], s.err
+}
+
+func TestUsageEventsEndpointsAcceptCustomDayRangeOlderThanThirtyDays(t *testing.T) {
+	now := time.Now().In(time.Local)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	startDay := today.AddDate(0, 0, -120)
+	query := url.Values{
+		"range": {"custom"},
+		"unit":  {"day"},
+		"start": {startDay.Format(time.DateOnly)},
+		"end":   {today.Format(time.DateOnly)},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		path   string
+		export bool
+	}{
+		{name: "list", path: "/api/v1/usage/events?" + query.Encode()},
+		{name: "export", path: "/api/v1/usage/events/export?format=csv&" + query.Encode(), export: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &usageEventsStub{}
+			router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != http.StatusOK {
+				t.Fatalf("expected long custom Events %s to return 200, got %d body=%s", tc.name, response.Code, response.Body.String())
+			}
+			if tc.export {
+				if provider.exportCalls != 1 || provider.filterCalls != 0 {
+					t.Fatalf("expected only export provider call, export=%d list=%d", provider.exportCalls, provider.filterCalls)
+				}
+			} else if provider.filterCalls != 1 || provider.exportCalls != 0 {
+				t.Fatalf("expected only list provider call, list=%d export=%d", provider.filterCalls, provider.exportCalls)
+			}
+			if provider.lastFilter.StartTime == nil || !provider.lastFilter.StartTime.Equal(startDay) {
+				t.Fatalf("expected custom day start %s, got %+v", startDay, provider.lastFilter)
+			}
+			expectedEnd := today.AddDate(0, 0, 1)
+			if provider.lastFilter.EndTime == nil || !provider.lastFilter.EndTime.Equal(expectedEnd) || !provider.lastFilter.EndExclusive {
+				t.Fatalf("expected exclusive custom day end %s, got %+v", expectedEnd, provider.lastFilter)
+			}
+			if provider.lastFilter.CustomUnit != "day" || provider.lastFilter.RangeCount != 121 {
+				t.Fatalf("expected 121 complete custom day buckets, got %+v", provider.lastFilter)
+			}
+		})
+	}
 }
 
 func TestUsageEventsReturnsFilteredRows(t *testing.T) {
@@ -780,6 +852,77 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	}
 	if !contains(body, "Export Key") || !contains(body, ",7,") || !contains(body, "authidx-export-main") || !contains(body, "sonnet-export") || !contains(body, "responses") || !contains(body, "failed") {
 		t.Fatalf("expected exported row values, got %s", body)
+	}
+}
+
+func TestUsageEventsExportAllowsTwoConcurrentStreamsAndRejectsThird(t *testing.T) {
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseAll := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	t.Cleanup(releaseAll)
+
+	provider := &blockingUsageEventsExportStub{
+		usageEventsStub: &usageEventsStub{},
+		started:         make(chan struct{}, 3),
+		release:         release,
+	}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	type exportResult struct {
+		status int
+		body   string
+	}
+	results := make(chan exportResult, 3)
+	for range 3 {
+		go func() {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format=csv", nil)
+			router.ServeHTTP(response, request)
+			results <- exportResult{status: response.Code, body: response.Body.String()}
+		}()
+	}
+
+	started := 0
+	rejected := false
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for started < 2 || !rejected {
+		select {
+		case <-provider.started:
+			started++
+			if started > 2 {
+				releaseAll()
+				t.Fatalf("expected at most two export streams to reach provider, got %d", started)
+			}
+		case result := <-results:
+			if result.status != http.StatusTooManyRequests {
+				releaseAll()
+				t.Fatalf("expected concurrent overflow status 429, got %d body=%s", result.status, result.body)
+			}
+			rejected = true
+		case <-deadline.C:
+			releaseAll()
+			t.Fatal("timed out waiting for two active exports and one rejection")
+		}
+	}
+
+	releaseAll()
+	for range 2 {
+		result := <-results
+		if result.status != http.StatusOK {
+			t.Fatalf("expected active export status 200, got %d body=%s", result.status, result.body)
+		}
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format=json", nil)
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected a later export to reuse a released slot, got %d body=%s", response.Code, response.Body.String())
+	}
+	if provider.calls.Load() != 3 {
+		t.Fatalf("expected exactly three provider streams after slot reuse, got %d", provider.calls.Load())
 	}
 }
 

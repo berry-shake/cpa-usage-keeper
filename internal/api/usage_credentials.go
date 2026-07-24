@@ -66,9 +66,9 @@ func registerUsageCredentialsRoute(
 			return
 		}
 
-		filter, err := parseUsageTimeFilterQuery(c.Request, time.Now().UTC())
+		filter, err := parseUsageCredentialsTimeFilterQuery(c.Request, time.Now().UTC())
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 

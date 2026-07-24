@@ -10,7 +10,7 @@ describe('OverviewActivityCards accessibility', () => {
     const html = renderToStaticMarkup(createElement(OverviewActivityCards, {
       activity: buildUsageActivityFixture([10]),
       loading: false,
-      requestIdentity: 'key::24h:::',
+      requestIdentity: 'key::day:::',
     }));
 
     expect(html.match(/role="grid"/g)).toHaveLength(2);

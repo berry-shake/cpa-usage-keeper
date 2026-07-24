@@ -344,6 +344,12 @@
   white-space: nowrap;
 }
 
+.customRangeLimitHint {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .customSummaryActions,
 .customPickerFooter {
   display: flex;

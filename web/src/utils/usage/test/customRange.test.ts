@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   buildCustomDaySlots,
   buildCustomHourSlots,
@@ -6,6 +6,7 @@ import {
   buildDefaultCustomRange,
   formatCustomRangeLabel,
   parseStoredUsageRangeState,
+  resolveUsageRangeRecoveryTimeZone,
   serializeUsageRangeState,
   normalizeCustomRange,
 } from '../customRange';
@@ -13,11 +14,11 @@ import {
 const SHANGHAI_NOW = Date.parse('2026-07-17T07:36:42.000Z');
 
 describe('custom usage range slots', () => {
-  it('builds exactly 30 project-timezone calendar days including today', () => {
+  it('builds exactly 365 project-timezone calendar days including today', () => {
     const slots = buildCustomDaySlots({ nowMs: SHANGHAI_NOW, timeZone: 'Asia/Shanghai' });
 
-    expect(slots).toHaveLength(30);
-    expect(slots[0].value).toBe('2026-06-18');
+    expect(slots).toHaveLength(365);
+    expect(slots[0].value).toBe('2025-07-18');
     expect(slots.at(-1)?.value).toBe('2026-07-17');
   });
 
@@ -61,15 +62,24 @@ describe('custom usage range slots', () => {
     });
   });
 
-  it('replaces stale or too-short persisted ranges with a valid default', () => {
+  it('preserves historical day ranges and replaces too-short hour ranges with a valid default', () => {
     expect(normalizeCustomRange({
       unit: 'day',
       start: '2026-05-01',
       end: '2026-07-17',
     }, { nowMs: SHANGHAI_NOW, timeZone: 'Asia/Shanghai' })).toEqual({
       unit: 'day',
-      start: '2026-07-11',
+      start: '2026-05-01',
       end: '2026-07-17',
+    });
+    expect(normalizeCustomRange({
+      unit: 'day',
+      start: '2025-07-17',
+      end: '2025-07-25',
+    }, { nowMs: SHANGHAI_NOW, timeZone: 'Asia/Shanghai' })).toEqual({
+      unit: 'day',
+      start: '2025-07-18',
+      end: '2025-07-25',
     });
     expect(normalizeCustomRange({
       unit: 'hour',
@@ -98,6 +108,8 @@ describe('custom usage range slots', () => {
   });
 
   it('migrates legacy stored ranges and round-trips custom state', () => {
+    expect(parseStoredUsageRangeState(null, { nowMs: SHANGHAI_NOW })).toEqual({ range: 'today' });
+    expect(parseStoredUsageRangeState('not-a-range', { nowMs: SHANGHAI_NOW })).toEqual({ range: 'today' });
     expect(parseStoredUsageRangeState('17d', { nowMs: SHANGHAI_NOW })).toEqual({ range: '17d' });
     const state = {
       range: 'custom' as const,
@@ -105,7 +117,21 @@ describe('custom usage range slots', () => {
       timeZone: 'Asia/Shanghai',
     };
     expect(parseStoredUsageRangeState(serializeUsageRangeState(state), { nowMs: SHANGHAI_NOW })).toEqual(state);
-    expect(parseStoredUsageRangeState('{"range":"custom"}', { nowMs: SHANGHAI_NOW })).toEqual({ range: '8h' });
+    expect(parseStoredUsageRangeState('{"range":"custom"}', { nowMs: SHANGHAI_NOW })).toEqual({ range: 'today' });
+  });
+
+  it('uses a recovery timezone only for an applied Custom range', () => {
+    expect(resolveUsageRangeRecoveryTimeZone({ range: 'today' }, 'Asia/Shanghai')).toBeUndefined();
+    expect(resolveUsageRangeRecoveryTimeZone({
+      range: 'custom',
+      customRange: { unit: 'day', start: '2026-07-11', end: '2026-07-17' },
+      timeZone: 'Asia/Shanghai',
+    }, ' UTC ')).toBe('UTC');
+    expect(resolveUsageRangeRecoveryTimeZone({
+      range: 'custom',
+      customRange: { unit: 'day', start: '2026-07-11', end: '2026-07-17' },
+      timeZone: 'Asia/Shanghai',
+    }, ' ')).toBe('Asia/Shanghai');
   });
 
   it.each([
@@ -120,7 +146,7 @@ describe('custom usage range slots', () => {
       unit: 'day' as const,
       storedStart: '2026-06-17',
       storedEnd: '2026-07-16',
-      expectedStart: '2026-06-18',
+      expectedStart: '2026-06-17',
       expectedEnd: '2026-07-16',
     },
   ])('clamps an aged persisted $unit range while preserving its end', ({ unit, storedStart, storedEnd, expectedStart, expectedEnd }) => {
@@ -133,6 +159,34 @@ describe('custom usage range slots', () => {
     expect(parseStoredUsageRangeState(storedState, { nowMs: SHANGHAI_NOW })).toEqual({
       range: 'custom',
       customRange: { unit, start: expectedStart, end: expectedEnd },
+      timeZone: 'Asia/Shanghai',
+    });
+  });
+
+  it('clamps a persisted day range to the one-year calendar boundary', () => {
+    const storedState = serializeUsageRangeState({
+      range: 'custom',
+      customRange: { unit: 'day', start: '2025-06-01', end: '2026-07-16' },
+      timeZone: 'Asia/Shanghai',
+    });
+
+    expect(parseStoredUsageRangeState(storedState, { nowMs: SHANGHAI_NOW })).toEqual({
+      range: 'custom',
+      customRange: { unit: 'day', start: '2025-07-18', end: '2026-07-16' },
+      timeZone: 'Asia/Shanghai',
+    });
+  });
+
+  it('resets a fully expired persisted day range to today', () => {
+    const storedState = serializeUsageRangeState({
+      range: 'custom',
+      customRange: { unit: 'day', start: '2025-01-01', end: '2025-07-17' },
+      timeZone: 'Asia/Shanghai',
+    });
+
+    expect(parseStoredUsageRangeState(storedState, { nowMs: SHANGHAI_NOW })).toEqual({
+      range: 'custom',
+      customRange: { unit: 'day', start: '2026-07-17', end: '2026-07-17' },
       timeZone: 'Asia/Shanghai',
     });
   });
@@ -173,40 +227,9 @@ describe('custom usage range slots', () => {
       end: '2026-07-16',
     }, { nowMs: SHANGHAI_NOW, timeZone: 'Asia/Shanghai' })).toEqual({
       unit: 'day',
-      start: '2026-06-18',
+      start: '2026-06-17',
       end: '2026-07-16',
     });
-  });
-
-  it('refreshes Custom bounds immediately and on the shared interval', async () => {
-    const customRangeModule = await import('../customRange') as Record<string, unknown>;
-    const scheduleCustomRangeBoundsRefresh = customRangeModule.scheduleCustomRangeBoundsRefresh as ((options: {
-      enabled: boolean;
-      refreshBounds: () => void;
-      timerTarget: { setInterval: (handler: () => void, timeout: number) => number; clearInterval: (id: number) => void };
-    }) => () => void) | undefined;
-    const refreshBounds = vi.fn();
-    const clearInterval = vi.fn();
-    let intervalHandler: (() => void) | undefined;
-
-    expect(scheduleCustomRangeBoundsRefresh).toBeTypeOf('function');
-    const cleanup = scheduleCustomRangeBoundsRefresh?.({
-      enabled: true,
-      refreshBounds,
-      timerTarget: {
-        setInterval: (handler) => {
-          intervalHandler = handler;
-          return 7;
-        },
-        clearInterval,
-      },
-    });
-
-    expect(refreshBounds).toHaveBeenCalledTimes(1);
-    intervalHandler?.();
-    expect(refreshBounds).toHaveBeenCalledTimes(2);
-    cleanup?.();
-    expect(clearInterval).toHaveBeenCalledWith(7);
   });
 
   it('formats Custom hour row dates with the Keeper locale', () => {

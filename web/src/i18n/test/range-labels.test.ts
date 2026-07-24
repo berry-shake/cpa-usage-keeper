@@ -26,6 +26,7 @@ describe('range filter labels', () => {
       expect(i18n.getResource(language, 'translation', 'common.back')).toBeTruthy();
       expect(i18n.getResource(language, 'translation', 'usage_stats.range_custom_select_days')).toBeTruthy();
       expect(i18n.getResource(language, 'translation', 'usage_stats.range_custom_select_hours')).toBeTruthy();
+      expect(i18n.getResource(language, 'translation', 'usage_stats.range_custom_day_limit_hint')).toBeTruthy();
     }
   });
 });

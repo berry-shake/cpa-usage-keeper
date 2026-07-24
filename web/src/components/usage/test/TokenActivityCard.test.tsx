@@ -33,7 +33,7 @@ describe('TokenActivityCard', () => {
     const html = renderToStaticMarkup(createElement(TokenActivityCard, {
       activity,
       loading: false,
-      requestIdentity: 'admin::24h:::',
+      requestIdentity: 'admin::day:::',
     }));
 
     expect(html).toContain('Token Activity');

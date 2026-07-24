@@ -1,8 +1,8 @@
 import '@/i18n';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { DailyAveragePanel, buildDailyAverageMetrics } from './DailyAveragePanel';
-import type { UsageOverviewPayload } from './hooks/useUsageData';
+import { DailyAverageCard, buildDailyAverageMetrics } from '../DailyAverageCard';
+import type { UsageOverviewPayload } from '../hooks/useUsageData';
 
 const usageWithDailyAverages: UsageOverviewPayload = {
   usage: {
@@ -12,9 +12,6 @@ const usageWithDailyAverages: UsageOverviewPayload = {
     total_tokens: 52590000,
   },
   summary: {
-    request_count: 461,
-    token_count: 52590000,
-    window_minutes: 10080,
     rpm: 0.0457,
     tpm: 5217.26,
     total_cost: 56.47,
@@ -29,20 +26,19 @@ const usageWithDailyAverages: UsageOverviewPayload = {
     daily_average_range_days: 7,
   },
   series: {
-    requests: {},
-    tokens: {},
-    rpm: {},
-    tpm: {},
-    cost: {},
-    cache_read_rate: {},
+    buckets: [],
+    requests: [],
+    tokens: [],
+    rpm: [],
+    tpm: [],
+    cost: [],
+    cache_read_rate: [],
   },
 };
 
 describe('buildDailyAverageMetrics', () => {
   it('uses backend daily average fields without deriving averages in the frontend', () => {
-    const metrics = buildDailyAverageMetrics(usageWithDailyAverages);
-
-    expect(metrics).toEqual({
+    expect(buildDailyAverageMetrics(usageWithDailyAverages)).toEqual({
       requests: 65.9,
       tokens: 7512857,
       cost: 8.067,
@@ -52,7 +48,7 @@ describe('buildDailyAverageMetrics', () => {
   });
 
   it('returns null when backend daily average fields are absent', () => {
-    const metrics = buildDailyAverageMetrics({
+    expect(buildDailyAverageMetrics({
       ...usageWithDailyAverages,
       summary: {
         ...usageWithDailyAverages.summary!,
@@ -61,16 +57,13 @@ describe('buildDailyAverageMetrics', () => {
         daily_average_cost: undefined,
         daily_average_range_days: undefined,
       },
-    });
-
-    expect(metrics).toBeNull();
+    })).toBeNull();
   });
-
 });
 
-describe('DailyAveragePanel', () => {
-  it('renders a top summary panel without a left identity icon or per-day suffixes', () => {
-    const html = renderToStaticMarkup(<DailyAveragePanel usage={usageWithDailyAverages} loading={false} />);
+describe('DailyAverageCard', () => {
+  it('renders the three backend averages in one compact summary card', () => {
+    const html = renderToStaticMarkup(<DailyAverageCard usage={usageWithDailyAverages} loading={false} />);
 
     expect(html).toContain('Daily Average');
     expect(html).toContain('Range 7 days');
@@ -83,16 +76,12 @@ describe('DailyAveragePanel', () => {
     expect(html).toContain('Set pricing to calculate cost');
     expect(html).not.toContain('/day');
     expect(html.match(/<svg/g)).toHaveLength(3);
+    expect(html.indexOf('Set pricing to calculate cost')).toBeGreaterThan(html.indexOf('Avg Cost'));
+    expect(html.indexOf('Set pricing to calculate cost')).toBeLessThan(html.indexOf('$8.07'));
   });
 
-  it('renders nothing before the backend exposes daily average fields', () => {
-    const html = renderToStaticMarkup(<DailyAveragePanel usage={null} loading={false} />);
-
-    expect(html).toBe('');
-  });
-
-  it('keeps the panel shell visible while another daily-average range is loading', () => {
-    const html = renderToStaticMarkup(<DailyAveragePanel usage={null} loading={true} reserveVisible />);
+  it('renders a loading shell before an eligible range returns its averages', () => {
+    const html = renderToStaticMarkup(<DailyAverageCard usage={null} loading />);
 
     expect(html).toContain('Daily Average');
     expect(html).toContain('Avg Requests');

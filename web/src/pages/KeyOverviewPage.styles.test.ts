@@ -19,9 +19,9 @@ describe('KeyOverviewPage layout', () => {
   })
 
   it('does not reload overview data just because language changes', () => {
-    expect(source).not.toContain('}, [onAuthRequired, t, usageRangeQuery, usageRangeQueryKey]);')
+    expect(source).not.toContain('}, [onAuthRequired, recoverRangeBoundsConflict, t, usageRangeQuery, usageRangeQueryKey]);')
     expect(source).not.toContain('}, [onAuthRequired, realtimeWindow, t]);')
-    expect(source).toContain('}, [onAuthRequired, usageRangeQuery, usageRangeQueryKey]);')
+    expect(source).toContain('}, [onAuthRequired, recoverRangeBoundsConflict, usageRangeQuery, usageRangeQueryKey]);')
     expect(source).toContain('}, [onAuthRequired, realtimeWindow]);')
   })
 

@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Line } from 'react-chartjs-2';
 import {
@@ -19,6 +19,7 @@ import {
 import { sparklineOptions } from '@/utils/usage/chartConfig';
 import type { UsageOverviewPayload, UsagePayload } from './hooks/useUsageData';
 import type { SparklineBundle } from './hooks/useSparklines';
+import { buildDailyAverageMetrics, DailyAverageCard } from './DailyAverageCard';
 import styles from '@/pages/UsagePage.module.scss';
 
 interface StatCardData {
@@ -36,6 +37,8 @@ interface StatCardData {
 export interface StatCardsProps {
   usage: UsageOverviewPayload | null;
   loading: boolean;
+  dailyAverageUsage: UsageOverviewPayload | null;
+  reserveDailyAverage: boolean;
   sparklines: {
     requests: SparklineBundle | null;
     tokens: SparklineBundle | null;
@@ -49,7 +52,7 @@ export interface StatCardsProps {
 interface StatCardMetrics {
   requestStats: { successRate: number | null };
   tokenBreakdown: { cacheReadTokens: number; cacheCreationTokens: number; reasoningTokens: number };
-  rateStats: { rpm: number; tpm: number; windowMinutes: number; requestCount: number; tokenCount: number };
+  rateStats: { rpm: number; tpm: number; requestCount: number; tokenCount: number };
   cacheReadRateStats: { cacheReadRate: number | null; cacheReadTokens: number; inputTokens: number };
   totalCost: number;
   costAvailable: boolean;
@@ -77,7 +80,7 @@ export function buildStatCardMetrics({ usage }: { usage: UsageOverviewPayload | 
     return {
       requestStats,
       tokenBreakdown: { cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 },
-      rateStats: { rpm: 0, tpm: 0, windowMinutes: 1, requestCount: 0, tokenCount: 0 },
+      rateStats: { rpm: 0, tpm: 0, requestCount: 0, tokenCount: 0 },
       cacheReadRateStats: { cacheReadRate: null, cacheReadTokens: 0, inputTokens: 0 },
       totalCost: 0,
       costAvailable: false,
@@ -98,9 +101,8 @@ export function buildStatCardMetrics({ usage }: { usage: UsageOverviewPayload | 
     rateStats: {
       rpm: usage.summary.rpm ?? 0,
       tpm: usage.summary.tpm ?? 0,
-      windowMinutes: usage.summary.window_minutes ?? 1,
-      requestCount: usage.summary.request_count ?? 0,
-      tokenCount: usage.summary.token_count ?? 0,
+      requestCount: Math.max(safeNumber(usageSnapshot?.total_requests), 0),
+      tokenCount: Math.max(safeNumber(usageSnapshot?.total_tokens), 0),
     },
     cacheReadRateStats: {
       cacheReadRate: calculateCacheReadRate({ inputTokens, cacheReadTokens }),
@@ -112,13 +114,27 @@ export function buildStatCardMetrics({ usage }: { usage: UsageOverviewPayload | 
   };
 }
 
-export function StatCards({ usage, loading, sparklines }: StatCardsProps) {
+export function StatCards({
+  usage,
+  loading,
+  dailyAverageUsage,
+  reserveDailyAverage,
+  sparklines,
+}: StatCardsProps) {
   const { t } = useTranslation();
   const usageSnapshot = usage?.usage ?? null;
+  const shouldExpandDailyAverage = Boolean(buildDailyAverageMetrics(dailyAverageUsage)) || reserveDailyAverage;
+  const [dailyAverageExpanded, setDailyAverageExpanded] = useState(false);
   const { requestStats, tokenBreakdown, rateStats, cacheReadRateStats, totalCost, costAvailable } = useMemo(
     () => buildStatCardMetrics({ usage }),
     [usage]
   );
+
+  useEffect(() => {
+    // 等浏览器完成当前布局后再切换展开态，让首次出现和范围切换都能触发卡片布局动画。
+    const frame = window.requestAnimationFrame(() => setDailyAverageExpanded(shouldExpandDailyAverage));
+    return () => window.cancelAnimationFrame(frame);
+  }, [shouldExpandDailyAverage]);
 
   const statsCards: StatCardData[] = [
     {
@@ -252,41 +268,59 @@ export function StatCards({ usage, loading, sparklines }: StatCardsProps) {
     },
   ];
 
-  return (
-    <div className={styles.statsGrid}>
-      {statsCards.map((card) => (
-        <div
-          key={card.key}
-          className={styles.statCard}
-          style={
-            {
-              '--accent': card.accent,
-              '--accent-soft': card.accentSoft,
-              '--accent-border': card.accentBorder,
-            } as CSSProperties
-          }
-        >
-          <div className={styles.statCardHeader}>
-            <div className={styles.statLabelGroup}>
-              <span className={styles.statLabel}>{card.label}</span>
-            </div>
-            <span className={styles.statIconBadge}>{card.icon}</span>
-          </div>
-          <div className={styles.statValue}>{card.value}</div>
-          {card.meta && <div className={styles.statMetaRow}>{card.meta}</div>}
-          <div className={styles.statTrend}>
-            {card.trend ? (
-              <Line
-                className={styles.sparkline}
-                data={card.trend.data}
-                options={sparklineOptions}
-              />
-            ) : (
-              <div className={styles.statTrendPlaceholder}></div>
-            )}
-          </div>
+  const primaryCards = statsCards.slice(0, 2);
+  const secondaryCards = statsCards.slice(2);
+  const renderStatCard = (card: StatCardData) => (
+    <div
+      key={card.key}
+      className={styles.statCard}
+      style={
+        {
+          '--accent': card.accent,
+          '--accent-soft': card.accentSoft,
+          '--accent-border': card.accentBorder,
+        } as CSSProperties
+      }
+    >
+      <div className={styles.statCardHeader}>
+        <div className={styles.statLabelGroup}>
+          <span className={styles.statLabel}>{card.label}</span>
         </div>
-      ))}
+        <span className={styles.statIconBadge}>{card.icon}</span>
+      </div>
+      <div className={styles.statValue}>{card.value}</div>
+      {card.meta && <div className={styles.statMetaRow}>{card.meta}</div>}
+      <div className={styles.statTrend}>
+        {card.trend ? (
+          <Line
+            className={styles.sparkline}
+            data={card.trend.data}
+            options={sparklineOptions}
+          />
+        ) : (
+          <div className={styles.statTrendPlaceholder}></div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={styles.statsSection}>
+      <div
+        className={`${styles.primaryStatsRow} ${dailyAverageExpanded ? styles.primaryStatsRowExpanded : ''}`.trim()}
+      >
+        <div className={styles.dailyAverageSlot} aria-hidden={!dailyAverageExpanded}>
+          <DailyAverageCard usage={dailyAverageUsage} loading={loading} />
+        </div>
+        {primaryCards.map((card) => (
+          <div key={card.key} className={styles.primaryStatSlot}>
+            {renderStatCard(card)}
+          </div>
+        ))}
+      </div>
+      <div className={styles.secondaryStatsGrid}>
+        {secondaryCards.map(renderStatCard)}
+      </div>
     </div>
   );
 }

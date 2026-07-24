@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +100,7 @@ func TestUsageAnalysisLatencyUsesIndependentRoute(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, `"p95_ttft_ms":120`) || !strings.Contains(body, `"p95_latency_ms":800`) || !strings.Contains(body, `"ttft_ms":120`) {
+	if !strings.Contains(body, `"supported":true`) || !strings.Contains(body, `"p95_ttft_ms":120`) || !strings.Contains(body, `"p95_latency_ms":800`) || !strings.Contains(body, `"ttft_ms":120`) {
 		t.Fatalf("unexpected latency payload: %s", body)
 	}
 	if provider.analysisCalls != 0 || provider.latencyCalls != 1 {
@@ -108,6 +109,78 @@ func TestUsageAnalysisLatencyUsesIndependentRoute(t *testing.T) {
 	if provider.latencyFilter.Range != "24h" || provider.latencyFilter.StartTime == nil || provider.latencyFilter.EndTime == nil {
 		t.Fatalf("expected resolved latency filter, got %+v", provider.latencyFilter)
 	}
+}
+
+func TestUsageAnalysisAcceptsCustomDayRangeOlderThanThirtyDays(t *testing.T) {
+	today := analysisLocalToday()
+	startDay := today.AddDate(0, 0, -120)
+	provider := &analysisSplitStub{analysis: &servicedto.AnalysisSnapshot{}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, analysisCustomDayURL("/api/v1/usage/analysis", startDay, today), nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected long custom Analysis range to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if provider.analysisCalls != 1 || provider.latencyCalls != 0 {
+		t.Fatalf("expected only core Analysis provider call, analysis=%d latency=%d", provider.analysisCalls, provider.latencyCalls)
+	}
+	if provider.analysisFilter.CustomUnit != "day" || provider.analysisFilter.RangeCount != 121 {
+		t.Fatalf("expected 121-day custom Analysis filter, got %+v", provider.analysisFilter)
+	}
+}
+
+func TestUsageAnalysisLatencyReturnsUnsupportedOutsideRecentThirtyDays(t *testing.T) {
+	today := analysisLocalToday()
+	historicalDay := today.AddDate(0, 0, -120)
+	provider := &analysisSplitStub{latency: &servicedto.AnalysisLatencyDiagnostics{}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, analysisCustomDayURL("/api/v1/usage/analysis/latency", historicalDay, historicalDay), nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected unsupported latency range to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"supported":false`) || !strings.Contains(body, `"unsupported_reason":"range_outside_recent_30_days"`) {
+		t.Fatalf("expected structured unsupported latency response, got %s", body)
+	}
+	if provider.latencyCalls != 0 {
+		t.Fatalf("expected unsupported latency range not to reach provider, got %d calls", provider.latencyCalls)
+	}
+}
+
+func TestUsageAnalysisLatencySupportsCustomRangeWithinRecentThirtyDays(t *testing.T) {
+	today := analysisLocalToday()
+	provider := &analysisSplitStub{latency: &servicedto.AnalysisLatencyDiagnostics{}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, analysisCustomDayURL("/api/v1/usage/analysis/latency", today.AddDate(0, 0, -29), today), nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected recent 30-day latency range to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"supported":true`) {
+		t.Fatalf("expected supported latency response, got %s", response.Body.String())
+	}
+	if provider.latencyCalls != 1 {
+		t.Fatalf("expected recent latency range to reach provider once, got %d calls", provider.latencyCalls)
+	}
+}
+
+func analysisLocalToday() time.Time {
+	now := time.Now().In(time.Local)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+}
+
+func analysisCustomDayURL(path string, startDay, endDay time.Time) string {
+	query := url.Values{
+		"range": {"custom"},
+		"unit":  {"day"},
+		"start": {startDay.Format(time.DateOnly)},
+		"end":   {endDay.Format(time.DateOnly)},
+	}
+	return path + "?" + query.Encode()
 }
 
 func TestUsageAnalysisRoutesResolveRollingRangesIndependently(t *testing.T) {

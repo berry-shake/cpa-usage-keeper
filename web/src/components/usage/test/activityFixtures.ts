@@ -24,7 +24,7 @@ export const buildUsageActivityFixture = (tokenValues: readonly number[] = []): 
   });
 
   return {
-    window: '24h',
+    window: 'day',
     grain: 'short',
     timezone: 'UTC',
     total_success: 2,

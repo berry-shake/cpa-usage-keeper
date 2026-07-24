@@ -9,6 +9,8 @@ import (
 
 	servicedto "cpa-usage-keeper/internal/service/dto"
 	"cpa-usage-keeper/internal/timeutil"
+
+	"github.com/gin-gonic/gin"
 )
 
 var allowedUsageEventsPageSizes = map[int]struct{}{
@@ -17,6 +19,14 @@ var allowedUsageEventsPageSizes = map[int]struct{}{
 	100:  {},
 	500:  {},
 	1000: {},
+}
+
+func writeUsageFilterParseError(c *gin.Context, err error) {
+	status := http.StatusBadRequest
+	if timeutil.IsUsageQueryRangeBoundsConflict(err) {
+		status = http.StatusConflict
+	}
+	c.JSON(status, gin.H{"error": err.Error()})
 }
 
 // parseUsageTimeFilterQuery 只解析通用时间条件和 Admin API Key scope，不读取 Events 专属参数。
@@ -29,17 +39,46 @@ func parseKeyUsageTimeFilterQuery(req *http.Request, anchor time.Time) (serviced
 	return parseUsageTimeFilterQueryWithClientAPIKey(req, anchor, false)
 }
 
+// Overview 的 Custom 日范围只依赖 daily 汇总，因此可以放宽至统一的一年上限。
+func parseUsageOverviewTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
+	return parseUsageTimeFilterQueryWithOptions(req, anchor, true, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
+}
+
+func parseKeyUsageOverviewTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
+	return parseUsageTimeFilterQueryWithOptions(req, anchor, false, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
+}
+
+// Events 直接查询仍在保留期内的原始事件，因此只放宽至统一的一年上限。
+func parseUsageEventsTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
+	return parseUsageTimeFilterQueryWithOptions(req, anchor, true, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
+}
+
+// Analysis 主数据来自 hourly/daily 汇总，因此和 Overview 一样放宽至统一的一年上限。
+func parseUsageAnalysisTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
+	return parseUsageTimeFilterQueryWithOptions(req, anchor, true, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
+}
+
+// Credentials 与 Usage 页共用范围控件；其原始事件聚合路径同样接受统一的一年上限。
+func parseUsageCredentialsTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
+	return parseUsageTimeFilterQueryWithOptions(req, anchor, true, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
+}
+
 func parseUsageTimeFilterQueryWithClientAPIKey(req *http.Request, anchor time.Time, includeClientAPIKey bool) (servicedto.UsageFilter, error) {
+	return parseUsageTimeFilterQueryWithOptions(req, anchor, includeClientAPIKey, timeutil.UsageQueryRangeOptions{})
+}
+
+func parseUsageTimeFilterQueryWithOptions(req *http.Request, anchor time.Time, includeClientAPIKey bool, options timeutil.UsageQueryRangeOptions) (servicedto.UsageFilter, error) {
 	if req == nil {
 		return servicedto.UsageFilter{}, nil
 	}
 	query := req.URL.Query()
-	normalizedRange, err := timeutil.ParseUsageQueryRange(
+	normalizedRange, err := timeutil.ParseUsageQueryRangeWithOptions(
 		query.Get("range"),
 		query.Get("unit"),
 		query.Get("start"),
 		query.Get("end"),
 		anchor,
+		options,
 	)
 	if err != nil {
 		return servicedto.UsageFilter{}, err
@@ -83,7 +122,7 @@ func parseUsageFilterQuery(req *http.Request, anchor time.Time) (servicedto.Usag
 	if req == nil {
 		return servicedto.UsageFilter{}, nil
 	}
-	filter, err := parseUsageTimeFilterQuery(req, anchor)
+	filter, err := parseUsageEventsTimeFilterQuery(req, anchor)
 	if err != nil {
 		return servicedto.UsageFilter{}, err
 	}

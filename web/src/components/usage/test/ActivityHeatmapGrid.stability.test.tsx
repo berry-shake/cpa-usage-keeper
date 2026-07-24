@@ -42,12 +42,12 @@ describe('ActivityHeatmapGrid stability', () => {
     }));
 
     act(() => root.render(
-      <ActivityHeatmapGrid {...gridProps} blocks={firstBlocks} requestIdentity="admin::24h:::" />,
+      <ActivityHeatmapGrid {...gridProps} blocks={firstBlocks} requestIdentity="admin::day:::" />,
     ));
     const firstCell = container.querySelector<HTMLElement>('[role="gridcell"]');
 
     act(() => root.render(
-      <ActivityHeatmapGrid {...gridProps} blocks={nextBlocks} requestIdentity="admin::7d:::" />,
+      <ActivityHeatmapGrid {...gridProps} blocks={nextBlocks} requestIdentity="admin::week:::" />,
     ));
 
     expect(container.querySelector<HTMLElement>('[role="gridcell"]')).toBe(firstCell);

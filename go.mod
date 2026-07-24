@@ -9,6 +9,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/sirupsen/logrus v1.9.3
 	gorm.io/gorm v1.30.0
+	gorm.io/plugin/dbresolver v1.5.3
 )
 
 require (

@@ -10,10 +10,10 @@ import { OverviewActivityCards } from './OverviewActivityCards';
 import styles from '@/pages/UsagePage.module.scss';
 
 const ACTIVITY_WINDOWS: readonly { value: UsageActivityWindow; labelKey: string }[] = [
-  { value: '24h', labelKey: 'usage_stats.recent_activity_window_day' },
-  { value: '7d', labelKey: 'usage_stats.recent_activity_window_week' },
-  { value: '30d', labelKey: 'usage_stats.recent_activity_window_month' },
-  { value: '1y', labelKey: 'usage_stats.recent_activity_window_year' },
+  { value: 'day', labelKey: 'usage_stats.recent_activity_window_day' },
+  { value: 'week', labelKey: 'usage_stats.recent_activity_window_week' },
+  { value: 'month', labelKey: 'usage_stats.recent_activity_window_month' },
+  { value: 'year', labelKey: 'usage_stats.recent_activity_window_year' },
 ];
 
 export interface RecentActivityPanelProps {

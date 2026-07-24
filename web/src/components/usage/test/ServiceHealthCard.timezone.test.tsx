@@ -12,7 +12,7 @@ describe('Recent Activity project timezone', () => {
   it('formats the shared window and both grids in Asia/Shanghai when the test process runs in UTC', () => {
     // 测试命令固定 TZ=UTC；响应 timezone 才是窗口与 tooltip 标签的唯一显示时区。
     const activity: UsageActivityResponse = {
-      window: '24h',
+      window: 'day',
       grain: 'short',
       timezone: 'Asia/Shanghai',
       total_success: 1,
@@ -48,8 +48,8 @@ describe('Recent Activity project timezone', () => {
       activity,
       loading: false,
       error: '',
-      window: '24h',
-      requestIdentity: 'admin::24h:::',
+      window: 'day',
+      requestIdentity: 'admin::day:::',
       onWindowChange: vi.fn(),
     }));
 

@@ -37,7 +37,7 @@ describe('TokenActivityCard tooltip', () => {
     };
 
     await act(async () => root.render(
-      <TokenActivityCard activity={activity} loading={false} requestIdentity="admin::24h:::" />,
+      <TokenActivityCard activity={activity} loading={false} requestIdentity="admin::day:::" />,
     ));
     const firstCell = container.querySelector<HTMLElement>('[role="gridcell"]');
     expect(firstCell).not.toBeNull();

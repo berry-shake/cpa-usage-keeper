@@ -21,7 +21,7 @@ describe('ServiceHealthCard tooltip emphasis', () => {
     act(() => root.render(createElement(ServiceHealthCard, {
       activity: buildUsageActivityFixture(),
       loading: false,
-      requestIdentity: 'admin::24h:::',
+      requestIdentity: 'admin::day:::',
     })));
     const cells = container.querySelectorAll<HTMLElement>('[role="gridcell"]');
     act(() => cells.item(cells.length - 1).focus());

@@ -1,8 +1,9 @@
 import type { UsageCustomRange, UsageCustomRangeUnit, UsageTimeRange } from '@/lib/types';
-import { normalizeSelectableUsageRange, normalizeUsageRange } from './rangeQuery';
+import { isSelectableUsageRange } from './rangeQuery';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+const CUSTOM_DAY_SLOT_COUNT = 365;
 
 interface CustomRangeClockOptions {
   nowMs: number;
@@ -19,6 +20,14 @@ export interface StoredUsageRangeState {
   customRange?: UsageCustomRange;
   timeZone?: string;
 }
+
+export const resolveUsageRangeRecoveryTimeZone = (
+  state: StoredUsageRangeState,
+  projectTimeZone?: string,
+): string | undefined => {
+  if (state.range !== 'custom') return undefined;
+  return projectTimeZone?.trim() || state.timeZone?.trim() || undefined;
+};
 
 export interface UsageCustomRangeSlot {
   value: string;
@@ -94,6 +103,30 @@ const formatDayLabel = (dateKey: string, locale?: string): string => {
     .format(new Date(Date.UTC(year, month - 1, day)));
 };
 
+interface CustomDayBounds {
+  firstCalendarMs: number;
+  firstDay: string;
+  todayCalendarMs: number;
+  today: string;
+}
+
+const getCustomDayBounds = ({ nowMs, timeZone }: CustomRangeClockOptions): CustomDayBounds => {
+  const todayParts = getZonedParts(nowMs, timeZone);
+  const todayCalendarMs = Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day);
+  const firstCalendarMs = todayCalendarMs - (CUSTOM_DAY_SLOT_COUNT - 1) * DAY_MS;
+  const firstDate = new Date(firstCalendarMs);
+  return {
+    firstCalendarMs,
+    firstDay: formatDateKey({
+      year: firstDate.getUTCFullYear(),
+      month: firstDate.getUTCMonth() + 1,
+      day: firstDate.getUTCDate(),
+    }),
+    todayCalendarMs,
+    today: formatDateKey(todayParts),
+  };
+};
+
 export const buildCustomWeekdayLabels = (locale?: string): string[] => {
   const formatter = new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' });
   const sunday = Date.UTC(2024, 0, 7);
@@ -101,12 +134,12 @@ export const buildCustomWeekdayLabels = (locale?: string): string[] => {
 };
 
 export const buildCustomDaySlots = ({ nowMs, timeZone, locale }: CustomRangeClockOptions): UsageCustomRangeSlot[] => {
-  const today = getZonedParts(nowMs, timeZone);
-  const todayCalendarMs = Date.UTC(today.year, today.month - 1, today.day);
-  return Array.from({ length: 30 }, (_, index) => {
-    const date = new Date(todayCalendarMs - (29 - index) * DAY_MS);
+  const { firstCalendarMs } = getCustomDayBounds({ nowMs, timeZone });
+  const labelFormatter = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return Array.from({ length: CUSTOM_DAY_SLOT_COUNT }, (_, index) => {
+    const date = new Date(firstCalendarMs + index * DAY_MS);
     const value = formatDateKey({ year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() });
-    return { value, label: formatDayLabel(value, locale), dateLabel: value, current: index === 29 };
+    return { value, label: labelFormatter.format(date), dateLabel: value, current: index === CUSTOM_DAY_SLOT_COUNT - 1 };
   });
 };
 
@@ -129,11 +162,27 @@ export const buildCustomHourSlots = ({ nowMs, timeZone, locale }: CustomRangeClo
 };
 
 export const buildDefaultCustomRange = ({ unit, nowMs, timeZone }: BuildDefaultCustomRangeOptions): UsageCustomRange => {
-  const slots = unit === 'hour'
-    ? buildCustomHourSlots({ nowMs, timeZone })
-    : buildCustomDaySlots({ nowMs, timeZone });
-  const startIndex = slots.length - (unit === 'hour' ? 8 : 7);
+  if (unit === 'day') {
+    const { todayCalendarMs, today } = getCustomDayBounds({ nowMs, timeZone });
+    const startDate = new Date(todayCalendarMs - 6 * DAY_MS);
+    return {
+      unit,
+      start: formatDateKey({
+        year: startDate.getUTCFullYear(),
+        month: startDate.getUTCMonth() + 1,
+        day: startDate.getUTCDate(),
+      }),
+      end: today,
+    };
+  }
+  const slots = buildCustomHourSlots({ nowMs, timeZone });
+  const startIndex = slots.length - 8;
   return { unit, start: slots[startIndex].value, end: slots[slots.length - 1].value };
+};
+
+const buildTodayCustomDayRange = (options: CustomRangeClockOptions): UsageCustomRange => {
+  const { today } = getCustomDayBounds(options);
+  return { unit: 'day', start: today, end: today };
 };
 
 export const normalizeCustomRange = (
@@ -141,7 +190,11 @@ export const normalizeCustomRange = (
   options: CustomRangeClockOptions,
 ): UsageCustomRange => {
   const unit = range?.unit ?? 'day';
-  const slots = unit === 'hour' ? buildCustomHourSlots(options) : buildCustomDaySlots(options);
+  if (unit === 'day') {
+    if (!range) return buildDefaultCustomRange({ unit, ...options });
+    return clampCustomRangeToCurrentBounds(range, options);
+  }
+  const slots = buildCustomHourSlots(options);
   const startIndex = slots.findIndex((slot) => slot.value === range?.start);
   const endIndex = slots.findIndex((slot) => slot.value === range?.end);
   const selectedSlots = endIndex - startIndex + 1;
@@ -162,7 +215,19 @@ export const clampCustomRangeToCurrentBounds = (
   range: UsageCustomRange,
   options: CustomRangeClockOptions,
 ): UsageCustomRange => {
-  const slots = range.unit === 'hour' ? buildCustomHourSlots(options) : buildCustomDaySlots(options);
+  if (range.unit === 'day') {
+    const { firstDay, today } = getCustomDayBounds(options);
+    if (!isValidDateKey(range.start) || !isValidDateKey(range.end) || range.start > range.end || range.start > today) {
+      return buildTodayCustomDayRange(options);
+    }
+    if (range.end < firstDay) return buildTodayCustomDayRange(options);
+    return {
+      unit: range.unit,
+      start: range.start < firstDay ? firstDay : range.start,
+      end: range.end > today ? today : range.end,
+    };
+  }
+  const slots = buildCustomHourSlots(options);
   const firstSlot = slots[0];
   const lastSlot = slots[slots.length - 1];
   const firstTimestamp = customRangeSlotTimestamp(firstSlot.value, range.unit);
@@ -204,53 +269,6 @@ export const clampStoredUsageRangeStateToCurrentBounds = (
     return state;
   }
   return { range: 'custom', customRange, timeZone: options.timeZone };
-};
-
-interface CustomRangeBoundsRefreshDocument {
-  visibilityState: DocumentVisibilityState;
-  addEventListener: (type: 'visibilitychange', listener: () => void) => void;
-  removeEventListener: (type: 'visibilitychange', listener: () => void) => void;
-}
-
-interface CustomRangeBoundsRefreshTimerTarget {
-  setInterval: (handler: () => void, timeout: number) => number;
-  clearInterval: (id: number) => void;
-}
-
-export const CUSTOM_RANGE_BOUNDS_REFRESH_INTERVAL_MS = 60_000;
-
-export const scheduleCustomRangeBoundsRefresh = ({
-  enabled,
-  refreshBounds,
-  documentRef,
-  timerTarget,
-  intervalMs = CUSTOM_RANGE_BOUNDS_REFRESH_INTERVAL_MS,
-}: {
-  enabled: boolean;
-  refreshBounds: () => void;
-  documentRef?: CustomRangeBoundsRefreshDocument;
-  timerTarget?: CustomRangeBoundsRefreshTimerTarget;
-  intervalMs?: number;
-}): (() => void) => {
-  if (!enabled) return () => undefined;
-  const targetDocument = documentRef ?? (typeof document === 'undefined' ? undefined : document);
-  const timers = timerTarget ?? (typeof window === 'undefined' ? undefined : {
-    setInterval: window.setInterval.bind(window),
-    clearInterval: window.clearInterval.bind(window),
-  });
-  if (!timers) return () => undefined;
-
-  const refreshIfVisible = () => {
-    if (targetDocument?.visibilityState === 'hidden') return;
-    refreshBounds();
-  };
-  refreshIfVisible();
-  const interval = timers.setInterval(refreshIfVisible, intervalMs);
-  targetDocument?.addEventListener('visibilitychange', refreshIfVisible);
-  return () => {
-    timers.clearInterval(interval);
-    targetDocument?.removeEventListener('visibilitychange', refreshIfVisible);
-  };
 };
 
 export const formatCustomRangeLabel = (
@@ -304,23 +322,23 @@ export const parseStoredUsageRangeState = (
   { nowMs }: { nowMs: number },
 ): StoredUsageRangeState => {
   const trimmed = raw?.trim();
-  if (!trimmed) return { range: '8h' };
+  if (!trimmed) return { range: 'today' };
   if (!trimmed.startsWith('{')) {
-    return { range: normalizeSelectableUsageRange(trimmed) };
+    return { range: isSelectableUsageRange(trimmed) ? trimmed : 'today' };
   }
   try {
     const parsed = JSON.parse(trimmed) as Partial<StoredUsageRangeState>;
-    const range = normalizeUsageRange(String(parsed.range ?? ''));
-    if (range !== 'custom') return { range };
+    const range = String(parsed.range ?? '');
+    if (range !== 'custom') return { range: isSelectableUsageRange(range) ? range : 'today' };
     const timeZone = parsed.timeZone?.trim();
-    if (!timeZone || !isCustomRange(parsed.customRange)) return { range: '8h' };
+    if (!timeZone || !isCustomRange(parsed.customRange)) return { range: 'today' };
     return {
       range: 'custom',
       customRange: clampCustomRangeToCurrentBounds(parsed.customRange, { nowMs, timeZone }),
       timeZone,
     };
   } catch {
-    return { range: '8h' };
+    return { range: 'today' };
   }
 };
 

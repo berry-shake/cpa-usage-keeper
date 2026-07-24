@@ -12,7 +12,7 @@ describe('OverviewActivityCards', () => {
     const html = renderToStaticMarkup(createElement(OverviewActivityCards, {
       activity,
       loading: false,
-      requestIdentity: 'admin::24h:::',
+      requestIdentity: 'admin::day:::',
     }));
 
     expect(html.indexOf('Token Activity')).toBeLessThan(html.indexOf('Request Health Timeline'));
@@ -34,7 +34,7 @@ describe('OverviewActivityCards', () => {
     const html = renderToStaticMarkup(createElement(OverviewActivityCards, {
       activity: buildUsageActivityFixture([1_234]),
       loading: true,
-      requestIdentity: 'admin::24h:::',
+      requestIdentity: 'admin::day:::',
     }));
 
     expect(html).toContain('>1.23K</strong>');

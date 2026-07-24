@@ -1272,6 +1272,7 @@ function LatencyDiagnosticsCard({ diagnostics, loading, error, isDark, isMobile 
     labels,
     colors: latencyColors,
   }), [chartTheme, isMobile, labels, latencyColors, safeDiagnostics]);
+  const unsupported = safeDiagnostics.supported === false;
   const hasData = toNumber(safeDiagnostics.total_points) > 0 && safeDiagnostics.points.length > 0;
   return (
     <section className={`${styles.analysisCard} ${styles.latencyDiagnosticsCard}`}>
@@ -1285,6 +1286,8 @@ function LatencyDiagnosticsCard({ diagnostics, loading, error, isDark, isMobile 
         <div className={styles.emptyState}>{t('common.loading')}</div>
       ) : error ? (
         <div className={styles.emptyState}>{error}</div>
+      ) : unsupported ? (
+        <div className={styles.emptyState}>{t('usage_stats.analysis_latency_recent_range_only')}</div>
       ) : !hasData ? (
         <div className={styles.emptyState}>{t('usage_stats.no_data')}</div>
       ) : (

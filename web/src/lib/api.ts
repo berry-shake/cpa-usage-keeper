@@ -12,6 +12,10 @@ export class ApiError extends Error {
   }
 }
 
+export const isUsageRangeBoundsConflict = (error: unknown): error is ApiError => (
+  error instanceof ApiError && error.status === 409
+)
+
 const APP_BASE_PATH_PLACEHOLDER = '__APP_BASE_PATH__'
 const EMBED_SESSION_STORAGE_KEY = 'cpa_usage_keeper_embed_session'
 const EMBED_SESSION_HEADER = 'X-CPA-Usage-Keeper-Embed-Session'

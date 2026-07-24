@@ -28,7 +28,7 @@ describe('RecentActivityPanel window switcher', () => {
         activity={buildUsageActivityFixture([1])}
         loading={false}
         error=""
-        window="24h"
+        window="day"
         windowIsCurrent={true}
         requestIdentity="admin::today"
         onWindowChange={onWindowChange}
@@ -43,7 +43,7 @@ describe('RecentActivityPanel window switcher', () => {
     expect(onWindowChange).not.toHaveBeenCalled();
 
     act(() => sevenDayButton?.click());
-    expect(onWindowChange).toHaveBeenCalledWith('7d');
+    expect(onWindowChange).toHaveBeenCalledWith('week');
     act(() => root.unmount());
   });
 
@@ -55,9 +55,9 @@ describe('RecentActivityPanel window switcher', () => {
         activity={buildUsageActivityFixture([1])}
         loading={true}
         error=""
-        window="24h"
+        window="day"
         windowIsCurrent={false}
-        requestIdentity="admin::7d"
+        requestIdentity="admin::week"
         onWindowChange={onWindowChange}
       />,
     ));
@@ -65,7 +65,7 @@ describe('RecentActivityPanel window switcher', () => {
     const dayButton = Array.from(container.querySelectorAll('button'))
       .find((button) => button.textContent === 'Day');
     act(() => dayButton?.click());
-    expect(onWindowChange).toHaveBeenCalledWith('24h');
+    expect(onWindowChange).toHaveBeenCalledWith('day');
     act(() => root.unmount());
   });
 });

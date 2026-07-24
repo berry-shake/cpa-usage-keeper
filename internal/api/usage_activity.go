@@ -55,7 +55,8 @@ func parseUsageActivityFilterQuery(req *http.Request, anchor time.Time) (service
 func parseUsageActivityFilterQueryWithClientAPIKey(req *http.Request, anchor time.Time, includeClientAPIKey bool) (servicedto.UsageFilter, error) {
 	queryNow := timeutil.NormalizeStorageTime(anchor)
 	if req == nil || strings.TrimSpace(req.URL.Query().Get("window")) == "" {
-		filter, err := parseUsageTimeFilterQueryWithClientAPIKey(req, queryNow, includeClientAPIKey)
+		// Activity 的长 Custom 日范围使用永久 daily 增量档位，并遵循统一的一年上限。
+		filter, err := parseUsageTimeFilterQueryWithOptions(req, queryNow, includeClientAPIKey, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
 		if err != nil {
 			return servicedto.UsageFilter{}, err
 		}
@@ -63,9 +64,14 @@ func parseUsageActivityFilterQueryWithClientAPIKey(req *http.Request, anchor tim
 		return filter, nil
 	}
 
-	// Activity 专属 window 允许 1y，以及归入 Day 视图的自然日模式。
+	// Activity 专属 window 使用标准四档，以及归入 Day 视图的自然日模式。
 	window := servicedto.UsageActivityWindow(strings.TrimSpace(req.URL.Query().Get("window")))
-	if window != servicedto.UsageActivityWindow1Y && window != servicedto.UsageActivityWindowToday && window != servicedto.UsageActivityWindowYesterday {
+	if window != servicedto.UsageActivityWindowDay &&
+		window != servicedto.UsageActivityWindowWeek &&
+		window != servicedto.UsageActivityWindowMonth &&
+		window != servicedto.UsageActivityWindowYear &&
+		window != servicedto.UsageActivityWindowToday &&
+		window != servicedto.UsageActivityWindowYesterday {
 		return servicedto.UsageFilter{}, fmt.Errorf("unsupported activity window %q", window)
 	}
 	apiKeyID := ""
@@ -76,7 +82,10 @@ func parseUsageActivityFilterQueryWithClientAPIKey(req *http.Request, anchor tim
 			return servicedto.UsageFilter{}, err
 		}
 	}
-	if window == servicedto.UsageActivityWindow1Y {
+	if window == servicedto.UsageActivityWindowDay ||
+		window == servicedto.UsageActivityWindowWeek ||
+		window == servicedto.UsageActivityWindowMonth ||
+		window == servicedto.UsageActivityWindowYear {
 		return servicedto.UsageFilter{ActivityWindow: window, QueryNow: &queryNow, APIKeyID: apiKeyID}, nil
 	}
 
@@ -112,7 +121,7 @@ func registerUsageActivityRoute(router gin.IRoutes, usageProvider service.UsageP
 	router.GET("/usage/activity", func(c *gin.Context) {
 		filter, err := parseUsageActivityFilterQuery(c.Request, time.Now())
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 		writeUsageActivityResponse(c, usageProvider, filter)
@@ -143,7 +152,7 @@ func registerKeyActivityRoute(router gin.IRoutes, usageProvider service.UsagePro
 		// Key Viewer 复用公共时间参数，但客户端 api_key_id 无论内容为何都不参与解析或过滤。
 		filter, err := parseKeyUsageActivityFilterQuery(c.Request, time.Now())
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeUsageFilterParseError(c, err)
 			return
 		}
 		if authHandler != nil && !authHandler.allowKeyOverviewRequest(fmt.Sprint(token), "activity") {

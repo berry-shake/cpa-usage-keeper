@@ -15,7 +15,7 @@ function buildActivity(windowHours: number, columns = 52): UsageActivityResponse
   const windowEnd = windowStart + windowHours * 60 * 60 * 1000;
   const bucketMilliseconds = (windowEnd - windowStart) / BLOCK_COUNT;
   return {
-    window: windowHours === 24 ? '24h' : windowHours === 7 * 24 ? '7d' : '30d',
+    window: windowHours === 24 ? 'day' : windowHours === 7 * 24 ? 'week' : 'month',
     grain: windowHours === 24 ? 'short' : windowHours === 7 * 24 ? 'medium' : 'long',
     timezone: 'UTC',
     total_success: 1,
@@ -50,11 +50,11 @@ function buildActivity(windowHours: number, columns = 52): UsageActivityResponse
 
 describe('ServiceHealthCard activity ranges', () => {
   it.each([
-    ['24h', 24],
+    ['Day', 24],
     ['Today', 24],
     ['Yesterday', 24],
-    ['7d', 7 * 24],
-    ['30d', 30 * 24],
+    ['Week', 7 * 24],
+    ['Month', 30 * 24],
     ['Custom 5h', 24],
     ['Custom 2d', 7 * 24],
     ['Custom 8d', 30 * 24],
@@ -139,7 +139,7 @@ describe('ServiceHealthCard range changes', () => {
     act(() => root.render(createElement(ServiceHealthCard, {
       activity: buildActivity(24),
       loading: false,
-      requestIdentity: 'admin::24h:::',
+      requestIdentity: 'admin::day:::',
     })));
 
     const firstBlock = container.querySelector<HTMLElement>('[role="gridcell"]');

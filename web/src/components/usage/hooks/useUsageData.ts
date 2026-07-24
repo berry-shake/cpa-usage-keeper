@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useMemo } from 'react';
-import { ApiError } from '@/lib/api';
+import { ApiError, isUsageRangeBoundsConflict } from '@/lib/api';
 import type { UsageCustomRangeUnit, UsageOverviewResponse, UsageOverviewUsageSnapshot, UsageTimeRange } from '@/lib/types';
 import { buildUsageStatsQueryKey, USAGE_STATS_STALE_TIME_MS, useUsageStatsStore } from '@/stores';
 import { getCurrentOverviewUsage } from '@/utils/usage/overview';
@@ -28,12 +28,13 @@ export interface UseUsageDataOptions {
   customEnd?: string;
   enabled?: boolean;
   apiKeyId?: string;
+  onRangeBoundsConflict?: (error: unknown) => boolean;
 }
 
 export const normalizeUsageOverviewRange = normalizeUsageRange;
 
 export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataReturn {
-  const { onAuthRequired, range = '8h', customUnit, customStart, customEnd, enabled = true, apiKeyId } = options;
+  const { onAuthRequired, onRangeBoundsConflict, range = '8h', customUnit, customStart, customEnd, enabled = true, apiKeyId } = options;
   const usageSnapshot = useUsageStatsStore((state) => state.usage);
   const loading = useUsageStatsStore((state) => state.loading);
   const storeError = useUsageStatsStore((state) => state.error);
@@ -59,12 +60,15 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
         apiKeyId,
       });
     } catch (error) {
+      if (isUsageRangeBoundsConflict(error) && onRangeBoundsConflict?.(error)) {
+        return;
+      }
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
       }
       throw error;
     }
-  }, [apiKeyId, loadUsageStats, onAuthRequired, rangeQuery]);
+  }, [apiKeyId, loadUsageStats, onAuthRequired, onRangeBoundsConflict, rangeQuery]);
 
   useEffect(() => {
     if (!enabled || !rangeQuery.valid) {
@@ -78,11 +82,14 @@ export function useUsageData(options: UseUsageDataOptions = {}): UseUsageDataRet
       end: rangeQuery.end,
       apiKeyId,
     }).catch((error) => {
+      if (isUsageRangeBoundsConflict(error) && onRangeBoundsConflict?.(error)) {
+        return;
+      }
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
       }
     });
-  }, [apiKeyId, enabled, loadUsageStats, onAuthRequired, rangeQuery]);
+  }, [apiKeyId, enabled, loadUsageStats, onAuthRequired, onRangeBoundsConflict, rangeQuery]);
 
   const currentQueryKey = rangeQuery.valid ? buildUsageStatsQueryKey(rangeQuery, apiKeyId) : null;
   const usage = usageSnapshot as UsageOverviewPayload | null;

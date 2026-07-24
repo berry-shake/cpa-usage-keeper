@@ -75,4 +75,35 @@ describe('AnalysisPanel latency loading boundary', () => {
     expect(markup).toContain('usage_stats.analysis_latency_title');
     expect(markup).toContain('latency failed');
   });
+
+  it('shows recent-range guidance when latency diagnostics are unsupported', () => {
+    const markup = renderToStaticMarkup(
+      <AnalysisPanel
+        analysis={analysis}
+        loading={false}
+        latencyDiagnostics={{
+          supported: false,
+          unsupported_reason: 'range_outside_recent_30_days',
+          points: [],
+          density: [],
+          total_points: 0,
+          sampled: false,
+          p95_ttft_ms: 0,
+          p95_latency_ms: 0,
+          max_ttft_ms: 0,
+          max_latency_ms: 0,
+        }}
+        latencyLoading={false}
+        latencyError=""
+        isDark={false}
+        isMobile={false}
+      />,
+    );
+
+    const latencyStart = markup.indexOf('usage_stats.analysis_latency_title');
+    const compositionStart = markup.indexOf('usage_stats.analysis_composition_title', latencyStart);
+    const latencyMarkup = markup.slice(latencyStart, compositionStart);
+    expect(latencyMarkup).toContain('usage_stats.analysis_latency_recent_range_only');
+    expect(latencyMarkup).not.toContain('usage_stats.no_data');
+  });
 });
