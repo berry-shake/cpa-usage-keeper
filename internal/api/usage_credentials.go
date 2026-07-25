@@ -74,7 +74,7 @@ func registerUsageCredentialsRoute(
 
 		rows, err := usageProvider.ListUsageCredentialStats(c.Request.Context(), filter)
 		if err != nil {
-			writeInternalError(c, "list usage credential stats failed", err)
+			writeUsageProviderError(c, "list usage credential stats failed", err)
 			return
 		}
 

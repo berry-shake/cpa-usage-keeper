@@ -538,8 +538,12 @@ export async function fetchUsageIdentities(signal?: AbortSignal): Promise<UsageI
   return response.json()
 }
 
-export async function fetchUsageCredentials(request: UsageRangeRequest, signal?: AbortSignal): Promise<UsageCredentialsResponse> {
+export async function fetchUsageCredentials(request: UsageRangeRequest, signal?: AbortSignal, apiKeyId?: string): Promise<UsageCredentialsResponse> {
   const params = buildUsageRangeParams(request)
+  const selectedAPIKeyId = apiKeyId?.trim()
+  if (selectedAPIKeyId) {
+    params.set('api_key_id', selectedAPIKeyId)
+  }
   const query = params.toString()
   const response = await apiFetch(`${apiPath('/usage/credentials')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {

@@ -704,8 +704,8 @@ for (const [tab, expected] of [
   ['overview', true],
   ['analysis', true],
   ['events', true],
-  ['auth-files', false],
-  ['ai-provider', false],
+  ['auth-files', true],
+  ['ai-provider', true],
   ['settings', false],
 ] as const) {
   it(`returns ${expected} for ${tab} API Key filter visibility`, () => {

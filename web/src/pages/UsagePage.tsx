@@ -110,7 +110,7 @@ export const getCredentialSectionVisibility = (tab: UsageTab) => ({
 
 export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'settings';
 
-export const shouldShowApiKeyFilter = (tab: UsageTab) => tab === 'overview' || tab === 'analysis' || tab === 'events';
+export const shouldShowApiKeyFilter = (tab: UsageTab) => tab === 'overview' || tab === 'analysis' || tab === 'events' || tab === 'auth-files' || tab === 'ai-provider';
 
 export const shouldShowUpdateCheckButton = (versionInfo: Pick<VersionResponse, 'updateCheckEnabled'> | null) => versionInfo?.updateCheckEnabled === true;
 
@@ -1186,7 +1186,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setCredentialStatsLoading(true);
     setCredentialStatsError('');
     try {
-      const response = await fetchUsageCredentials(usageRangeQuery, controller.signal);
+      const response = await fetchUsageCredentials(usageRangeQuery, controller.signal, selectedApiKeyId);
       if (credentialStatsRequestControllerRef.current !== controller) {
         return;
       }
@@ -1210,7 +1210,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
         credentialStatsRequestControllerRef.current = null;
       }
     }
-  }, [onAuthRequired, recoverRangeBoundsConflict, usageRangeQuery]);
+  }, [onAuthRequired, recoverRangeBoundsConflict, selectedApiKeyId, usageRangeQuery]);
 
   useEffect(() => {
     try {

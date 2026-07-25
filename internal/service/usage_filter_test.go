@@ -252,6 +252,20 @@ func TestUsageServiceResolvesAPIKeyIDForUsageQueries(t *testing.T) {
 	if events.TotalCount != 2 || len(events.Events) != 2 {
 		t.Fatalf("expected events to use resolved API key, got %+v", events)
 	}
+	credentialStats, err := provider.ListUsageCredentialStats(context.Background(), servicedto.UsageFilter{APIKeyID: targetID, Range: "custom", StartTime: &start, EndTime: &end})
+	if err != nil {
+		t.Fatalf("ListUsageCredentialStats returned error: %v", err)
+	}
+	var credentialTokens int64
+	for _, row := range credentialStats {
+		if row.Model == "claude-other" {
+			t.Fatalf("expected credential stats to exclude other API key, got %+v", credentialStats)
+		}
+		credentialTokens += row.TotalTokens
+	}
+	if credentialTokens != 30 {
+		t.Fatalf("expected credential stats to use resolved API key, got %+v", credentialStats)
+	}
 }
 
 func TestUsageServiceRejectsInvalidAPIKeyID(t *testing.T) {

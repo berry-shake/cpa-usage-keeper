@@ -765,11 +765,17 @@ func (s *usageService) ListUsageEventFilterOptions(ctx context.Context, filter s
 	return &servicedto.UsageEventFilterOptions{Models: options.Models}, nil
 }
 
-func (s *usageService) ListUsageCredentialStats(_ context.Context, filter servicedto.UsageFilter) ([]servicedto.UsageCredentialStat, error) {
-	rows, err := repository.ListUsageCredentialStatsWithFilter(s.db, repodto.UsageQueryFilter{
+func (s *usageService) ListUsageCredentialStats(ctx context.Context, filter servicedto.UsageFilter) ([]servicedto.UsageCredentialStat, error) {
+	ctx = usageServiceContext(ctx)
+	apiGroupKey, err := s.resolveAPIGroupKey(ctx, filter.APIKeyID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := repository.ListUsageCredentialStatsWithFilter(s.db.WithContext(ctx), repodto.UsageQueryFilter{
 		StartTime:    filter.StartTime,
 		EndTime:      filter.EndTime,
 		EndExclusive: filter.EndExclusive,
+		APIGroupKey:  apiGroupKey,
 	})
 	if err != nil {
 		return nil, err
