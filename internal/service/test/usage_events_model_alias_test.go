@@ -31,7 +31,7 @@ func TestUsageServicePreservesEventMetadataForListAndStream(t *testing.T) {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	provider := service.NewUsageService(db)
+	provider := service.NewUsageService(db, emptyPricingCatalogForTest())
 	page, err := provider.ListUsageEvents(context.Background(), servicedto.UsageFilter{Page: 1, PageSize: 10, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListUsageEvents returned error: %v", err)

@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
-	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/timeutil"
 
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 )
 
 const quotaWindowRawOnlyThreshold = 5 * time.Hour
@@ -22,12 +23,19 @@ type UsageWindowStats struct {
 
 type UsageWindowStatsCalculator struct {
 	db           *gorm.DB
-	costResolver *UsageCostResolver
+	costResolver pricing.Resolver
 }
 
 type usageWindowTokenStats struct {
+	APIGroupKey         string `gorm:"column:api_group_key"`
 	Model               string `gorm:"column:model"`
+	AuthIndex           string `gorm:"column:auth_index"`
 	ModelAlias          string `gorm:"column:model_alias"`
+	ServiceTier         string `gorm:"column:service_tier"`
+	ResponseServiceTier string `gorm:"column:response_service_tier"`
+	ReasoningEffort     string `gorm:"column:reasoning_effort"`
+	Endpoint            string `gorm:"column:endpoint"`
+	ExecutorType        string `gorm:"column:executor_type"`
 	TotalTokens         int64  `gorm:"column:total_tokens"`
 	InputTokens         int64  `gorm:"column:input_tokens"`
 	OutputTokens        int64  `gorm:"column:output_tokens"`
@@ -36,21 +44,30 @@ type usageWindowTokenStats struct {
 }
 
 type usageWindowTokenStatsKey struct {
-	model      string
-	modelAlias string
+	dimensions pricing.UsageDimensions
 }
 
-func NewUsageWindowStatsCalculator(ctx context.Context, db *gorm.DB) (*UsageWindowStatsCalculator, error) {
+func NewUsageWindowStatsCalculator(ctx context.Context, db *gorm.DB, costResolvers ...pricing.Resolver) (*UsageWindowStatsCalculator, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is nil")
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	if len(costResolvers) > 1 {
+		return nil, fmt.Errorf("multiple pricing resolvers are not supported")
 	}
-	costResolver, err := NewUsageCostResolver(ctx, db)
-	if err != nil {
-		return nil, err
+	var costResolver pricing.Resolver
+	if len(costResolvers) == 1 {
+		costResolver = costResolvers[0]
+	} else {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		snapshot, err := LoadPricingSnapshot(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		costResolver = pricing.NewCatalog(snapshot).NewResolver()
 	}
+	// 保存原始可克隆句柄；Reader clause 必须在每次 Sum 的独立 session 上绑定，不能保存可变 Statement。
 	return &UsageWindowStatsCalculator{db: db, costResolver: costResolver}, nil
 }
 
@@ -65,7 +82,9 @@ func (c *UsageWindowStatsCalculator) SumByAuthIndex(ctx context.Context, authInd
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := loadUsageWindowTokenStats(c.db.WithContext(ctx), authIndex, start, end)
+	// 先绑定 Reader，再创建 clone=2 的独立 session；长窗口三段查询不会互相累积 Model/Where。
+	queryDB := c.db.Clauses(dbresolver.Read).Session(&gorm.Session{Context: ctx})
+	rows, err := loadUsageWindowTokenStats(queryDB, authIndex, start, end, c.costResolver.ActiveFields())
 	if err != nil {
 		return UsageWindowStats{}, err
 	}
@@ -86,7 +105,8 @@ func (c *UsageWindowStatsCalculator) SumByAuthIndexAndModelKeyword(ctx context.C
 		ctx = context.Background()
 	}
 	// 复用现有 model_alias/model 分组聚合，模型过滤在少量聚合行上做即可，不必下推 SQL。
-	rows, err := loadUsageWindowTokenStats(c.db.WithContext(ctx), authIndex, start, end)
+	queryDB := c.db.Clauses(dbresolver.Read).Session(&gorm.Session{Context: ctx})
+	rows, err := loadUsageWindowTokenStats(queryDB, authIndex, start, end, c.costResolver.ActiveFields())
 	if err != nil {
 		return UsageWindowStats{}, err
 	}
@@ -108,41 +128,16 @@ func filterUsageWindowTokenStatsByModelKeyword(rows []usageWindowTokenStats, mod
 	return filtered
 }
 
-func SumUsageWindowStatsByAuthIndex(ctx context.Context, db *gorm.DB, authIndex string, start time.Time, end *time.Time) (UsageWindowStats, error) {
-	// 数据库句柄为空时直接返回错误，避免后续查询 panic。
-	if db == nil {
-		// 返回明确错误，调用方可以按普通统计失败处理。
-		return UsageWindowStats{}, fmt.Errorf("database is nil")
-	}
-	// auth_index 是 quota 统计的唯一身份维度，先去掉外部传入的空白。
-	authIndex = strings.TrimSpace(authIndex)
-	// auth_index 为空时没有可查询对象，直接返回参数错误。
-	if authIndex == "" {
-		// 返回明确错误，避免误查全表。
-		return UsageWindowStats{}, fmt.Errorf("auth_index is required")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	queryDB := db.WithContext(ctx)
-	// 价格表按本次调用预加载一次，后续 raw/hourly 聚合结果都复用同一个 resolver。
-	costResolver, err := NewUsageCostResolver(ctx, db)
+func SumUsageWindowStatsByAuthIndex(ctx context.Context, db *gorm.DB, authIndex string, start time.Time, end *time.Time, costResolver pricing.Resolver) (UsageWindowStats, error) {
+	// 兼容函数只负责构造统一 calculator，禁止保留第二套窗口切分、查询和计价实现。
+	calculator, err := NewUsageWindowStatsCalculator(ctx, db, costResolver)
 	if err != nil {
-		// 保留底层错误，方便定位数据库或迁移问题。
 		return UsageWindowStats{}, err
 	}
-	// 根据窗口长度选择 raw-only 或 hourly-rollup 查询计划。
-	rows, err := loadUsageWindowTokenStats(queryDB, authIndex, start, end)
-	// 任意一段查询失败都返回错误，调用方会跳过本次窗口补充。
-	if err != nil {
-		// 给错误包上业务上下文，方便日志识别失败位置。
-		return UsageWindowStats{}, err
-	}
-	// 把 model_alias/model 级 token 聚合结果换算成最终 token/cost 汇总。
-	return usageWindowStatsFromTokenStats(rows, costResolver), nil
+	return calculator.SumByAuthIndex(ctx, authIndex, start, end)
 }
 
-func loadUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end *time.Time) ([]usageWindowTokenStats, error) {
+func loadUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end *time.Time, activeFields pricing.ActiveFields) ([]usageWindowTokenStats, error) {
 	// 空时间无法表达有效 quota 窗口，提前返回避免误构造超宽时间范围。
 	if start.IsZero() || (end != nil && end.IsZero()) {
 		// 返回空结果而不是错误，调用方会把它当作“该窗口暂无用量”。
@@ -151,7 +146,7 @@ func loadUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, e
 	// 没有结束时间时只能走 raw 查询，保持“从 start 到当前已有数据”的旧语义。
 	if end == nil {
 		// raw 查询本身会按 model group by，不再逐条读 usage_events。
-		return sumRawUsageWindowTokenStats(db, authIndex, start, nil)
+		return sumRawUsageWindowTokenStats(db, authIndex, start, nil, activeFields)
 	}
 	// 结束时间归一化为存储时区，避免和 SQLite 文本时间比较口径不一致。
 	windowEnd := timeutil.NormalizeStorageTime(*end)
@@ -165,13 +160,13 @@ func loadUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, e
 	// 5 小时及以内直接查 raw，避免小窗口为了 rollup 多打几次数据库。
 	if windowEnd.Sub(windowStart) <= quotaWindowRawOnlyThreshold {
 		// raw 查询会使用 auth_index + timestamp 范围索引，并在 SQL 内完成 model 聚合。
-		return sumRawUsageWindowTokenStats(db, authIndex, windowStart, &windowEnd)
+		return sumRawUsageWindowTokenStats(db, authIndex, windowStart, &windowEnd, activeFields)
 	}
 	// 长窗口拆成边界 raw 和中间完整小时 rollup，降低真实高频数据下的扫描行数。
-	return sumLongUsageWindowTokenStats(db, authIndex, windowStart, windowEnd)
+	return sumLongUsageWindowTokenStats(db, authIndex, windowStart, windowEnd, activeFields)
 }
 
-func sumLongUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end time.Time) ([]usageWindowTokenStats, error) {
+func sumLongUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end time.Time, activeFields pricing.ActiveFields) ([]usageWindowTokenStats, error) {
 	// 左边界结束点取 start 之后的第一个整点，只有非整点部分才需要 raw 补偿。
 	leftEnd := ceilUsageWindowHour(start)
 	// 如果窗口不到左边界整点就结束，左边界最多只能补到 end。
@@ -206,7 +201,7 @@ func sumLongUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time
 	// 左边界存在时读取 usage_events 边界段。
 	if start.Before(leftEnd) {
 		// 查询左边界 raw 聚合，最多覆盖不足一小时的数据。
-		rows, err := sumRawUsageWindowTokenStats(db, authIndex, start, &leftEnd)
+		rows, err := sumRawUsageWindowTokenStats(db, authIndex, start, &leftEnd, activeFields)
 		// 左边界查询失败时直接返回，避免展示半截统计。
 		if err != nil {
 			// 包装左边界错误，便于测试和日志定位。
@@ -218,7 +213,7 @@ func sumLongUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time
 	// 中间存在完整小时时读取 hourly rollup。
 	if hourlyStart.Before(hourlyEnd) {
 		// 查询完整小时 rollup 聚合，避免扫描 7 天 raw events。
-		rows, err := sumHourlyUsageWindowTokenStats(db, authIndex, hourlyStart, hourlyEnd)
+		rows, err := sumHourlyUsageWindowTokenStats(db, authIndex, hourlyStart, hourlyEnd, activeFields)
 		// hourly 查询失败时直接返回，避免展示半截统计。
 		if err != nil {
 			// 包装 hourly 错误，便于区分 raw 和 rollup 问题。
@@ -230,7 +225,7 @@ func sumLongUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time
 	// 右边界存在时读取 usage_events 尾部段。
 	if rightStart.Before(end) {
 		// 查询右边界 raw 聚合，覆盖最后一个完整小时之后的数据。
-		rows, err := sumRawUsageWindowTokenStats(db, authIndex, rightStart, &end)
+		rows, err := sumRawUsageWindowTokenStats(db, authIndex, rightStart, &end, activeFields)
 		// 右边界查询失败时直接返回，避免展示半截统计。
 		if err != nil {
 			// 包装右边界错误，便于测试和日志定位。
@@ -243,15 +238,24 @@ func sumLongUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time
 	return usageWindowTokenStatsValues(merged), nil
 }
 
-func sumRawUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end *time.Time) ([]usageWindowTokenStats, error) {
+func sumRawUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end *time.Time, activeFields pricing.ActiveFields) ([]usageWindowTokenStats, error) {
+	dimensions := UsagePricingDimensionColumns(activeFields)
+	groupDimensions := append([]string{"model_alias", "model"}, dimensions[2:]...)
+	selectDimensions := append([]string(nil), dimensions...)
+	for index := range selectDimensions {
+		if selectDimensions[index] == "model_alias" {
+			selectDimensions[index] = "COALESCE(model_alias, '') AS model_alias"
+		}
+	}
+	selectClause := strings.Join(selectDimensions, ", ") + ", COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens"
 	// raw 查询只取 model_alias/model 级汇总字段，避免把大量 usage_events 行读进 Go 内存。
 	query := db.Model(&entities.UsageEvent{}).
 		// SELECT 中只聚合 token/cost 需要的字段，不读取 raw_json 等大字段。
-		Select("model, COALESCE(model_alias, '') AS model_alias, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens").
+		Select(selectClause).
 		// auth_index 已经是唯一身份维度，这里不再额外按 auth_type 过滤。
 		Where("auth_index = ? AND timestamp >= ?", authIndex, timeutil.FormatStorageTime(start)).
 		// 按 model_alias/model 分组保留现有聚合边界，后续 cost 先按真实 model、再按 alias 回退。
-		Group("model_alias, model")
+		Group(strings.Join(groupDimensions, ", "))
 	// 如果调用方传入结束时间，就用半开区间避免边界重复累计。
 	if end != nil {
 		// end 统一格式化为 storage time，确保 SQLite 文本比较稳定。
@@ -264,25 +268,34 @@ func sumRawUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time,
 		// 包装 raw 查询错误，保留调用上下文。
 		return nil, fmt.Errorf("sum raw usage window stats: %w", err)
 	}
+	for index := range rows {
+		rows[index].AuthIndex = authIndex
+	}
 	// 返回 model_alias/model 级 token 汇总。
 	return rows, nil
 }
 
-func sumHourlyUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end time.Time) ([]usageWindowTokenStats, error) {
+func sumHourlyUsageWindowTokenStats(db *gorm.DB, authIndex string, start time.Time, end time.Time, activeFields pricing.ActiveFields) ([]usageWindowTokenStats, error) {
+	dimensions := UsagePricingDimensionColumns(activeFields)
+	groupDimensions := append([]string{"model_alias", "model"}, dimensions[2:]...)
+	selectClause := strings.Join(dimensions, ", ") + ", COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens"
 	// hourly 查询直接读取 overview 已经维护好的小时增量表。
 	query := db.Model(&entities.UsageOverviewHourlyStat{}).
 		// SELECT 中聚合 token/cost 需要的字段，保持和 raw 查询返回结构一致。
-		Select("model, model_alias, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens").
+		Select(selectClause).
 		// auth_index + bucket_start 范围可以使用现有 hourly auth_bucket 索引。
 		Where("auth_index = ? AND bucket_start >= ? AND bucket_start < ?", authIndex, timeutil.FormatStorageTime(start), timeutil.FormatStorageTime(end)).
 		// 按 model_alias/model 分组保留现有聚合边界，后续 cost 先按真实 model、再按 alias 回退。
-		Group("model_alias, model")
+		Group(strings.Join(groupDimensions, ", "))
 	// rows 只承接聚合后的少量 model 行。
 	var rows []usageWindowTokenStats
 	// 执行 hourly 聚合查询。
 	if err := query.Scan(&rows).Error; err != nil {
 		// 包装 hourly 查询错误，保留调用上下文。
 		return nil, fmt.Errorf("sum hourly usage window stats: %w", err)
+	}
+	for index := range rows {
+		rows[index].AuthIndex = authIndex
 	}
 	// 返回 model_alias/model 级 token 汇总。
 	return rows, nil
@@ -292,14 +305,31 @@ func mergeUsageWindowTokenStats(merged map[usageWindowTokenStatsKey]usageWindowT
 	// 遍历每个来源返回的 model_alias/model 汇总行。
 	for _, row := range rows {
 		// 维度先 trim，避免同一模型因为空白产生两个聚合桶。
-		model := strings.TrimSpace(row.Model)
-		modelAlias := strings.TrimSpace(row.ModelAlias)
-		key := usageWindowTokenStatsKey{model: model, modelAlias: modelAlias}
+		dimensions := newUsagePricingCostSubject(
+			row.APIGroupKey,
+			row.Model,
+			row.AuthIndex,
+			row.ModelAlias,
+			row.ServiceTier,
+			row.ResponseServiceTier,
+			row.ReasoningEffort,
+			row.Endpoint,
+			row.ExecutorType,
+			0, 0, 0, 0,
+		).Dimensions
+		key := usageWindowTokenStatsKey{dimensions: dimensions}
 		// 从已有 map 中取出当前 model_alias/model 的累计值。
 		current := merged[key]
 		// 写回规范化后的维度，后续 resolver 也按 trim 后的值查找。
-		current.Model = model
-		current.ModelAlias = modelAlias
+		current.APIGroupKey = dimensions.APIGroupKey
+		current.Model = dimensions.Model
+		current.AuthIndex = dimensions.AuthIndex
+		current.ModelAlias = dimensions.ModelAlias
+		current.ServiceTier = dimensions.ServiceTier
+		current.ResponseServiceTier = dimensions.ResponseServiceTier
+		current.ReasoningEffort = dimensions.ReasoningEffort
+		current.Endpoint = dimensions.Endpoint
+		current.ExecutorType = dimensions.ExecutorType
 		// 累加 total_tokens，用于前端 token 展示。
 		current.TotalTokens += row.TotalTokens
 		// 累加 input_tokens，用于普通输入、缓存读取和缓存写入成本拆分。
@@ -327,7 +357,7 @@ func usageWindowTokenStatsValues(merged map[usageWindowTokenStatsKey]usageWindow
 	return rows
 }
 
-func usageWindowStatsFromTokenStats(rows []usageWindowTokenStats, costResolver *UsageCostResolver) UsageWindowStats {
+func usageWindowStatsFromTokenStats(rows []usageWindowTokenStats, costResolver pricing.Resolver) UsageWindowStats {
 	// 初始化最终返回的 token/cost 汇总。
 	stats := UsageWindowStats{}
 	// 遍历每个 model_alias/model 的聚合 token。
@@ -335,16 +365,21 @@ func usageWindowStatsFromTokenStats(rows []usageWindowTokenStats, costResolver *
 		// total_tokens 直接累计到前端展示的窗口 token。
 		stats.Tokens += row.TotalTokens
 		// 使用统一 resolver 先按真实 model、再按 alias 回退计算该维度的 cost。
-		result := costResolver.Calculate(UsageCostSubject{
-			Model:      row.Model,
-			ModelAlias: row.ModelAlias,
-			Tokens: helper.UsageTokenCostInput{
-				InputTokens:         row.InputTokens,
-				OutputTokens:        row.OutputTokens,
-				CacheReadTokens:     row.CacheReadTokens,
-				CacheCreationTokens: row.CacheCreationTokens,
-			},
-		})
+		result := costResolver.Calculate(newUsagePricingCostSubject(
+			row.APIGroupKey,
+			row.Model,
+			row.AuthIndex,
+			row.ModelAlias,
+			row.ServiceTier,
+			row.ResponseServiceTier,
+			row.ReasoningEffort,
+			row.Endpoint,
+			row.ExecutorType,
+			row.InputTokens,
+			row.OutputTokens,
+			row.CacheReadTokens,
+			row.CacheCreationTokens,
+		))
 		stats.Cost += result.Cost.TotalCostUSD
 	}
 	// 返回最终窗口统计。

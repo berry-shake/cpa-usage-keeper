@@ -16,6 +16,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/poller"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
 	"github.com/gin-gonic/gin"
@@ -82,7 +83,11 @@ func TestAppCloseStopsRealQuotaRefreshTasksBeforeDatabaseClose(t *testing.T) {
 	}
 	block := make(chan struct{})
 	handler := &appQuotaHandlerStub{block: block}
-	quotaService := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"claude": handler}))
+	quotaService := quota.NewServiceWithRegistry(
+		db,
+		quota.NewProviderRegistry(map[string]quota.ProviderHandler{"claude": handler}),
+		pricing.NewCatalog(pricing.EmptySnapshot()),
+	)
 	quotaService.SetRefreshContext(context.Background())
 	app := &App{DB: db, QuotaService: quotaService}
 
@@ -279,7 +284,7 @@ func TestNewWithConfigLeavesExistingUsageForBackgroundAggregationRunner(t *testi
 
 	// 断言：构造阶段不做同步 catch-up，工作保留给 App.Run 启动的后台任务。
 	var checkpointCount int64
-	if err := app.DB.Model(&entities.UsageOverviewAggregationCheckpoint{}).Where("name = ?", "overview").Count(&checkpointCount).Error; err != nil {
+	if err := app.DB.Model(&entities.UsageAggregationCheckpoint{}).Where("name = ?", entities.UsageAggregationCheckpointOverview).Count(&checkpointCount).Error; err != nil {
 		t.Fatalf("count overview checkpoints returned error: %v", err)
 	}
 	if checkpointCount != 0 {
@@ -313,7 +318,7 @@ func TestNewWithConfigContinuesWhenRecentUsageCacheInitializationFails(t *testin
 		t.Fatalf("expected recent usage cache to be nil after initialization failure, got %T", app.RecentUsageCache)
 	}
 	logContent := readAppLogFile(t, logDir)
-	if !strings.Contains(logContent, "level=error") || !strings.Contains(logContent, "recent usage event cache initialization failed") || !strings.Contains(logContent, cacheErr.Error()) {
+	if !strings.Contains(logContent, "| error |") || !strings.Contains(logContent, "recent usage event cache initialization failed") || !strings.Contains(logContent, cacheErr.Error()) {
 		t.Fatalf("expected error log for recent usage cache initialization failure, got %s", logContent)
 	}
 }

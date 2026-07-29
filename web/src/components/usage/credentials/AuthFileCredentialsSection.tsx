@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import { MainActionButton } from '@/components/ui/MainActionButton'
 import { Modal } from '@/components/ui/Modal'
 import { IconChartLine, IconGaugeReset, IconRefreshCw, IconSearch, IconSettings, IconShield, IconTrash2 } from '@/components/ui/icons'
 import quotaCostIcon from '@/assets/icons/quota-cost.svg'
@@ -201,34 +202,25 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
         )}
         actions={(
           <div className={styles.credentialSectionActionButtons}>
-            <div className={`${styles.credentialRefreshSwitcher} ${styles.credentialInspectionSwitcher}`.trim()}>
-              <button
-                type="button"
-                className={`${styles.credentialRefreshButton} ${styles.credentialRefreshButtonActive} ${styles.credentialInspectionButton}`.trim()}
-                onClick={openInspection}
-                aria-pressed={inspectionTone !== 'idle'}
-              >
-                <span className={styles.credentialRefreshButtonInner}>
-                  <IconSearch size={12} />
-                  <span>{t('usage_stats.credentials_inspection_open')}</span>
-                  {inspectionTone !== 'idle' && <span className={`${styles.credentialInspectionDot} ${styles[`credentialInspectionDot${capitalize(inspectionTone)}`]}`.trim()} aria-hidden="true" />}
-                </span>
-              </button>
-            </div>
-            <div className={styles.credentialRefreshSwitcher}>
-              <button
-                type="button"
-                className={`${styles.credentialRefreshButton} ${styles.credentialRefreshButtonActive} ${quotaRefreshing ? styles.credentialRefreshButtonLoading : ''}`.trim()}
-                onClick={() => void onRefreshQuota()}
-                disabled={!canRefresh}
-                aria-busy={quotaRefreshing}
-              >
-                <span className={styles.credentialRefreshButtonInner}>
-                  {quotaRefreshing ? <LoadingSpinner size={12} className={styles.credentialRefreshSpinner} /> : <IconRefreshCw size={12} />}
-                  <span>{quotaRefreshing ? t('usage_stats.credentials_quota_refreshing') : t('usage_stats.credentials_quota_refresh_current_page')}</span>
-                </span>
-              </button>
-            </div>
+            <MainActionButton
+              type="button"
+              className={styles.credentialInspectionButton}
+              onClick={openInspection}
+              aria-pressed={inspectionTone !== 'idle'}
+            >
+              <IconSearch size={12} />
+              <span>{t('usage_stats.credentials_inspection_open')}</span>
+              {inspectionTone !== 'idle' && <span className={`${styles.credentialInspectionDot} ${styles[`credentialInspectionDot${capitalize(inspectionTone)}`]}`.trim()} aria-hidden="true" />}
+            </MainActionButton>
+            <MainActionButton
+              type="button"
+              onClick={() => void onRefreshQuota()}
+              disabled={!canRefresh}
+              loading={quotaRefreshing}
+            >
+              {!quotaRefreshing && <IconRefreshCw size={12} />}
+              <span>{quotaRefreshing ? t('usage_stats.credentials_quota_refreshing') : t('usage_stats.credentials_quota_refresh_current_page')}</span>
+            </MainActionButton>
           </div>
         )}
       >

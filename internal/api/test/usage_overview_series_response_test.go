@@ -56,7 +56,7 @@ func TestLongCustomDayOverviewCapsAlignedSeriesAtNinetyPoints(t *testing.T) {
 		"range": {"custom"}, "unit": {"day"},
 		"start": {start.Format(time.DateOnly)}, "end": {today.Format(time.DateOnly)},
 	}
-	router := NewRouter(nil, nil, service.NewUsageService(db), nil, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, service.NewUsageService(db, emptyPricingCatalogForTest()), nil, AuthConfig{}, nil, "")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/usage/overview?"+query.Encode(), nil))
 	if response.Code != http.StatusOK {

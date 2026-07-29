@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository"
 	repodto "cpa-usage-keeper/internal/repository/dto"
 	servicedto "cpa-usage-keeper/internal/service/dto"
@@ -18,14 +19,28 @@ import (
 type usageService struct {
 	db          *gorm.DB
 	recentUsage *repository.UsageRecentEventCache
+	pricing     *pricing.Catalog
 }
 
-func NewUsageService(db *gorm.DB) UsageProvider {
-	return NewUsageServiceWithRecentCache(db, nil)
+type UsageServiceOptions struct {
+	RecentUsage    *repository.UsageRecentEventCache
+	PricingCatalog *pricing.Catalog
 }
 
-func NewUsageServiceWithRecentCache(db *gorm.DB, recentUsage *repository.UsageRecentEventCache) UsageProvider {
-	return &usageService{db: db, recentUsage: recentUsage}
+func NewUsageService(db *gorm.DB, pricingCatalog *pricing.Catalog) UsageProvider {
+	return NewUsageServiceWithRecentCache(db, nil, pricingCatalog)
+}
+
+func NewUsageServiceWithRecentCache(db *gorm.DB, recentUsage *repository.UsageRecentEventCache, pricingCatalog *pricing.Catalog) UsageProvider {
+	return NewUsageServiceWithOptions(db, UsageServiceOptions{RecentUsage: recentUsage, PricingCatalog: pricingCatalog})
+}
+
+func NewUsageServiceWithOptions(db *gorm.DB, options UsageServiceOptions) UsageProvider {
+	return &usageService{
+		db:          db,
+		recentUsage: options.RecentUsage,
+		pricing:     requirePricingCatalog(options.PricingCatalog),
+	}
 }
 
 func usageServiceContext(ctx context.Context) context.Context {
@@ -67,7 +82,7 @@ func (s *usageService) GetUsageOverview(ctx context.Context, filter servicedto.U
 		EndExclusive: filter.EndExclusive,
 		QueryNow:     filter.QueryNow,
 		APIGroupKey:  apiGroupKey,
-	}, s.recentUsage)
+	}, s.recentUsage, s.pricing.NewResolver())
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +248,7 @@ func (s *usageService) GetUsageOverviewRealtime(ctx context.Context, filter serv
 		RealtimeWindow:  filter.RealtimeWindow,
 		RealtimeEndTime: filter.RealtimeEndTime,
 		APIGroupKey:     apiGroupKey,
-	}, s.recentUsage)
+	}, s.recentUsage, s.pricing.NewResolver())
 	if err != nil {
 		return nil, err
 	}
@@ -473,7 +488,7 @@ func (s *usageService) GetAnalysis(ctx context.Context, filter servicedto.UsageF
 		EndTime:      filter.EndTime,
 		EndExclusive: filter.EndExclusive,
 		APIGroupKey:  apiGroupKey,
-	})
+	}, s.pricing.NewResolver())
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +675,7 @@ func (s *usageService) ListUsageEvents(ctx context.Context, filter servicedto.Us
 		AuthIndex:    filter.AuthIndex,
 		APIGroupKey:  apiGroupKey,
 		Result:       filter.Result,
-	})
+	}, s.pricing.NewResolver())
 	if err != nil {
 		return nil, err
 	}
@@ -746,7 +761,7 @@ func (s *usageService) StreamUsageEvents(ctx context.Context, filter servicedto.
 			CostAvailable:       row.CostAvailable,
 			PricingStyle:        row.PricingStyle,
 		})
-	})
+	}, s.pricing.NewResolver())
 }
 
 // Request Event Log 的 model 筛选项只应用调用方传入的时间窗口；独立筛选项接口当前传空 filter。
@@ -776,7 +791,7 @@ func (s *usageService) ListUsageCredentialStats(ctx context.Context, filter serv
 		EndTime:      filter.EndTime,
 		EndExclusive: filter.EndExclusive,
 		APIGroupKey:  apiGroupKey,
-	})
+	}, s.pricing.NewResolver())
 	if err != nil {
 		return nil, err
 	}

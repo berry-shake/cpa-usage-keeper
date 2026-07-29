@@ -8,6 +8,7 @@ import {
   buildSelectedSyncPrices,
   markPricingSyncFailures,
   notifyPricingSyncUnexpectedError,
+  notifyPricingSyncFailures,
   PriceSettingsCard,
   pricingDraftToModelPrice,
   syncDraftToModelPrice,
@@ -106,6 +107,45 @@ describe('PriceSettingsCard', () => {
 		expect(html).toContain('Cache Write');
 		expect(html).toContain('$3.1250/1M');
 	});
+
+  it('shows Rules before Edit and Delete only for saved prices', () => {
+    const savedHTML = renderToStaticMarkup(
+      <PriceSettingsCard
+        modelNames={['saved-model', 'new-model']}
+        modelPrices={{
+          'saved-model': {
+            style: 'openai',
+            prompt: 1,
+            completion: 2,
+            cacheRead: 0,
+            cacheWrite: 0,
+            multiplier: 1,
+          },
+        }}
+        onPriceSave={() => undefined}
+        onPriceDelete={() => undefined}
+        loading={false}
+      />,
+    );
+    const rulesIndex = savedHTML.indexOf('>Rules</span>');
+    const editIndex = savedHTML.indexOf('>Edit</span>');
+    const deleteIndex = savedHTML.indexOf('>Delete</span>');
+
+    expect(rulesIndex).toBeGreaterThanOrEqual(0);
+    expect(rulesIndex).toBeLessThan(editIndex);
+    expect(editIndex).toBeLessThan(deleteIndex);
+
+    const emptyHTML = renderToStaticMarkup(
+      <PriceSettingsCard
+        modelNames={['new-model']}
+        modelPrices={{}}
+        onPriceSave={() => undefined}
+        onPriceDelete={() => undefined}
+        loading={false}
+      />,
+    );
+    expect(emptyHTML).not.toContain('>Rules</span>');
+  });
 
   it('renders saved model prices in natural descending model-name order', () => {
     const prices = Object.fromEntries([
@@ -256,6 +296,28 @@ describe('PriceSettingsCard', () => {
       { kind: 'error', message: 'Unable to sync model prices: connection reset' },
     ]);
     expect(source).toContain('notifyPricingSyncUnexpectedError(error, t, onNotice)');
+  });
+
+  it('shows the concrete backend reason in the top notice when Models.dev prices cannot be applied', () => {
+    const notices: Array<{ kind: string; message: string }> = [];
+    const result = {
+      successModels: [],
+      failures: [
+        { model: 'gpt-4o', message: 'combined pricing rule multiplier is not finite' },
+        { model: 'gpt-4o-mini', message: 'combined pricing rule multiplier is not finite' },
+      ],
+    };
+
+    notifyPricingSyncFailures(
+      result,
+      (key) => (key === 'usage_stats.model_price_sync_apply_partial' ? 'Applied 0, failed 2' : key),
+      (kind, message) => notices.push({ kind, message }),
+    );
+
+    expect(notices).toEqual([{
+      kind: 'error',
+      message: 'Applied 0, failed 2: combined pricing rule multiplier is not finite',
+    }]);
   });
 
   it('opens edit without showing a top notice before the user saves', () => {

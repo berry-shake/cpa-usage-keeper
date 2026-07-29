@@ -29,7 +29,8 @@ func TestBuildUsageOverviewRealtimeWithFilterRequiresValidTTFTAndLatencyForBothD
 	realtime, err := repository.BuildUsageOverviewRealtimeWithFilter(db, repodto.UsageQueryFilter{
 		RealtimeWindow:  "15m",
 		RealtimeEndTime: &now,
-	})
+	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewRealtimeWithFilter returned error: %v", err)
 	}
@@ -73,9 +74,9 @@ func TestBuildUsageOverviewRealtimeExcludesPrewarmFromResponseDistributions(t *t
 					t.Fatalf("NewUsageRecentEventCache returned error: %v", cacheErr)
 				}
 				t.Cleanup(cache.Close)
-				realtime, err = repository.BuildUsageOverviewRealtimeWithFilterAndRecentCache(db, filter, cache)
+				realtime, err = repository.BuildUsageOverviewRealtimeWithFilterAndRecentCache(db, filter, cache, emptyPricingResolverForTest())
 			} else {
-				realtime, err = repository.BuildUsageOverviewRealtimeWithFilter(db, filter)
+				realtime, err = repository.BuildUsageOverviewRealtimeWithFilter(db, filter, emptyPricingResolverForTest())
 			}
 			if err != nil {
 				t.Fatalf("build realtime overview: %v", err)

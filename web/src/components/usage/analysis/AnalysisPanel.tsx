@@ -967,12 +967,12 @@ function CostHeaderHint({ show, label }: { show: boolean; label: string }) {
 
 function AnalysisCardHeader({ title, subtitle, showPricingHint, hint }: { title: string; subtitle: string; showPricingHint: boolean; hint: string }) {
   return (
-    <div className={styles.cardHeader}>
-      <div className={styles.cardTitleLine}>
-        <h2>{title}</h2>
+    <div className={`${styles.cardHeader} keeper-card-heading`}>
+      <div className={`${styles.cardTitleLine} keeper-card-title-track`}>
+        <h2 className="keeper-card-title">{title}</h2>
         <CostHeaderHint show={showPricingHint} label={hint} />
       </div>
-      <p>{subtitle}</p>
+      <p className="keeper-card-subtitle">{subtitle}</p>
     </div>
   );
 }
@@ -1085,7 +1085,7 @@ function TokenUsageChart({ rows, loading, isDark, isMobile }: { rows: ChartRow[]
   const legendItems = useMemo(() => buildTokenLegendItems(tokenLabels, averageTokenTotal, chartTheme.averageLine), [averageTokenTotal, chartTheme.averageLine, tokenLabels]);
   const hasUnavailableCost = rows.some((row) => !row.costAvailable);
   return (
-    <section className={`${styles.analysisCard} ${styles.tokenUsageCard}`}>
+    <section className={`${styles.analysisCard} ${styles.tokenUsageCard} keeper-card-surface`}>
       <AnalysisCardHeader
         title={t('usage_stats.analysis_token_usage_title')}
         subtitle={t('usage_stats.analysis_token_usage_subtitle')}
@@ -1275,7 +1275,7 @@ function LatencyDiagnosticsCard({ diagnostics, loading, error, isDark, isMobile 
   const unsupported = safeDiagnostics.supported === false;
   const hasData = toNumber(safeDiagnostics.total_points) > 0 && safeDiagnostics.points.length > 0;
   return (
-    <section className={`${styles.analysisCard} ${styles.latencyDiagnosticsCard}`}>
+    <section className={`${styles.analysisCard} ${styles.latencyDiagnosticsCard} keeper-card-surface`}>
       <AnalysisCardHeader
         title={t('usage_stats.analysis_latency_title')}
         subtitle={t('usage_stats.analysis_latency_subtitle')}
@@ -1352,7 +1352,7 @@ function CompositionPanel({ tabs, loading, isDark, windowMinutes }: { tabs: Comp
   const chartOptions = useMemo(() => buildCompositionChartOptions(chartTheme, tooltipLabels), [chartTheme, tooltipLabels]);
   const hasUnavailableCost = items.some((item) => item.cost_available === false);
   return (
-    <section className={`${styles.analysisCard} ${styles.compositionCard}`}>
+    <section className={`${styles.analysisCard} ${styles.compositionCard} keeper-card-surface`}>
       <AnalysisCardHeader
         title={t('usage_stats.analysis_composition_title')}
         subtitle={t('usage_stats.analysis_composition_subtitle')}
@@ -1480,7 +1480,7 @@ function CostBreakdownCard({ breakdown, rows, loading }: { breakdown: AnalysisCo
   };
   const hideCostTooltip = () => setCostTooltip(null);
   return (
-    <section className={`${styles.analysisCard} ${styles.costBreakdownCard}`}>
+    <section className={`${styles.analysisCard} ${styles.costBreakdownCard} keeper-card-surface`}>
       <AnalysisCardHeader
         title={t('usage_stats.analysis_cost_breakdown_title')}
         subtitle={t('usage_stats.analysis_cost_breakdown_subtitle')}
@@ -1840,7 +1840,7 @@ function ModelEfficiencyCard({ rows, loading, isDark, isMobile }: { rows: Analys
   const hasPricedData = pricedRows.length > 0;
   const hasUnavailableCost = rows.some((row) => row.cost_available === false);
   return (
-    <section className={`${styles.analysisCard} ${styles.modelEfficiencyCard}`}>
+    <section className={`${styles.analysisCard} ${styles.modelEfficiencyCard} keeper-card-surface`}>
       <AnalysisCardHeader
         title={t('usage_stats.analysis_model_efficiency_title')}
         subtitle={t('usage_stats.analysis_model_efficiency_subtitle')}
@@ -1936,7 +1936,7 @@ function Heatmap({ cells, apiKeys, apiKeyLabels, models, loading, isDark }: { ce
   };
   const hideTooltip = () => setTooltip(null);
   return (
-    <section className={`${styles.analysisCard} ${styles.heatmapCard} ${isDark ? styles.heatmapCardDark : styles.heatmapCardLight}`}>
+    <section className={`${styles.analysisCard} ${styles.heatmapCard} keeper-card-surface ${isDark ? styles.heatmapCardDark : styles.heatmapCardLight}`}>
       <AnalysisCardHeader
         title={t('usage_stats.analysis_heatmap_title')}
         subtitle={t('usage_stats.analysis_heatmap_subtitle')}

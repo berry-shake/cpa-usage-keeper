@@ -11,7 +11,7 @@ import (
 
 func TestLongCustomOverviewWithoutFactsReturnsEmptySeries(t *testing.T) {
 	db := openUsageServiceTestDatabase(t)
-	provider := service.NewUsageService(db)
+	provider := service.NewUsageService(db, emptyPricingCatalogForTest())
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)
 	end := start.AddDate(0, 0, 31)
 

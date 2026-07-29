@@ -747,6 +747,28 @@ export interface PricingSyncResponse {
   pricing: PricingEntry[]
 }
 
+export interface PricingRule {
+  key: string
+  value: string
+  multiplier: number
+}
+
+export interface ReplacePricingRuleInput {
+  key: string
+  value: string
+  multiplier?: number
+}
+
+export interface PricingRulesResponse {
+  model: string
+  rules: PricingRule[]
+}
+
+export interface ReplacePricingRulesRequest {
+  model: string
+  rules: ReplacePricingRuleInput[]
+}
+
 export interface PricingSyncMatch {
   model: string
   matched_model: string

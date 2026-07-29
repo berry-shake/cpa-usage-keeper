@@ -42,6 +42,12 @@ type RecentUsageEvent struct {
 	ModelAlias string
 	// AuthIndex 用于关联 usage_identities，找不到身份时才使用 fallback。
 	AuthIndex string
+	// 以下五个字段补齐 hourly/daily 已有的规则维度，并继续通过字符串池复用。
+	ServiceTier         string
+	ResponseServiceTier string
+	ReasoningEffort     string
+	Endpoint            string
+	ExecutorType        string
 	// IdentityFallbackKind 记录 fallback 应落到 Auth File 还是 AI Provider。
 	IdentityFallbackKind RecentUsageIdentityKind
 	// IdentityFallbackLabel 保存 source/provider 展示名，避免 realtime 再读 usage_events。
@@ -111,6 +117,11 @@ type recentUsageEventLoadRow struct {
 	Timestamp           time.Time
 	Source              string
 	AuthIndex           string
+	ServiceTier         string
+	ResponseServiceTier string
+	ReasoningEffort     string
+	Endpoint            string
+	ExecutorType        string
 	Failed              bool
 	Generate            bool
 	LatencyMS           int64
@@ -324,6 +335,11 @@ func (c *UsageRecentEventCache) appendEvents(events []entities.UsageEvent) {
 			Timestamp:           event.Timestamp,
 			Source:              event.Source,
 			AuthIndex:           event.AuthIndex,
+			ServiceTier:         event.ServiceTier,
+			ResponseServiceTier: event.ResponseServiceTier,
+			ReasoningEffort:     event.ReasoningEffort,
+			Endpoint:            event.Endpoint,
+			ExecutorType:        event.ExecutorType,
 			Failed:              event.Failed,
 			Generate:            usageEventGenerateEnabled(event.Generate),
 			LatencyMS:           event.LatencyMS,
@@ -436,7 +452,7 @@ func loadUsageRecentEventCacheRows(db *gorm.DB, start time.Time) ([]recentUsageE
 	var rows []recentUsageEventLoadRow
 	// 只 select 最近缓存和 realtime 必需字段，避免大字段进入 70 分钟内存窗口。
 	if err := db.Model(&entities.UsageEvent{}).
-		Select("api_group_key, provider, auth_type, model, model_alias, timestamp, source, auth_index, failed, generate, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens").
+		Select("api_group_key, provider, auth_type, model, model_alias, timestamp, source, auth_index, service_tier, response_service_tier, reasoning_effort, endpoint, executor_type, failed, generate, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens").
 		// 启动加载只取 retention 左边界之后的数据。
 		Where("timestamp >= ?", timeutil.FormatStorageTime(start)).
 		// 按时间排序让后续剪枝和调试输出更直观。
@@ -467,6 +483,11 @@ func (c *UsageRecentEventCache) recentEventFromRowLocked(row recentUsageEventLoa
 		Model:                 c.pool.intern(strings.TrimSpace(row.Model)),
 		ModelAlias:            c.pool.intern(strings.TrimSpace(row.ModelAlias)),
 		AuthIndex:             c.pool.intern(strings.TrimSpace(row.AuthIndex)),
+		ServiceTier:           c.pool.intern(strings.TrimSpace(row.ServiceTier)),
+		ResponseServiceTier:   c.pool.intern(strings.TrimSpace(row.ResponseServiceTier)),
+		ReasoningEffort:       c.pool.intern(strings.TrimSpace(row.ReasoningEffort)),
+		Endpoint:              c.pool.intern(strings.TrimSpace(row.Endpoint)),
+		ExecutorType:          c.pool.intern(strings.TrimSpace(row.ExecutorType)),
 		IdentityFallbackKind:  identityKind,
 		IdentityFallbackLabel: c.pool.intern(fallbackLabel),
 		Failed:                row.Failed,
@@ -511,6 +532,11 @@ func (c *UsageRecentEventCache) releaseEventStringsLocked(event RecentUsageEvent
 	c.pool.release(event.Model)
 	c.pool.release(event.ModelAlias)
 	c.pool.release(event.AuthIndex)
+	c.pool.release(event.ServiceTier)
+	c.pool.release(event.ResponseServiceTier)
+	c.pool.release(event.ReasoningEffort)
+	c.pool.release(event.Endpoint)
+	c.pool.release(event.ExecutorType)
 	c.pool.release(event.IdentityFallbackLabel)
 }
 
@@ -612,6 +638,11 @@ func recentUsageEventToEntity(event RecentUsageEvent) entities.UsageEvent {
 		Model:               event.Model,
 		Timestamp:           event.Timestamp,
 		AuthIndex:           event.AuthIndex,
+		ServiceTier:         event.ServiceTier,
+		ResponseServiceTier: event.ResponseServiceTier,
+		ReasoningEffort:     event.ReasoningEffort,
+		Endpoint:            event.Endpoint,
+		ExecutorType:        event.ExecutorType,
 		Failed:              event.Failed,
 		Generate:            &generate,
 		LatencyMS:           event.LatencyMS,

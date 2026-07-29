@@ -165,7 +165,7 @@ func TestUsageActivityRangesReturnBackendSelectedFixedTierWindows(t *testing.T) 
 		t.Fatalf("resolve sql database: %v", err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	router := NewRouter(nil, nil, service.NewUsageService(db), nil, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, service.NewUsageService(db, emptyPricingCatalogForTest()), nil, AuthConfig{}, nil, "")
 	testCases := []struct {
 		name         string
 		query        string

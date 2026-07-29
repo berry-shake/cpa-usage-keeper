@@ -12,6 +12,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/timeutil"
 	"gorm.io/gorm"
@@ -32,7 +33,16 @@ func buildUsageOverviewFromEventsForTest(events []entities.UsageEvent, filter dt
 	windowMinutes := computeWindowMinutes(filter)
 	bucketByDay := shouldBucketUsageOverviewByDay(filter, windowMinutes)
 	overview := newUsageOverviewRecord(windowMinutes)
-	costResolver := &UsageCostResolver{pricesByModel: pricingByModel}
+	configs := make([]pricing.ModelConfig, 0, len(pricingByModel))
+	for model, setting := range pricingByModel {
+		setting.Model = model
+		configs = append(configs, pricing.ModelConfig{Pricing: setting})
+	}
+	snapshot, err := pricing.CompileSnapshot(configs)
+	if err != nil {
+		panic(err)
+	}
+	costResolver := pricing.NewCatalog(snapshot).NewResolver()
 	for _, event := range events {
 		applyUsageEventToOverviewSnapshot(overview.Usage, event)
 		applyUsageEventToOverview(overview, event, bucketByDay, costResolver)
@@ -75,7 +85,7 @@ func TestBuildUsageOverviewWithFilterRequiresResolvedTimeRange(t *testing.T) {
 	}
 	closeTestDatabase(t, db)
 
-	if _, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "4h"}); err == nil || !strings.Contains(err.Error(), "requires start_time and end_time") {
+	if _, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "4h"}, emptyPricingResolverForTest()); err == nil || !strings.Contains(err.Error(), "requires start_time and end_time") {
 		t.Fatalf("expected missing resolved time range error, got %v", err)
 	}
 }
@@ -98,12 +108,12 @@ func TestBuildUsageOverviewWithFilterDoesNotRunAggregationCatchup(t *testing.T) 
 
 	start := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC)
-	if _, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end}); err != nil {
+	if _, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end}, emptyPricingResolverForTest()); err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
 
 	var checkpointCount int64
-	if err := db.Model(&entities.UsageOverviewAggregationCheckpoint{}).Count(&checkpointCount).Error; err != nil {
+	if err := db.Model(&entities.UsageAggregationCheckpoint{}).Where("name = ?", entities.UsageAggregationCheckpointOverview).Count(&checkpointCount).Error; err != nil {
 		t.Fatalf("count overview checkpoints returned error: %v", err)
 	}
 	if checkpointCount != 0 {
@@ -137,7 +147,7 @@ func TestLoadUsageOverviewRawEventWindowsUsesSeparateRangeQueries(t *testing.T) 
 		{start: start, end: fullStart},
 		{start: fullEnd, end: end, includeEnd: true},
 	}
-	if _, err := loadUsageOverviewRawEventWindowsWithFilter(db, filter, windows, nil); err != nil {
+	if _, err := loadUsageOverviewRawEventWindowsWithFilter(db, filter, windows, nil, 0); err != nil {
 		t.Fatalf("loadUsageOverviewRawEventWindowsWithFilter returned error: %v", err)
 	}
 	if len(sqls) != 2 {
@@ -167,7 +177,7 @@ func TestBuildUsageOverviewWithFilterIncludesEndBoundaryWhenNoFullHour(t *testin
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -218,7 +228,7 @@ func TestBuildUsageOverviewWithFilterKeepsRawEventQueriesAtBoundaries(t *testing
 			}
 			t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
 
-			if _, err := BuildUsageOverviewWithFilter(db, filter); err != nil {
+			if _, err := BuildUsageOverviewWithFilter(db, filter, emptyPricingResolverForTest()); err != nil {
 				t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 			}
 			if len(ranges) == 0 {
@@ -315,7 +325,7 @@ func TestBuildUsageOverviewWithFilterUsesStatsForFullHoursAndRawEventsForBoundar
 		t.Fatalf("delete full-hour usage_events returned error: %v", err)
 	}
 
-	overview, err := BuildUsageOverviewWithFilter(db, filter)
+	overview, err := BuildUsageOverviewWithFilter(db, filter, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -364,7 +374,7 @@ func TestBuildUsageOverviewWithFilterKeepsHourlyBucketsWhenShortWindowContainsCo
 	}
 	oracle := buildUsageOverviewFromEventsForTest(oracleEvents, filter, pricingByModel)
 
-	overview, err := BuildUsageOverviewWithFilter(db, filter)
+	overview, err := BuildUsageOverviewWithFilter(db, filter, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -426,7 +436,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyStatsForCompleteDays(t *testing.T)
 	if err := db.Where("timestamp >= ? AND timestamp < ?", timeutil.FormatStorageTime(fullDayStart), timeutil.FormatStorageTime(fullDayEnd)).Delete(&entities.UsageEvent{}).Error; err != nil {
 		t.Fatalf("delete full-day usage_events returned error: %v", err)
 	}
-	overview, err := BuildUsageOverviewWithFilter(db, filter)
+	overview, err := BuildUsageOverviewWithFilter(db, filter, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -486,7 +496,7 @@ func TestBuildUsageOverviewWithFilterComputesSummaryAndSeries(t *testing.T) {
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 17, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "7d", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "7d", StartTime: &start, EndTime: &end}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -632,7 +642,8 @@ func TestBuildUsageOverviewWithFilterKeepsCalendarRangeWindowMinutes(t *testing.
 				StartTime: &tc.start,
 				EndTime:   &tc.end,
 				QueryNow:  &queryNow,
-			}, nil)
+			}, nil, emptyPricingResolverForTest())
+
 			if err != nil {
 				t.Fatalf("BuildUsageOverviewWithFilterAndRecentCache returned error: %v", err)
 			}
@@ -737,7 +748,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostForPartialPricing(t *
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -786,7 +797,7 @@ func TestBuildUsageOverviewWithFilterReturnsAvailableCostWhenUnpricedEventsHaveN
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -820,7 +831,7 @@ func TestBuildUsageOverviewWithFilterReturnsUnavailableCostWithoutPricing(t *tes
 
 	start := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "24h", StartTime: &start, EndTime: &end}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -887,7 +898,7 @@ func TestBuildUsageOverviewWithFilterUsesExactPresetWindowMinutes(t *testing.T) 
 				t.Fatalf("AggregateUsageOverviewStats returned error: %v", err)
 			}
 
-			overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: tc.rangeName, StartTime: &tc.start, EndTime: &tc.end})
+			overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: tc.rangeName, StartTime: &tc.start, EndTime: &tc.end}, pricingResolverFromDBForTest(t, db))
 			if err != nil {
 				t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 			}
@@ -910,7 +921,7 @@ func TestBuildUsageOverviewWithFilterUsesExactPresetWindowMinutes(t *testing.T) 
 				t.Fatalf("unexpected request series for %s: %+v", tc.rangeName, overview.Series.Requests)
 			}
 		})
-		for _, table := range []string{"usage_events", "usage_overview_hourly_stats", "usage_overview_daily_stats", "usage_activity_stats", "usage_overview_aggregation_checkpoints", "usage_activity_aggregation_checkpoints"} {
+		for _, table := range []string{"usage_events", "usage_overview_hourly_stats", "usage_overview_daily_stats", "usage_activity_stats", "usage_latency_stats", "usage_aggregation_checkpoints"} {
 			if err := db.Exec("DELETE FROM " + table).Error; err != nil {
 				t.Fatalf("DELETE %s returned error: %v", table, err)
 			}
@@ -1002,7 +1013,7 @@ func TestBuildUsageOverviewWithFilterUsesDailyBucketsForLongCustomRanges(t *test
 
 	start := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 26, 23, 59, 59, 999000000, time.UTC)
-	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end})
+	overview, err := BuildUsageOverviewWithFilter(db, dto.UsageQueryFilter{Range: "custom", StartTime: &start, EndTime: &end}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter returned error: %v", err)
 	}
@@ -1066,7 +1077,8 @@ func TestBuildUsageOverviewRealtimeWithFilterBuildsRealtimeBlockFromRecentCache(
 		APIGroupKey:     "provider-a",
 		RealtimeWindow:  "15m",
 		RealtimeEndTime: &now,
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewRealtimeWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1209,7 +1221,8 @@ func TestBuildUsageOverviewRealtimeWithFilterCapsResponseDistributionParticles(t
 		APIGroupKey:     "provider-a",
 		RealtimeWindow:  "60m",
 		RealtimeEndTime: &now,
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewRealtimeWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1334,7 +1347,8 @@ func TestBuildUsageOverviewRealtimeWithFilterUsesWarmupEventsForSlidingBucketsOn
 	realtime, err := BuildUsageOverviewRealtimeWithFilterAndRecentCache(db, dto.UsageQueryFilter{
 		RealtimeWindow:  "15m",
 		RealtimeEndTime: &now,
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewRealtimeWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1386,7 +1400,8 @@ func TestBuildUsageOverviewRealtimeWithFilterUsesRecentCacheFallbackLabels(t *te
 		APIGroupKey:     "provider-a",
 		RealtimeWindow:  "15m",
 		RealtimeEndTime: &now,
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewRealtimeWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1431,7 +1446,8 @@ func TestBuildUsageOverviewRealtimeWithFilterFallsBackToDBWhenRecentCacheIsNil(t
 	realtime, err := BuildUsageOverviewRealtimeWithFilterAndRecentCache(db, dto.UsageQueryFilter{
 		RealtimeWindow:  "15m",
 		RealtimeEndTime: &now,
-	}, nil)
+	}, nil, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewRealtimeWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1492,7 +1508,7 @@ func TestBuildUsageOverviewWithFilterUsesRecentCacheForCoveredBoundaryEvents(t *
 		QueryNow:    &now,
 		APIGroupKey: "provider-a",
 	}
-	overview, err := BuildUsageOverviewWithFilterAndRecentCache(db, filter, cache)
+	overview, err := BuildUsageOverviewWithFilterAndRecentCache(db, filter, cache, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1537,7 +1553,8 @@ func TestBuildUsageOverviewWithFilterUsesOpenEndedRecentCacheForCurrentRightBoun
 		EndTime:     &end,
 		QueryNow:    &now,
 		APIGroupKey: "provider-a",
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1589,7 +1606,8 @@ func TestBuildUsageOverviewWithFilterUsesBoundedRecentCacheForHistoricalCustomRi
 		EndTime:     &end,
 		QueryNow:    &now,
 		APIGroupKey: "provider-a",
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1632,7 +1650,8 @@ func TestBuildUsageOverviewWithFilterClampsFutureCustomEndToQueryNow(t *testing.
 		EndTime:     &end,
 		QueryNow:    &queryNow,
 		APIGroupKey: "provider-a",
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilterAndRecentCache returned error: %v", err)
 	}
@@ -1665,7 +1684,8 @@ func TestBuildUsageOverviewWithFilterDoesNotFallbackToDBForEmptyCoveredRightBoun
 		EndTime:     &end,
 		QueryNow:    &now,
 		APIGroupKey: "provider-a",
-	}, cache)
+	}, cache, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("expected covered empty right boundary cache not to query DB, got %v", err)
 	}

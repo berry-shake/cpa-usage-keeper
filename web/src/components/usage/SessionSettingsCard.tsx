@@ -55,12 +55,8 @@ export function SessionSettingsCard({ sessions, loading = false, revokingId = nu
 
   return (
     <Card
-      title={
-        <div className={styles.sectionTitleBlock}>
-          <h3 className={styles.sectionTitle}>{t('usage_stats.session_settings_title')}</h3>
-          <p className={styles.sectionSubtitle}>{t('usage_stats.session_settings_subtitle')}</p>
-        </div>
-      }
+      title={t('usage_stats.session_settings_title')}
+      subtitle={t('usage_stats.session_settings_subtitle')}
       className={`${styles.detailsFixedCard} ${styles.sessionSettingsCard}`}
     >
       <div ref={sessionSettingsBodyRef} className={styles.sessionSettingsBody}>
@@ -103,7 +99,8 @@ export function SessionSettingsCard({ sessions, loading = false, revokingId = nu
                         type="button"
                         variant="danger"
                         size="sm"
-                        className={`${styles.usagePillAction} ${styles.settingsCompactAction} ${styles.usagePillActionDanger} ${styles.sessionSettingsLogoutButton}`.trim()}
+                        appearance="action"
+                        className={styles.sessionSettingsLogoutButton}
                         onClick={() => setConfirmingSession(session)}
                         disabled={disabled}
                         aria-label={t('usage_stats.session_settings_logout_one')}
@@ -126,10 +123,10 @@ export function SessionSettingsCard({ sessions, loading = false, revokingId = nu
           closeDisabled={confirmingRevoking}
           footer={
             <>
-              <Button type="button" variant="secondary" onClick={() => setConfirmingSession(null)} disabled={confirmingRevoking}>
+              <Button type="button" variant="secondary" appearance="action" onClick={() => setConfirmingSession(null)} disabled={confirmingRevoking}>
                 {t('common.cancel')}
               </Button>
-              <Button type="button" variant="danger" onClick={() => void handleConfirmLogout()} loading={confirmingRevoking}>
+              <Button type="button" variant="danger" appearance="action" onClick={() => void handleConfirmLogout()} loading={confirmingRevoking}>
                 {confirmingRevoking ? t('usage_stats.session_settings_logging_out') : t(confirmationKeys.confirmKey)}
               </Button>
             </>

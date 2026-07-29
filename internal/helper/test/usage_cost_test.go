@@ -97,6 +97,34 @@ func TestCalculateUsageTokenCostBreakdownAppliesMultiplierToEverySegment(t *test
 	assertCostClose(t, breakdown.TotalCostUSD, (1.0*10+0.2*1+0.1*12.5+0.5*20)*1.5)
 }
 
+func TestCalculateUsageTokenCostBreakdownReturnsFiniteZeroBeforeOverflowWhenMultiplierIsZero(t *testing.T) {
+	zero := 0.0
+	breakdown := helper.CalculateUsageTokenCostBreakdown(helper.UsageTokenCostInput{
+		InputTokens:         math.MaxInt64,
+		OutputTokens:        math.MaxInt64,
+		CacheReadTokens:     math.MaxInt64,
+		CacheCreationTokens: math.MaxInt64,
+	}, entities.ModelPriceSetting{
+		PromptPricePer1M:     math.MaxFloat64,
+		CompletionPricePer1M: math.MaxFloat64,
+		CacheReadPricePer1M:  math.MaxFloat64,
+		CacheWritePricePer1M: math.MaxFloat64,
+		PriceMultiplier:      &zero,
+	})
+
+	for name, cost := range map[string]float64{
+		"uncached input": breakdown.UncachedInputCostUSD,
+		"cache read":     breakdown.CacheReadCostUSD,
+		"cache write":    breakdown.CacheWriteCostUSD,
+		"output":         breakdown.OutputCostUSD,
+		"total":          breakdown.TotalCostUSD,
+	} {
+		if cost != 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+			t.Fatalf("%s cost = %v, want finite zero", name, cost)
+		}
+	}
+}
+
 func TestCalculateUsageTokenCostBreakdownClampsNegativeTokens(t *testing.T) {
 	pricing := entities.ModelPriceSetting{
 		PromptPricePer1M:     3,
@@ -130,4 +158,28 @@ func TestUsageTokenInputRequiresPricingUsesCanonicalTokenFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestScaleUsageTokenCostBreakdownScalesEveryCostField(t *testing.T) {
+	breakdown := helper.UsageTokenCostBreakdown{
+		UncachedInputCostUSD: 1,
+		CacheReadCostUSD:     2,
+		CacheWriteCostUSD:    3,
+		OutputCostUSD:        4,
+		TotalCostUSD:         10,
+	}
+
+	scaled := helper.ScaleUsageTokenCostBreakdown(breakdown, 1.25)
+	assertCostClose(t, scaled.UncachedInputCostUSD, 1.25)
+	assertCostClose(t, scaled.CacheReadCostUSD, 2.5)
+	assertCostClose(t, scaled.CacheWriteCostUSD, 3.75)
+	assertCostClose(t, scaled.OutputCostUSD, 5)
+	assertCostClose(t, scaled.TotalCostUSD, 12.5)
+
+	zero := helper.ScaleUsageTokenCostBreakdown(breakdown, 0)
+	assertCostClose(t, zero.UncachedInputCostUSD, 0)
+	assertCostClose(t, zero.CacheReadCostUSD, 0)
+	assertCostClose(t, zero.CacheWriteCostUSD, 0)
+	assertCostClose(t, zero.OutputCostUSD, 0)
+	assertCostClose(t, zero.TotalCostUSD, 0)
 }

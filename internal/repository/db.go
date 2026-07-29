@@ -11,6 +11,7 @@ import (
 
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/logging"
 	"cpa-usage-keeper/internal/repository/migration"
 	"cpa-usage-keeper/internal/timeutil"
 
@@ -24,8 +25,8 @@ const (
 	sqliteWriterMaxOpenConnections = 1
 	// sqliteWriterMaxIdleConnections 常驻唯一 writer，避免写事务反复创建物理连接。
 	sqliteWriterMaxIdleConnections = 1
-	// sqliteReaderMaxOpenConnections 把页面查询和导出共享的 reader 并发总量限制为四。
-	sqliteReaderMaxOpenConnections = 4
+	// sqliteReaderMaxOpenConnections 允许突发统计查询按需扩到八条独立只读连接。
+	sqliteReaderMaxOpenConnections = 8
 	// sqliteReaderMaxIdleConnections 允许已经按需建立的四条 reader 在空闲后继续复用。
 	sqliteReaderMaxIdleConnections = 4
 )
@@ -88,7 +89,10 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 	// SQLite DSN 统一补齐 busy_timeout/foreign_keys，调用方只需要传项目配置里的路径。
 	dsn := sqliteDSN(cfg.SQLitePath)
 	// GORM 自动时间也先落到项目 TZ，再由 storageTime serializer 输出统一字符串。
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) }})
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger:  logging.NewGORMLogger(),
+		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database %s: %w", filepath.Clean(cfg.SQLitePath), err)
 	}
@@ -162,7 +166,10 @@ func OpenReadDatabase(cfg config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("build sqlite read database DSN %s: %w", filepath.Clean(cfg.SQLitePath), err)
 	}
 	// reader 使用与 writer 相同的项目时区 NowFunc，保证查询参数和 GORM 时间处理语义一致。
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) }})
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger:  logging.NewGORMLogger(),
+		NowFunc: func() time.Time { return timeutil.NormalizeStorageTime(time.Now()) },
+	})
 	// 只读文件或 DSN 无法打开时直接终止 App 初始化，禁止静默退回 writer 连接。
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite read database %s: %w", filepath.Clean(cfg.SQLitePath), err)
@@ -181,7 +188,7 @@ func OpenReadDatabase(cfg config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure sqlite read database: %w", err)
 	}
-	// 最多四条 reader 同时执行纯查询；第五个读取由 database/sql 排队等待空闲连接。
+	// 最多八条 reader 同时执行纯查询；第九个读取由 database/sql 排队等待空闲连接。
 	sqlDB.SetMaxOpenConns(sqliteReaderMaxOpenConnections)
 	// 峰值结束后允许保留最多四条已建立 reader；SetMaxIdleConns 本身不会主动预热连接。
 	sqlDB.SetMaxIdleConns(sqliteReaderMaxIdleConnections)
@@ -353,7 +360,7 @@ type CleanupStorageOptions struct {
 
 const usageEventsRetentionDays = 90
 
-// CleanupStorage 是每日维护任务的统一仓储清理入口：先清 Redis inbox，按配置清过期 usage_events，再清 Activity 短粒度统计，最后执行 VACUUM。
+// CleanupStorage 是每日维护任务的统一仓储清理入口：先清 inbox/raw events，再清 Activity 与 Latency 限期统计，最后执行 VACUUM。
 // VACUUM 必须在删除完成后单独执行，任何一步失败都会停止后续步骤并把已完成部分的结果返回给上层日志。
 func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions) (dto.StorageCleanupResult, error) {
 	opts := CleanupStorageOptions{}
@@ -373,6 +380,10 @@ func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions
 	}
 	// Activity 的 short/medium/long 分别按自身 retention 清理，daily 永久保留。
 	if err := CleanupUsageActivityStats(db, now); err != nil {
+		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+	}
+	// Latency 小时保留 3 天、自然日保留 365 天，并复用本轮最后一次 VACUUM。
+	if err := CleanupUsageLatencyStats(db, now); err != nil {
 		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
 	}
 	// SQLite 删除不会立即缩小文件，维护窗口最后统一 VACUUM。
@@ -420,7 +431,7 @@ func cleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
 }
 
 func usageEventAggregationsCaughtUp(tx *gorm.DB) (bool, error) {
-	// 当前最大 event ID 是 Overview 与 Activity 两个全局 checkpoint 的共同安全目标。
+	// 当前最大 event ID 是三个全局 checkpoint 和每行 Identity cursor 的共同安全目标。
 	var maxEventID int64
 	if err := tx.Model(&entities.UsageEvent{}).Select("COALESCE(MAX(id), 0)").Scan(&maxEventID).Error; err != nil {
 		return false, fmt.Errorf("load usage event cleanup watermark: %w", err)
@@ -430,46 +441,34 @@ func usageEventAggregationsCaughtUp(tx *gorm.DB) (bool, error) {
 		return true, nil
 	}
 
-	// Overview 必须已经把当前最大 ID 提交到旧 hourly/daily 表。
-	var overviewReady int64
-	if err := tx.Model(&entities.UsageOverviewAggregationCheckpoint{}).
-		Where("name = ? AND last_aggregated_usage_event_id >= ?", usageOverviewAggregationCheckpointName, maxEventID).
-		Count(&overviewReady).Error; err != nil {
-		return false, fmt.Errorf("check overview cleanup watermark: %w", err)
+	// 同一事务内一次读取三行，避免分别查询时观察到不一致水位或继续依赖已删除旧表。
+	var checkpoints []entities.UsageAggregationCheckpoint
+	names := []entities.UsageAggregationCheckpointName{
+		entities.UsageAggregationCheckpointOverview,
+		entities.UsageAggregationCheckpointActivity,
+		entities.UsageAggregationCheckpointLatency,
 	}
-	// checkpoint 不存在或落后时禁止删除任何 raw event。
-	if overviewReady == 0 {
-		return false, nil
+	if err := tx.Where("name IN ?", names).Find(&checkpoints).Error; err != nil {
+		return false, fmt.Errorf("load usage aggregation cleanup watermarks: %w", err)
 	}
-
-	// Activity 必须已经把当前最大 ID 提交到四层新统计和独立 checkpoint。
-	var activityReady int64
-	if err := tx.Model(&entities.UsageActivityAggregationCheckpoint{}).
-		Where("name = ? AND last_aggregated_usage_event_id >= ?", usageActivityAggregationCheckpointName, maxEventID).
-		Count(&activityReady).Error; err != nil {
-		return false, fmt.Errorf("check activity cleanup watermark: %w", err)
+	// 缺行、重复异常或任一 cursor 落后都必须保守保留 raw events。
+	ready := make(map[entities.UsageAggregationCheckpointName]bool, len(names))
+	for _, checkpoint := range checkpoints {
+		ready[checkpoint.Name] = checkpoint.LastAggregatedUsageEventID >= maxEventID
 	}
-	// Activity 落后时必须保留 raw event，尤其不能丢失永久 daily 累计。
-	if activityReady == 0 {
-		return false, nil
+	for _, name := range names {
+		if !ready[name] {
+			return false, nil
+		}
 	}
 
-	// Identity 没有全局 checkpoint，因此直接判断是否存在超过每行 cursor 的匹配事件。
-	// 这里使用标准 SQL EXISTS 与 JOIN 一次匹配不同 Identity cursor，不依赖 SQLite 专属语法。
-	var pendingIdentity int
-	if err := tx.Raw(`SELECT EXISTS (
-		SELECT 1
-		FROM usage_identities AS identity
-		JOIN usage_events AS event
-		  ON event.id > identity.last_aggregated_usage_event_id
-		 AND event.auth_index = identity.identity
-		 AND ((identity.auth_type = ? AND event.auth_type = ?) OR (identity.auth_type = ? AND event.auth_type = ?))
-		LIMIT 1
-	)`, entities.UsageIdentityAuthTypeAuthFile, "oauth", entities.UsageIdentityAuthTypeAIProvider, "apikey").Scan(&pendingIdentity).Error; err != nil {
+	// Identity 没有全局 checkpoint；复用兼容追赶的同一 EXISTS 判断，但保持在当前 cleanup 事务内读取。
+	pendingIdentity, err := hasPendingUsageIdentityAggregation(tx)
+	if err != nil {
 		return false, fmt.Errorf("check identity cleanup watermark: %w", err)
 	}
 	// 任一 active/deleted identity 仍有 delta 时都禁止删除；不存在匹配 delta 才算安全。
-	return pendingIdentity == 0, nil
+	return !pendingIdentity, nil
 }
 
 func usageEventsCleanupCutoff(now time.Time) time.Time {

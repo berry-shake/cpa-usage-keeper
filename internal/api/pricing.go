@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/gin-gonic/gin"
@@ -38,6 +40,10 @@ type pricingSyncResponse struct {
 	UnmatchedModels []string               `json:"unmatched_models"`
 	SyncedAt        string                 `json:"synced_at"`
 	Pricing         []pricingEntryResponse `json:"pricing"`
+}
+
+type updatePricingBatchRequest struct {
+	Pricing []updatePricingRequest `json:"pricing"`
 }
 
 type updatePricingRequest struct {
@@ -156,8 +162,14 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 		c.JSON(http.StatusOK, preview)
 	})
 
+	registerPricingRuleRoutes(router, pricingProvider)
+
 	router.PUT("/pricing", func(c *gin.Context) {
 		updatePricing(c, pricingProvider, "")
+	})
+
+	router.PUT("/pricing/batch", func(c *gin.Context) {
+		updatePricingBatch(c, pricingProvider)
 	})
 
 	router.PUT("/pricing/:model", func(c *gin.Context) {
@@ -184,6 +196,51 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 		}
 		c.Status(http.StatusNoContent)
 	})
+}
+
+func updatePricingBatch(c *gin.Context, pricingProvider service.PricingProvider) {
+	if pricingProvider == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "pricing provider is not configured"})
+		return
+	}
+
+	var request updatePricingBatchRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	inputs := make([]servicedto.UpdatePricingInput, len(request.Pricing))
+	for index := range request.Pricing {
+		entry := request.Pricing[index]
+		if len(entry.LegacyCachePricePer1M) > 0 || len(entry.LegacyCacheCreationPricePer1M) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "legacy cache price fields are not supported"})
+			return
+		}
+		inputs[index] = servicedto.UpdatePricingInput{
+			Model:                strings.TrimSpace(entry.Model),
+			PricingStyle:         entry.PricingStyle,
+			PromptPricePer1M:     entry.PromptPricePer1M,
+			CompletionPricePer1M: entry.CompletionPricePer1M,
+			CacheReadPricePer1M:  entry.CacheReadPricePer1M,
+			CacheWritePricePer1M: entry.CacheWritePricePer1M,
+			PriceMultiplier:      entry.PriceMultiplier,
+		}
+	}
+
+	settings, err := pricingProvider.UpdatePricingBatch(c.Request.Context(), inputs)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidPricingInput) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		writeInternalError(c, "batch update pricing failed", err)
+		return
+	}
+	response := make([]pricingEntryResponse, len(settings))
+	for index := range settings {
+		response[index] = pricingEntryResponseFromSetting(settings[index])
+	}
+	c.JSON(http.StatusOK, pricingListResponse{Pricing: response})
 }
 
 func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, pathModel string) {
@@ -221,7 +278,7 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 		PriceMultiplier:      request.PriceMultiplier,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "non-negative") || strings.Contains(err.Error(), "pricing_style") || strings.Contains(err.Error(), "price_multiplier") {
+		if errors.Is(err, service.ErrInvalidPricingInput) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -229,7 +286,11 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 		return
 	}
 
-	c.JSON(http.StatusOK, pricingEntryResponse{
+	c.JSON(http.StatusOK, pricingEntryResponseFromSetting(*setting))
+}
+
+func pricingEntryResponseFromSetting(setting entities.ModelPriceSetting) pricingEntryResponse {
+	return pricingEntryResponse{
 		Model:                setting.Model,
 		PricingStyle:         setting.PricingStyle,
 		PromptPricePer1M:     setting.PromptPricePer1M,
@@ -237,7 +298,7 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 		CacheReadPricePer1M:  setting.CacheReadPricePer1M,
 		CacheWritePricePer1M: setting.CacheWritePricePer1M,
 		PriceMultiplier:      modelPriceMultiplierValue(setting.PriceMultiplier),
-	})
+	}
 }
 
 func modelPriceMultiplierValue(multiplier *float64) float64 {

@@ -452,6 +452,7 @@ describe('UsagePage active tab auto-refresh guard', () => {
   it('keeps Overview auto-refresh enabled and does not auto-refresh other tabs', () => {
     expect(shouldAutoRefreshUsageTab({ activeTab: 'overview', eventsPage: 2 })).toBe(true);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'analysis', eventsPage: 1 })).toBe(false);
+    expect(shouldAutoRefreshUsageTab({ activeTab: 'ranking', eventsPage: 1 })).toBe(false);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'settings', eventsPage: 1 })).toBe(false);
   });
 });
@@ -533,7 +534,7 @@ describe('UsagePage request event preferences', () => {
     });
 
     expect(preferences).toEqual({
-      version: 5,
+      version: 7,
       pageSize: 500,
       filters: {
         model: 'claude-opus',
@@ -541,6 +542,7 @@ describe('UsagePage request event preferences', () => {
         result: 'failed',
       },
       visibleColumnIds: ['model', 'timestamp', 'total_cost'],
+      columnOrder: REQUEST_EVENT_COLUMN_IDS,
     });
   });
 
@@ -613,7 +615,7 @@ describe('UsagePage request event preferences', () => {
     const hiddenSpeedColumnIds = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'speed');
 
     saveRequestEventsPreferences({
-      version: 5,
+      version: 7,
       pageSize: 100,
       filters: {
         model: '__all__',
@@ -621,11 +623,12 @@ describe('UsagePage request event preferences', () => {
         result: '__all__',
       },
       visibleColumnIds: hiddenSpeedColumnIds,
+      columnOrder: [...REQUEST_EVENT_COLUMN_IDS],
     }, storage);
 
     const stored = JSON.parse(storage.value(REQUEST_EVENTS_PREFERENCES_STORAGE_KEY) ?? '');
     expect(stored).toEqual({
-      version: 5,
+      version: 7,
       pageSize: 100,
       filters: {
         model: '__all__',
@@ -633,6 +636,7 @@ describe('UsagePage request event preferences', () => {
         result: '__all__',
       },
       visibleColumnIds: hiddenSpeedColumnIds,
+      columnOrder: REQUEST_EVENT_COLUMN_IDS,
     });
     expect(loadRequestEventsPreferences(storage).visibleColumnIds).toEqual(hiddenSpeedColumnIds);
   });
@@ -642,7 +646,7 @@ describe('UsagePage request event preferences', () => {
     const hiddenSpeedModeColumnIds = REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'service_tier');
 
     saveRequestEventsPreferences({
-      version: 5,
+      version: 7,
       pageSize: 100,
       filters: {
         model: '__all__',
@@ -650,6 +654,7 @@ describe('UsagePage request event preferences', () => {
         result: '__all__',
       },
       visibleColumnIds: hiddenSpeedModeColumnIds,
+      columnOrder: [...REQUEST_EVENT_COLUMN_IDS],
     }, storage);
 
     expect(loadRequestEventsPreferences(storage).visibleColumnIds).toEqual(hiddenSpeedModeColumnIds);
@@ -675,7 +680,7 @@ describe('UsagePage request event preferences', () => {
 
     expect(storage.setItem).toHaveBeenCalledTimes(1);
     expect(JSON.parse(storage.value(REQUEST_EVENTS_PREFERENCES_STORAGE_KEY) ?? '')).toEqual({
-      version: 5,
+      version: 7,
       pageSize: 50,
       filters: {
         model: 'gpt-4.1',
@@ -683,6 +688,7 @@ describe('UsagePage request event preferences', () => {
         result: 'success',
       },
       visibleColumnIds: ['timestamp', 'model'],
+      columnOrder: REQUEST_EVENT_COLUMN_IDS,
     });
   });
 });
@@ -690,6 +696,7 @@ describe('UsagePage request event preferences', () => {
 for (const [tab, expected] of [
   ['overview', true],
   ['analysis', true],
+  ['ranking', false],
   ['events', true],
   ['auth-files', true],
   ['ai-provider', true],
@@ -703,6 +710,7 @@ for (const [tab, expected] of [
 for (const [tab, expected] of [
   ['overview', true],
   ['analysis', true],
+  ['ranking', false],
   ['events', true],
   ['auth-files', true],
   ['ai-provider', true],
@@ -720,17 +728,28 @@ describe('UsagePage tab labels', () => {
     expect(labels).toEqual([
       'translated:usage_stats.tab_overview',
       'translated:usage_stats.tab_analysis',
+      'translated:usage_stats.tab_ranking',
       'translated:usage_stats.tab_events',
       'translated:usage_stats.tab_auth_files',
       'translated:usage_stats.tab_ai_provider',
       'translated:usage_stats.tab_settings',
     ]);
   });
+
+  it('omits Ranking from the CPAMC embedded navigation', () => {
+    const values = getUsageTabOptions((key) => key, { includeRanking: false }).map((option) => option.value);
+
+    expect(values).toEqual(['overview', 'analysis', 'events', 'auth-files', 'ai-provider', 'settings']);
+  });
 });
 
 describe('UsagePage credentials tab migration', () => {
   it('migrates the legacy Credentials tab value to Auth Files', () => {
     expect(normalizeUsageTabValue('credentials')).toBe('auth-files');
+  });
+
+  it('keeps Ranking as an independent persisted tab value', () => {
+    expect(normalizeUsageTabValue('ranking')).toBe('ranking');
   });
 
   it('keeps each credential section scoped to its own tab', () => {

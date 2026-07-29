@@ -46,32 +46,57 @@ describe('usePricingData auth callback stability', () => {
     expect(deleteModelPriceBlock).toContain('delete nextPrices[model];');
     expect(deleteModelPriceBlock).toContain('throw error;');
   });
+
+  it('binds pricing rule reads and writes to a model-specific latest request', () => {
+    expect(source).toContain('const pricingRulesReadRequestRef = useRef')
+    expect(source).toContain('const pricingRulesWriteRequestRef = useRef')
+    expect(source).toContain('pricingRulesReadRequestRef.current?.controller.abort()')
+    expect(source).toContain('pricingRulesWriteRequestRef.current?.controller.abort()')
+    expect(source).toContain('await fetchPricingRules(model, controller.signal)')
+    expect(source).toContain('await replacePricingRules({ model, rules }, controller.signal)')
+    expect(source).toContain('response.model !== model')
+    expect(source).toContain('return null')
+  })
 });
 
 describe('persistModelPriceEntries', () => {
-  it('reports partial failures without blocking other pricing updates', async () => {
-    const calls: string[] = [];
+	it('persists every model through one atomic batch update', async () => {
+	let calls = 0;
 
-    const result = await persistModelPriceEntries({
-      'gpt-4o': openAIPrice,
-      'gpt-4o-mini': openAIPrice,
-      'claude-sonnet': openAIPrice,
-    }, {
-      updatePricingEntry: async (model, pricing) => {
-        calls.push(model);
-        expect(pricing.price_multiplier).toBe(1);
-        if (model === 'gpt-4o-mini') {
-          throw new Error('network unavailable');
-        }
-        return { model, ...pricing };
-      },
-    });
+	const result = await persistModelPriceEntries({
+	  'gpt-4o': openAIPrice,
+	  'gpt-4o-mini': openAIPrice,
+	  'claude-sonnet': openAIPrice,
+	}, {
+	  updatePricingEntries: async (pricing) => {
+		calls += 1;
+		expect(pricing.map((entry) => entry.model)).toEqual(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet']);
+		expect(pricing.every((entry) => entry.price_multiplier === 1)).toBe(true);
+		return { pricing };
+	  },
+	});
 
-    expect(calls).toEqual(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet']);
-    expect(result.successModels).toEqual(['gpt-4o', 'claude-sonnet']);
-    expect(result.failures).toEqual([
-      { model: 'gpt-4o-mini', message: 'network unavailable', error: expect.any(Error) },
-    ]);
+	expect(calls).toBe(1);
+	expect(result.successModels).toEqual(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet']);
+	expect(result.failures).toEqual([]);
+	});
+
+	it('reports one atomic batch failure against every submitted model', async () => {
+	const error = new Error('network unavailable');
+	const result = await persistModelPriceEntries({
+	  'gpt-4o': openAIPrice,
+	  'gpt-4o-mini': openAIPrice,
+	}, {
+	  updatePricingEntries: async () => { throw error; },
+	});
+
+	expect(result).toEqual({
+	  successModels: [],
+	  failures: [
+		{ model: 'gpt-4o', message: 'network unavailable', error },
+		{ model: 'gpt-4o-mini', message: 'network unavailable', error },
+	  ],
+	});
   });
 
   it('preserves an explicit zero price multiplier in update payloads', async () => {
@@ -83,9 +108,9 @@ describe('persistModelPriceEntries', () => {
         multiplier: 0,
       },
     }, {
-      updatePricingEntry: async (model, pricing) => {
-        payloads.push(pricing.price_multiplier);
-        return { model, ...pricing };
+	  updatePricingEntries: async (pricing) => {
+		payloads.push(pricing[0].price_multiplier);
+		return { pricing };
       },
     });
 
@@ -103,13 +128,13 @@ describe('persistModelPriceEntries', () => {
 				cacheWrite: 3.125,
 			},
 		}, {
-			updatePricingEntry: async (model, pricing) => {
-				payloads.push({
-					cacheRead: pricing.cache_read_price_per_1m,
-					cacheWrite: pricing.cache_write_price_per_1m,
-				});
-				return { model, ...pricing };
-			},
+		  updatePricingEntries: async (pricing) => {
+			payloads.push({
+			  cacheRead: pricing[0].cache_read_price_per_1m,
+			  cacheWrite: pricing[0].cache_write_price_per_1m,
+			});
+			return { pricing };
+		  },
 		});
 
 		expect(payloads).toEqual([{ cacheRead: 0.25, cacheWrite: 3.125 }]);

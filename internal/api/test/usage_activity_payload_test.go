@@ -51,7 +51,7 @@ func TestUsageActivityPayloadExposesCanonicalTokenMetricsWithoutCachedTokens(t *
 	}
 
 	// 执行真实路由，确保 repository、service 和 API 映射使用同一份 canonical 数据。
-	router := NewRouter(nil, nil, service.NewUsageService(db), nil, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, service.NewUsageService(db, emptyPricingCatalogForTest()), nil, AuthConfig{}, nil, "")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/usage/activity?range=24h", nil))
 	if response.Code != http.StatusOK {

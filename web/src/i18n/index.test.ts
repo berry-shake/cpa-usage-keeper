@@ -306,9 +306,12 @@ describe('i18n resources', () => {
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_quota_reset_failed')).toBe('重置限額失敗，請稍後重試。')
   })
 
-  it('keeps the login product title aligned across languages', () => {
-    expect(i18n.getResourceBundle('en', 'translation').auth.login_title).toBe('CPA Usage Statistics Dashboard');
-    expect(i18n.getResourceBundle('zh', 'translation').auth.login_title).toBe('CPA 用量统计\n仪表盘');
-    expect(i18n.getResourceBundle('zh-TW', 'translation').auth.login_title).toBe('CPA 用量統計\n儀表板');
+  it('keeps the login product identity aligned across languages', () => {
+    expect(i18n.getResourceBundle('en', 'translation').auth.login_title).toBe('CPA USAGE KEEPER');
+    expect(i18n.getResourceBundle('en', 'translation').auth.login_subtitle).toBe('Every flow leaves a trace.');
+    expect(i18n.getResourceBundle('zh', 'translation').auth.login_title).toBe('CPA USAGE KEEPER');
+    expect(i18n.getResourceBundle('zh', 'translation').auth.login_subtitle).toBe('万千流转，皆有迹可循。');
+    expect(i18n.getResourceBundle('zh-TW', 'translation').auth.login_title).toBe('CPA USAGE KEEPER');
+    expect(i18n.getResourceBundle('zh-TW', 'translation').auth.login_subtitle).toBe('萬千流轉，皆有跡可循。');
   });
 });

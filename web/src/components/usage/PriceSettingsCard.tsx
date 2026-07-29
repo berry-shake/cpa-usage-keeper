@@ -10,11 +10,14 @@ import type { PricingSyncMeta } from '@/components/usage/hooks/usePricingData';
 import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment';
 import type {
   ModelPrice,
+  PricingRule,
   PricingSaveResult,
   PricingStyle,
   PricingSyncMatch,
   PricingSyncPreviewResponse,
+  ReplacePricingRuleInput,
 } from '@/lib/types';
+import { PriceRulesModal } from './pricing/PriceRulesModal';
 import styles from '@/pages/UsagePage.module.scss';
 
 const formatDisplayName = (value: string): string => {
@@ -50,11 +53,15 @@ export interface PriceSettingsCardProps {
   onSyncPrices?: () => Promise<void>;
   syncingPrices?: boolean;
   syncMeta?: PricingSyncMeta | null;
+  onRulesLoad?: (model: string) => Promise<PricingRule[] | null>;
+  onRulesSave?: (model: string, rules: ReplacePricingRuleInput[]) => Promise<PricingRule[] | null>;
   onSyncPricesChange?: (prices: Record<string, ModelPrice>) => Promise<PricingSaveResult>;
   onSyncPreview?: () => Promise<PricingSyncPreviewResponse>;
   onNotice?: (kind: 'success' | 'info' | 'error', message: string) => void;
   loading?: boolean;
 }
+
+const emptyPricingRules = async (): Promise<PricingRule[]> => [];
 
 export interface PricingSyncDraft {
   model: string;
@@ -80,15 +87,6 @@ export interface PricingDraftInput {
   cacheRead: string;
   cacheWrite: string;
   multiplier: string;
-}
-
-function PriceSettingsTitle({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className={styles.sectionTitleBlock}>
-      <h3 className={styles.sectionTitle}>{title}</h3>
-      <p className={styles.sectionSubtitle}>{subtitle}</p>
-    </div>
-  );
 }
 
 const parsePriceValue = (value: string): number | null => {
@@ -195,6 +193,23 @@ export const notifyPricingSyncUnexpectedError = (
   );
 };
 
+export const notifyPricingSyncFailures = (
+  result: PricingSaveResult,
+  t: (key: string, options?: { success: number; failed: number }) => string,
+  onNotice: PriceSettingsCardProps['onNotice'],
+) => {
+  if (result.failures.length === 0) return;
+  const summary = t('usage_stats.model_price_sync_apply_partial', {
+    success: result.successModels.length,
+    failed: result.failures.length,
+  });
+  const detail = result.failures.find((failure) => failure.message.trim())?.message.trim() ?? '';
+  onNotice?.(
+    result.successModels.length > 0 ? 'info' : 'error',
+    `${summary}${detail ? `: ${detail}` : ''}`,
+  );
+};
+
 export interface SelectedSyncPrices {
   selectedDrafts: PricingSyncDraft[];
   prices: Record<string, ModelPrice>;
@@ -293,6 +308,8 @@ export function PriceSettingsCard({
   onSyncPrices,
   syncingPrices = false,
   syncMeta = null,
+  onRulesLoad,
+  onRulesSave,
   onSyncPricesChange,
   onSyncPreview,
   onNotice,
@@ -322,6 +339,7 @@ export function PriceSettingsCard({
   const [editSaving, setEditSaving] = useState(false);
   const [deleteModel, setDeleteModel] = useState<string | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
+  const [rulesModel, setRulesModel] = useState<string | null>(null);
 
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -499,40 +517,16 @@ export function PriceSettingsCard({
 
     setSyncApplying(true);
     try {
-      if (!onSyncPricesChange) {
-        const result = await saveSyncDraftsWithSingleModelCallback(selectedDrafts, syncPrices, onPriceSave);
-        setSyncDrafts((current) => markPricingSyncFailures(current, result));
-        if (result.failures.length === 0) {
-          onNotice?.('success', t('usage_stats.model_price_sync_apply_success', { count: result.successModels.length }));
-          setSyncOpen(false);
-          return;
-        }
-
-        onNotice?.(
-          result.successModels.length > 0 ? 'info' : 'error',
-          t('usage_stats.model_price_sync_apply_partial', {
-            success: result.successModels.length,
-            failed: result.failures.length,
-          }),
-        );
-        return;
-      }
-
-      const result = await onSyncPricesChange(syncPrices);
+      const result = onSyncPricesChange
+        ? await onSyncPricesChange(syncPrices)
+        : await saveSyncDraftsWithSingleModelCallback(selectedDrafts, syncPrices, onPriceSave);
       setSyncDrafts((current) => markPricingSyncFailures(current, result));
       if (result.failures.length === 0) {
         onNotice?.('success', t('usage_stats.model_price_sync_apply_success', { count: result.successModels.length }));
         setSyncOpen(false);
         return;
       }
-
-      onNotice?.(
-        result.successModels.length > 0 ? 'info' : 'error',
-        t('usage_stats.model_price_sync_apply_partial', {
-          success: result.successModels.length,
-          failed: result.failures.length,
-        }),
-      );
+      notifyPricingSyncFailures(result, t, onNotice);
     } catch (error) {
       notifyPricingSyncUnexpectedError(error, t, onNotice);
     } finally {
@@ -578,16 +572,13 @@ export function PriceSettingsCard({
   return (
     <>
       <Card
-        title={
-          <PriceSettingsTitle
-            title={t('usage_stats.model_price_settings_title')}
-            subtitle={t('usage_stats.model_price_settings_subtitle')}
-          />
-        }
+        title={t('usage_stats.model_price_settings_title')}
+        subtitle={t('usage_stats.model_price_settings_subtitle')}
         extra={onSyncPrices ? (
           <Button
             variant="secondary"
             size="sm"
+            appearance="action"
             loading={syncingPrices}
             disabled={syncingPrices || loading || modelNames.length === 0}
             onClick={() => void onSyncPrices()}
@@ -612,7 +603,7 @@ export function PriceSettingsCard({
                   </div>
                   <Button
                     variant="secondary"
-                    className={styles.usagePillAction}
+                    appearance="action"
                     onClick={() => void handleOpenSyncPreview()}
                     loading={syncLoading}
                   >
@@ -705,7 +696,7 @@ export function PriceSettingsCard({
                       className={styles.usagePillControl}
                     />
                   </div>
-                  <Button variant="primary" className={`${styles.usagePillAction} ${styles.priceFormAction}`} onClick={() => void handleSavePrice()} disabled={!selectedModel || priceSaving} loading={priceSaving}>
+                  <Button variant="primary" appearance="action" className={styles.priceFormAction} onClick={() => void handleSavePrice()} disabled={!selectedModel || priceSaving} loading={priceSaving}>
                     {t('common.save')}
                   </Button>
                 </div>
@@ -741,10 +732,13 @@ export function PriceSettingsCard({
                           </div>
                         </div>
                         <div className={styles.priceActions}>
-                          <Button variant="secondary" size="sm" className={styles.usagePillAction} onClick={() => handleOpenEdit(model)}>
+                          <Button variant="secondary" size="sm" appearance="action" onClick={() => setRulesModel(model)}>
+                            {t('usage_stats.model_price_rules')}
+                          </Button>
+                          <Button variant="secondary" size="sm" appearance="action" onClick={() => handleOpenEdit(model)}>
                             {t('common.edit')}
                           </Button>
-                          <Button variant="danger" size="sm" className={`${styles.usagePillAction} ${styles.usagePillActionDanger}`} onClick={() => setDeleteModel(model)}>
+                          <Button variant="danger" size="sm" appearance="action" onClick={() => setDeleteModel(model)}>
                             {t('common.delete')}
                           </Button>
                         </div>
@@ -760,6 +754,15 @@ export function PriceSettingsCard({
         </div>
       </Card>
 
+      <PriceRulesModal
+        open={rulesModel !== null}
+        model={rulesModel ?? ''}
+        onClose={() => setRulesModel(null)}
+        loadRules={onRulesLoad ?? emptyPricingRules}
+        saveRules={onRulesSave ?? emptyPricingRules}
+        onNotice={onNotice}
+      />
+
       {/* 编辑弹窗不作为价格卡片内容参与布局，只负责编辑当前模型价格。 */}
       <Modal
         open={editModel !== null}
@@ -768,10 +771,10 @@ export function PriceSettingsCard({
         closeDisabled={editSaving}
         footer={
           <div className={styles.priceActions}>
-            <Button variant="secondary" className={styles.usagePillAction} onClick={closeEditModal} disabled={editSaving}>
+            <Button variant="secondary" appearance="action" onClick={closeEditModal} disabled={editSaving}>
               {t('common.cancel')}
             </Button>
-            <Button variant="primary" className={styles.usagePillAction} onClick={() => void handleSaveEdit()} loading={editSaving}>
+            <Button variant="primary" appearance="action" onClick={() => void handleSaveEdit()} loading={editSaving}>
               {t('common.save')}
             </Button>
           </div>
@@ -860,10 +863,10 @@ export function PriceSettingsCard({
         closeDisabled={deleteSaving}
         footer={
           <div className={styles.priceActions}>
-            <Button variant="secondary" className={styles.usagePillAction} onClick={closeDeleteModal} disabled={deleteSaving}>
+            <Button variant="secondary" appearance="action" onClick={closeDeleteModal} disabled={deleteSaving}>
               {t('common.cancel')}
             </Button>
-            <Button variant="danger" className={`${styles.usagePillAction} ${styles.usagePillActionDanger}`} onClick={() => void confirmDeleteModel()} loading={deleteSaving}>
+            <Button variant="danger" appearance="action" onClick={() => void confirmDeleteModel()} loading={deleteSaving}>
               {t('usage_stats.model_price_delete_confirm_action')}
             </Button>
           </div>
@@ -888,7 +891,7 @@ export function PriceSettingsCard({
           <div className={styles.priceActions}>
             <Button
               variant="secondary"
-              className={styles.usagePillAction}
+              appearance="action"
               onClick={() => setSyncOpen(false)}
               disabled={syncApplying}
             >
@@ -896,7 +899,7 @@ export function PriceSettingsCard({
             </Button>
             <Button
               variant="primary"
-              className={styles.usagePillAction}
+              appearance="action"
               onClick={() => void handleApplySyncDrafts()}
               loading={syncApplying}
               disabled={selectedSyncCount === 0}
@@ -926,7 +929,7 @@ export function PriceSettingsCard({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className={styles.usagePillAction}
+                  appearance="action"
                   onClick={() => handleSetAllSyncDrafts(true)}
                   disabled={syncApplying}
                 >
@@ -935,7 +938,7 @@ export function PriceSettingsCard({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className={styles.usagePillAction}
+                  appearance="action"
                   onClick={() => handleSetAllSyncDrafts(false)}
                   disabled={syncApplying}
                 >

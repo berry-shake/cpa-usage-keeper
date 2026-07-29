@@ -10,6 +10,7 @@ import (
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/helper"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository"
 	repodto "cpa-usage-keeper/internal/repository/dto"
 	"gorm.io/gorm"
@@ -186,7 +187,7 @@ func TestPricingServiceSyncRemotePricingUpsertsMatchedUsedModels(t *testing.T) {
 		t.Fatalf("insert usage event: %v", err)
 	}
 
-	service := NewPricingService(db).(*pricingService)
+	service := newRemoteSyncPricingService(t, db)
 	service.remotePricesFetcher = stubRemotePricesFetcher{
 		result: &RemoteModelPricesResult{
 			Prices: map[string]RemoteModelPrice{
@@ -227,6 +228,13 @@ func TestPricingServiceSyncRemotePricingUpsertsMatchedUsedModels(t *testing.T) {
 	if settings[0].PriceMultiplier == nil || *settings[0].PriceMultiplier != 1 {
 		t.Fatalf("newly synced model must default multiplier to 1, got %+v", settings[0].PriceMultiplier)
 	}
+	listed, err := service.ListPricing(context.Background())
+	if err != nil {
+		t.Fatalf("list published pricing: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Model != "claude-sonnet" || listed[0].CompletionPricePer1M != 15 {
+		t.Fatalf("remote sync must publish the refreshed pricing catalog, got %+v", listed)
+	}
 }
 
 func TestPricingServiceSyncRemotePricingRefreshesInactiveModelsWithExistingPriceRows(t *testing.T) {
@@ -246,7 +254,7 @@ func TestPricingServiceSyncRemotePricingRefreshesInactiveModelsWithExistingPrice
 		t.Fatalf("seed legacy price setting: %v", err)
 	}
 
-	service := NewPricingService(db).(*pricingService)
+	service := newRemoteSyncPricingService(t, db)
 	service.remotePricesFetcher = stubRemotePricesFetcher{
 		result: &RemoteModelPricesResult{
 			Prices: map[string]RemoteModelPrice{
@@ -289,7 +297,7 @@ func TestPricingServiceSyncRemotePricingPersistsClaudeStyleAndCacheCreation(t *t
 		t.Fatalf("insert usage event: %v", err)
 	}
 
-	service := NewPricingService(db).(*pricingService)
+	service := newRemoteSyncPricingService(t, db)
 	service.remotePricesFetcher = stubRemotePricesFetcher{
 		result: &RemoteModelPricesResult{
 			Prices: map[string]RemoteModelPrice{
@@ -343,7 +351,7 @@ func TestPricingServiceSyncRemotePricingPreservesOpenAICacheWriteAndMultiplier(t
 		t.Fatalf("seed OpenAI price setting: %v", err)
 	}
 
-	service := NewPricingService(db).(*pricingService)
+	service := newRemoteSyncPricingService(t, db)
 	service.remotePricesFetcher = stubRemotePricesFetcher{
 		result: &RemoteModelPricesResult{
 			Prices: map[string]RemoteModelPrice{
@@ -382,19 +390,15 @@ func TestPricingServiceSyncRemotePricingPreservesOpenAICacheWriteAndMultiplier(t
 		t.Fatalf("expected multiplier %v to be preserved, got %+v", multiplier, saved.PriceMultiplier)
 	}
 
-	resolver, err := repository.NewUsageCostResolver(context.Background(), db)
-	if err != nil {
-		t.Fatalf("build usage cost resolver: %v", err)
-	}
-	cost := resolver.Calculate(repository.UsageCostSubject{
-		Model: "gpt-5.6-terra",
-		Tokens: helper.UsageTokenCostInput{
+	cost := service.catalog.NewResolver().Calculate(pricing.NewCostSubject(
+		pricing.UsageDimensions{Model: "gpt-5.6-terra"},
+		helper.UsageTokenCostInput{
 			InputTokens:         1_000_000,
 			OutputTokens:        500_000,
 			CacheReadTokens:     200_000,
 			CacheCreationTokens: 100_000,
 		},
-	})
+	))
 	want := (0.7*2.5 + 0.2*0.25 + 0.1*3.125 + 0.5*15) * multiplier
 	if !cost.Available || math.Abs(cost.Cost.TotalCostUSD-want) > 1e-9 {
 		t.Fatalf("unexpected OpenAI synced cost: got %+v want %v", cost, want)
@@ -414,7 +418,7 @@ func TestPricingServiceSyncRemotePricingPreservesZeroMultiplier(t *testing.T) {
 		t.Fatalf("seed zero-multiplier price setting: %v", err)
 	}
 
-	service := NewPricingService(db).(*pricingService)
+	service := newRemoteSyncPricingService(t, db)
 	service.remotePricesFetcher = stubRemotePricesFetcher{
 		result: &RemoteModelPricesResult{
 			Prices: map[string]RemoteModelPrice{
@@ -462,4 +466,13 @@ func openRemoteSyncTestDatabase(t *testing.T) *gorm.DB {
 	}
 	closeTestDatabase(t, db)
 	return db
+}
+
+func newRemoteSyncPricingService(t *testing.T, db *gorm.DB) *pricingService {
+	t.Helper()
+	snapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
+	if err != nil {
+		t.Fatalf("load pricing snapshot: %v", err)
+	}
+	return NewPricingService(db, pricing.NewCatalog(snapshot)).(*pricingService)
 }

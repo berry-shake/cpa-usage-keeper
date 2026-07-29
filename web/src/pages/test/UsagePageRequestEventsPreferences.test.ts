@@ -37,27 +37,60 @@ const MERGED_V6_FULL_COLUMNS = REQUEST_EVENT_COLUMN_IDS.flatMap((columnId) => (
 ));
 
 describe('UsagePage request event cache column preferences', () => {
-  it('upgrades a v3 full selection to all v5 columns including cache write', () => {
+  it('keeps a complete custom order independently from hidden columns', () => {
+    const columnOrder = [
+      'total_cost',
+      'model',
+      ...REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'total_cost' && columnId !== 'model'),
+    ];
+    const preferences = normalizeRequestEventsPreferences({
+      version: 7,
+      pageSize: 100,
+      visibleColumnIds: ['timestamp', 'model'],
+      columnOrder,
+    });
+
+    expect(preferences.version).toBe(7);
+    expect(preferences.visibleColumnIds).toEqual(['timestamp', 'model']);
+    expect(preferences.columnOrder).toEqual(columnOrder);
+  });
+
+  it('keeps a custom prefix and appends columns missing from the saved order', () => {
+    const preferences = normalizeRequestEventsPreferences({
+      version: 7,
+      pageSize: 100,
+      visibleColumnIds: ['timestamp'],
+      columnOrder: ['total_cost', 'timestamp', 'total_cost', 'not-a-column'],
+    });
+
+    expect(preferences.columnOrder).toEqual([
+      'total_cost',
+      'timestamp',
+      ...REQUEST_EVENT_COLUMN_IDS.filter((columnId) => columnId !== 'total_cost' && columnId !== 'timestamp'),
+    ]);
+  });
+
+  it('upgrades a v3 full selection to all current columns including cache write', () => {
     const preferences = normalizeRequestEventsPreferences({
       version: 3,
       pageSize: 100,
       visibleColumnIds: LEGACY_V3_FULL_COLUMNS,
     });
 
-    expect(preferences.version).toBe(5);
+    expect(preferences.version).toBe(7);
     expect(preferences.visibleColumnIds).toEqual(REQUEST_EVENT_COLUMN_IDS);
     expect(preferences.visibleColumnIds).toContain('cache_read_tokens');
     expect(preferences.visibleColumnIds).toContain('cache_creation_tokens');
   });
 
-  it('normalizes a merged v6 full selection back to the combined v5 column', () => {
+  it('normalizes a merged v6 full selection back to the combined current column', () => {
     const preferences = normalizeRequestEventsPreferences({
       version: 6,
       pageSize: 100,
       visibleColumnIds: MERGED_V6_FULL_COLUMNS,
     });
 
-    expect(preferences.version).toBe(5);
+    expect(preferences.version).toBe(7);
     expect(preferences.visibleColumnIds).toEqual(REQUEST_EVENT_COLUMN_IDS);
     expect(preferences.visibleColumnIds).not.toContain('response_service_tier' as never);
   });

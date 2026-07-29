@@ -26,8 +26,12 @@ func UsageTokenInputRequiresPricing(input UsageTokenCostInput) bool {
 // CalculateUsageTokenCostBreakdown 按普通输入、缓存读取、缓存写入和输出四段独立计价。
 func CalculateUsageTokenCostBreakdown(input UsageTokenCostInput, pricing entities.ModelPriceSetting) UsageTokenCostBreakdown {
 	input = clampUsageTokenCostInput(input)
+	multiplier := modelPriceMultiplier(pricing)
+	if multiplier == 0 {
+		return UsageTokenCostBreakdown{}
+	}
 	breakdown := calculateUsageTokenCostBreakdown(input, pricing)
-	return scaleUsageTokenCostBreakdown(breakdown, modelPriceMultiplier(pricing))
+	return ScaleUsageTokenCostBreakdown(breakdown, multiplier)
 }
 
 func calculateUsageTokenCostBreakdown(input UsageTokenCostInput, pricing entities.ModelPriceSetting) UsageTokenCostBreakdown {
@@ -60,7 +64,8 @@ func modelPriceMultiplier(pricing entities.ModelPriceSetting) float64 {
 	return *pricing.PriceMultiplier
 }
 
-func scaleUsageTokenCostBreakdown(breakdown UsageTokenCostBreakdown, multiplier float64) UsageTokenCostBreakdown {
+// ScaleUsageTokenCostBreakdown 对已经算出的全部成本段应用同一个通用标量。
+func ScaleUsageTokenCostBreakdown(breakdown UsageTokenCostBreakdown, multiplier float64) UsageTokenCostBreakdown {
 	breakdown.UncachedInputCostUSD *= multiplier
 	breakdown.CacheReadCostUSD *= multiplier
 	breakdown.CacheWriteCostUSD *= multiplier

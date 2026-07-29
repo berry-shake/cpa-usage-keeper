@@ -117,7 +117,7 @@ func seedSyncCleanupUsageEventsAt(t *testing.T, db *gorm.DB, oldAt, recentAt tim
 }
 
 func catchUpSyncCleanupAggregations(t *testing.T, db *gorm.DB, now time.Time) {
-	// 准备：helper 只负责把 cleanup 依赖的两个全局 cursor 推进到当前最大 event ID。
+	// 准备：helper 把 cleanup 依赖的三个全局 cursor 推进到当前最大 event ID。
 	t.Helper()
 	// 执行：先保持旧 Overview 最终结果，再写入 Activity 独立结果。
 	if err := repository.AggregateUsageOverviewStats(context.Background(), db, now); err != nil {
@@ -125,6 +125,9 @@ func catchUpSyncCleanupAggregations(t *testing.T, db *gorm.DB, now time.Time) {
 	}
 	if err := repository.AggregateUsageActivityStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate activity before cleanup: %v", err)
+	}
+	if err := repository.AggregateUsageLatencyStats(context.Background(), db, now); err != nil {
+		t.Fatalf("aggregate latency before cleanup: %v", err)
 	}
 	// 断言由调用用例通过最终删除结果完成，helper 不额外读取数据库。
 }

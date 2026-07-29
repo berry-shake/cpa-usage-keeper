@@ -50,7 +50,7 @@ func TestIssue272RedisIngressKeepsRequestEventSpeedTPS(t *testing.T) {
 	}
 
 	// Request Events 使用归一化后的完整 Output=70 计算速度，不再扣除 Reasoning=50。
-	router := NewRouter(nil, nil, service.NewUsageService(db), nil, AuthConfig{}, nil, "")
+	router := NewRouter(nil, nil, service.NewUsageService(db, emptyPricingCatalogForTest()), nil, AuthConfig{}, nil, "")
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events?range=24h", nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)

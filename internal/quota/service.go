@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository"
 
 	"gorm.io/gorm"
@@ -18,13 +19,13 @@ import (
 type ServiceOptions struct {
 	RefreshWorkerLimit               int
 	UsageHeaderSnapshotFlushInterval time.Duration
+	PricingCatalog                   *pricing.Catalog
 }
-
-const usageHeaderSnapshotQueueSize = 100
 
 type Service struct {
 	db       *gorm.DB
 	registry ProviderRegistry
+	pricing  *pricing.Catalog
 
 	refreshMu    sync.Mutex
 	refreshTasks map[string]*RefreshTaskRecord
@@ -60,11 +61,12 @@ type Service struct {
 	// refreshWG 跟踪 service 派生的 dispatcher/worker/scheduler goroutine，App 关闭 DB 前会等待它们退出。
 	refreshWG sync.WaitGroup
 
-	usageHeaderCh            chan []UsageHeaderSnapshot
-	usageHeaderSlots         chan struct{}
+	usageHeaderPending       map[string]UsageHeaderSnapshot
+	usageHeaderWake          chan struct{}
 	usageHeaderStopCh        chan struct{}
 	usageHeaderDoneCh        chan struct{}
 	usageHeaderFlushInterval time.Duration
+	usageHeaderNewTimer      func(time.Duration) (<-chan time.Time, func())
 	usageHeaderMu            sync.Mutex
 	usageHeaderClosing       bool
 	usageHeaderCloseOnce     sync.Once
@@ -80,16 +82,16 @@ type CheckResponse struct {
 	RateLimitResetCreditsAvailableCount *int       `json:"rateLimitResetCreditsAvailableCount,omitempty"`
 }
 
-func NewService(db *gorm.DB, caller ManagementAPICaller) *Service {
-	return NewServiceWithOptions(db, caller, ServiceOptions{})
+func NewService(db *gorm.DB, caller ManagementAPICaller, pricingCatalog *pricing.Catalog) *Service {
+	return NewServiceWithOptions(db, caller, ServiceOptions{PricingCatalog: pricingCatalog})
 }
 
 func NewServiceWithOptions(db *gorm.DB, caller ManagementAPICaller, options ServiceOptions) *Service {
 	return NewServiceWithRegistryAndOptions(db, NewDefaultProviderRegistry(caller, DefaultProviderConfigs()), options)
 }
 
-func NewServiceWithRegistry(db *gorm.DB, registry ProviderRegistry) *Service {
-	return NewServiceWithRegistryAndOptions(db, registry, ServiceOptions{})
+func NewServiceWithRegistry(db *gorm.DB, registry ProviderRegistry, pricingCatalog *pricing.Catalog) *Service {
+	return NewServiceWithRegistryAndOptions(db, registry, ServiceOptions{PricingCatalog: pricingCatalog})
 }
 
 func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, options ServiceOptions) *Service {
@@ -105,9 +107,14 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 		usageHeaderFlushInterval = usageHeaderSnapshotFlushInterval
 	}
 	refreshContext, refreshCancel := context.WithCancel(context.Background())
+	pricingCatalog := options.PricingCatalog
+	if pricingCatalog == nil {
+		panic("pricing catalog is required")
+	}
 	service := &Service{
 		db:                         db,
 		registry:                   registry,
+		pricing:                    pricingCatalog,
 		refreshTasks:               make(map[string]*RefreshTaskRecord),
 		resetInFlight:              make(map[string]struct{}),
 		refreshWorkerTokens:        make(chan struct{}, workerLimit),
@@ -116,14 +123,12 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 		refreshContext:             refreshContext,
 		refreshCancel:              refreshCancel,
 		autoRefreshSettingsChanged: make(chan struct{}, 1),
-		usageHeaderCh:              make(chan []UsageHeaderSnapshot, usageHeaderSnapshotQueueSize),
-		usageHeaderSlots:           make(chan struct{}, usageHeaderSnapshotQueueSize),
+		usageHeaderPending:         make(map[string]UsageHeaderSnapshot, usageHeaderPendingIdentityLimit),
+		usageHeaderWake:            make(chan struct{}, 1),
 		usageHeaderStopCh:          make(chan struct{}),
 		usageHeaderDoneCh:          make(chan struct{}),
 		usageHeaderFlushInterval:   usageHeaderFlushInterval,
-	}
-	for i := 0; i < usageHeaderSnapshotQueueSize; i++ {
-		service.usageHeaderSlots <- struct{}{}
+		usageHeaderNewTimer:        newUsageHeaderTimer,
 	}
 	go service.runUsageHeaderSnapshotWorker()
 	return service

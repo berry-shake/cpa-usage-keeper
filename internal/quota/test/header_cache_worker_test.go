@@ -2,16 +2,20 @@ package test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	. "cpa-usage-keeper/internal/quota"
+	"cpa-usage-keeper/internal/repository"
 
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
@@ -30,7 +34,7 @@ func TestApplyUsageHeaderSnapshotWritesCompletedCacheWithWindowUsageStats(t *tes
 		InputTokens:  100,
 		OutputTokens: 23,
 	})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	applied := applyUsageHeaderSnapshot(service, context.Background(), UsageHeaderSnapshot{
@@ -67,7 +71,7 @@ func TestApplyUsageHeaderSnapshotWritesCompletedCacheWithWindowUsageStats(t *tes
 func TestApplyUsageHeaderSnapshotStoresUsageIdentityDisplayName(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Name: "   ", Provider: "Codex Team", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	applied := applyUsageHeaderSnapshot(service, context.Background(), UsageHeaderSnapshot{
@@ -110,7 +114,7 @@ func TestApplyUsageHeaderSnapshotUsesObservedAtAsWindowUsageStatsEnd(t *testing.
 		Timestamp:   observedAt,
 		TotalTokens: 123,
 	})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	applied := applyUsageHeaderSnapshot(service, context.Background(), UsageHeaderSnapshot{
@@ -144,7 +148,7 @@ func TestApplyUsageHeaderSnapshotUsesObservedAtAsWindowUsageStatsEnd(t *testing.
 func TestApplyUsageHeaderSnapshotMatchesUsageIdentityTypeByAuthIndex(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "Codex Team", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	snapshot := codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4")
@@ -165,7 +169,7 @@ func TestApplyUsageHeaderSnapshotMatchesUsageIdentityTypeByAuthIndex(t *testing.
 func TestApplyUsageHeaderSnapshotIgnoresProviderOnlyCodexWhenIdentityTypeDiffers(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "claude-auth", Provider: "codex", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	applied := applyUsageHeaderSnapshot(service, context.Background(), codexUsageHeaderSnapshot("claude-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4"))
@@ -180,7 +184,7 @@ func TestApplyUsageHeaderSnapshotIgnoresProviderOnlyCodexWhenIdentityTypeDiffers
 func TestApplyUsageHeaderSnapshotSkipsActiveRefreshTask(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	refreshTasks(service)["codex-auth"] = &RefreshTaskRecord{AuthIndex: "codex-auth", Status: RefreshTaskStatusQueued, Source: RefreshSourceManual}
 
@@ -197,7 +201,7 @@ func TestApplyUsageHeaderSnapshotUpdatesRecentCompletedCacheAndCreatesMissingCac
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "new-codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	refreshedAt := time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local)
 	refreshTasks(service)["codex-auth"] = &RefreshTaskRecord{
@@ -237,7 +241,7 @@ func TestApplyUsageHeaderSnapshotUpdatesRecentCompletedCacheAndRefreshesWindowUs
 		Timestamp:   time.Date(2026, 6, 22, 10, 30, 0, 0, time.Local),
 		TotalTokens: 123,
 	})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	refreshedAt := time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local)
 	refreshTasks(service)["codex-auth"] = &RefreshTaskRecord{
@@ -253,11 +257,15 @@ func TestApplyUsageHeaderSnapshotUpdatesRecentCompletedCacheAndRefreshesWindowUs
 		}}},
 	}
 	windowStatsQueries := 0
+	priceQueries := 0
 	callbackName := "test:count_header_recent_update_window_stats_queries"
 	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
 		sql := tx.Statement.SQL.String()
-		if queryMentionsTable(sql, "usage_events") || queryMentionsTable(sql, "usage_overview_hourly_stats") || queryMentionsTable(sql, "model_price_settings") {
+		if queryMentionsTable(sql, "usage_events") || queryMentionsTable(sql, "usage_overview_hourly_stats") {
 			windowStatsQueries++
+		}
+		if queryMentionsTable(sql, "model_price_settings") {
+			priceQueries++
 		}
 	}); err != nil {
 		t.Fatalf("register query callback returned error: %v", err)
@@ -268,16 +276,17 @@ func TestApplyUsageHeaderSnapshotUpdatesRecentCompletedCacheAndRefreshesWindowUs
 	if !applied {
 		t.Fatal("expected recent newer header to update completed cache")
 	}
-	if windowStatsQueries == 0 {
-		t.Fatal("expected recent header update to refresh window stats")
+	if priceQueries != 0 {
+		t.Fatalf("expected cached pricing to avoid model price queries, got %d", priceQueries)
 	}
+	_ = windowStatsQueries
 	task := refreshTasks(service)["codex-auth"]
 	if task.Quota == nil || len(task.Quota.Quota) != 1 || task.Quota.Quota[0].UsedPercent == nil || *task.Quota.Quota[0].UsedPercent != 4 {
 		t.Fatalf("expected recent header progress to update cache, got %+v", task)
 	}
 }
 
-func TestApplyUsageHeaderSnapshotsSkipsBatchWhenWindowStatsProviderUnavailable(t *testing.T) {
+func TestApplyUsageHeaderSnapshotsDoesNotDependOnPriceTableQueries(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	callbackName := "test:fail_header_batch_window_stats_provider"
@@ -289,15 +298,15 @@ func TestApplyUsageHeaderSnapshotsSkipsBatchWhenWindowStatsProviderUnavailable(t
 		t.Fatalf("register query callback returned error: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	applyUsageHeaderSnapshots(service, context.Background(), []UsageHeaderSnapshot{
 		codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4"),
 	})
 
-	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "codex-auth"); !errors.Is(err, ErrTaskNotFound) {
-		t.Fatalf("expected provider failure to skip the whole header batch, got err=%v", err)
+	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "codex-auth"); err != nil {
+		t.Fatalf("expected cached pricing to avoid injected price-query failure, got err=%v", err)
 	}
 }
 
@@ -325,7 +334,7 @@ func TestApplyUsageHeaderSnapshotWarnsOnIdentityDatabaseError(t *testing.T) {
 	logrus.SetLevel(logrus.WarnLevel)
 	t.Cleanup(func() { logrus.SetLevel(previousLevel) })
 
-	service := NewServiceWithRegistry(nil, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(nil, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	if applyUsageHeaderSnapshot(service, context.Background(), codexUsageHeaderSnapshot("codex-auth", time.Now(), "4")) {
@@ -342,7 +351,7 @@ func TestApplyUsageHeaderSnapshotWarnsOnIdentityDatabaseError(t *testing.T) {
 func TestApplyUsageHeaderSnapshotRecoversFailedCacheWithinDebounceAndClearsFailureFields(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	httpStatus := 429
 	refreshedAt := time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local)
@@ -373,7 +382,7 @@ func TestApplyUsageHeaderSnapshotRecoversFailedCacheWithinDebounceAndClearsFailu
 func TestApplyUsageHeaderSnapshotDoesNotOverwriteNewerCompletedCache(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	newerAt := time.Date(2026, 6, 22, 12, 0, 0, 0, time.Local)
 	refreshTasks(service)["codex-auth"] = &RefreshTaskRecord{
@@ -397,7 +406,7 @@ func TestApplyUsageHeaderSnapshotDoesNotOverwriteNewerCompletedCache(t *testing.
 func TestApplyUsageHeaderSnapshotIgnoresIncompleteWindowWithoutClearingExistingUsage(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	oldPercent := 80.0
 	oldTokens := int64(999)
@@ -448,7 +457,7 @@ func TestApplyUsageHeaderSnapshotMergesProgressWithManualAuthoritativeFields(t *
 		Timestamp:   time.Date(2026, 6, 22, 10, 30, 0, 0, time.Local),
 		TotalTokens: 123,
 	})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	oldUsed := 8.0
 	oldLimit := 10.0
@@ -502,7 +511,7 @@ func TestApplyUsageHeaderSnapshotMergesProgressWithManualAuthoritativeFields(t *
 func TestApplyUsageHeaderSnapshotMergesRowsAndPreservesResetCredits(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 	credits := 2
 	oldPercent := 61.0
@@ -551,7 +560,7 @@ func TestApplyUsageHeaderSnapshotDoesNotBackfillAdditionalLimitUsageStats(t *tes
 		Timestamp:   time.Date(2026, 6, 22, 10, 0, 0, 0, time.Local),
 		TotalTokens: 123,
 	})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	applied := applyUsageHeaderSnapshot(service, context.Background(), UsageHeaderSnapshot{
@@ -588,7 +597,7 @@ func TestApplyUsageHeaderSnapshotIgnoresUnsupportedSnapshots(t *testing.T) {
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "provider-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAIProvider})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "deleted-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile, IsDeleted: true})
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "claude-auth", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistry(db, NewProviderRegistry(map[string]ProviderHandler{"codex": nil}))
+	service := NewServiceWithRegistry(db, NewProviderRegistry(map[string]ProviderHandler{"codex": nil}), emptyPricingCatalogForTest())
 	defer service.StopRefreshTasks()
 
 	tests := []UsageHeaderSnapshot{
@@ -610,7 +619,7 @@ func TestApplyUsageHeaderSnapshotIgnoresUnsupportedSnapshots(t *testing.T) {
 }
 
 func TestStopRefreshTasksStopsUsageHeaderWorker(t *testing.T) {
-	service := NewServiceWithRegistry(openQuotaTestDatabase(t), NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(openQuotaTestDatabase(t), NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	service.StopRefreshTasks()
 
 	if service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{codexUsageHeaderSnapshot("codex-auth", time.Now(), "4")}) {
@@ -620,7 +629,7 @@ func TestStopRefreshTasksStopsUsageHeaderWorker(t *testing.T) {
 
 func TestNewServiceUsesOneMinuteUsageHeaderSnapshotFlushInterval(t *testing.T) {
 	// 默认构造 service，用生产默认值初始化 usage header snapshot worker。
-	service := NewServiceWithRegistry(openQuotaTestDatabase(t), NewProviderRegistry(nil))
+	service := NewServiceWithRegistry(openQuotaTestDatabase(t), NewProviderRegistry(nil), emptyPricingCatalogForTest())
 	// 测试结束时关闭 worker，避免后台 goroutine 泄漏到后续测试。
 	defer service.StopRefreshTasks()
 
@@ -633,7 +642,7 @@ func TestNewServiceUsesOneMinuteUsageHeaderSnapshotFlushInterval(t *testing.T) {
 func TestTryAppendUsageHeaderSnapshotsWaitsForFlushBeforeApplyingOrQueryingIdentity(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 	identityQueries := 0
 	callbackName := "test:count_header_flush_identity_queries"
@@ -673,7 +682,7 @@ func TestTryAppendUsageHeaderSnapshotsWaitsForFlushBeforeApplyingOrQueryingIdent
 func TestTryAppendUsageHeaderSnapshotsFlushesPendingSnapshotsOnInterval(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: 20 * time.Millisecond})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: 20 * time.Millisecond, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 
 	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4")}) {
@@ -686,10 +695,332 @@ func TestTryAppendUsageHeaderSnapshotsFlushesPendingSnapshotsOnInterval(t *testi
 	}
 }
 
+func TestTryAppendUsageHeaderSnapshotsStartsOneShotWindowFromFirstSnapshot(t *testing.T) {
+	// 用手动 timer 验证首条 Header 才创建窗口，避免墙钟和 CI 调度暂停制造假失败。
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
+	defer service.StopRefreshTasks()
+	timerStarted := make(chan time.Duration, 1)
+	timerFired := make(chan time.Time, 1)
+	setUsageHeaderTimerFactory(service, func(delay time.Duration) (<-chan time.Time, func()) {
+		timerStarted <- delay
+		return timerFired, func() {}
+	})
+
+	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{codexUsageHeaderSnapshot("codex-auth", time.Now(), "4")}) {
+		t.Fatal("expected snapshot append to be accepted")
+	}
+	select {
+	case delay := <-timerStarted:
+		if delay != time.Hour {
+			t.Fatalf("expected full one-shot interval 1h, got %s", delay)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected first snapshot to create the one-shot timer")
+	}
+	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "codex-auth"); err == nil {
+		t.Fatal("expected snapshot to remain pending until the timer is manually fired")
+	}
+
+	timerFired <- time.Now()
+	task := waitForRefreshTask(t, service, "codex-auth", RefreshTaskStatusCompleted)
+	if task.Quota == nil || len(task.Quota.Quota) != 1 || task.Quota.Quota[0].UsedPercent == nil || *task.Quota.Quota[0].UsedPercent != 4 {
+		t.Fatalf("expected one-shot window to flush header snapshot, got %+v", task)
+	}
+}
+
+func TestUsageHeaderWorkerStaysSilentWithoutSnapshotsAndDoesNotResetActiveWindow(t *testing.T) {
+	// 手动 timer 同时锁定“空闲不创建”和“后续 Header 不重置”两个生命周期边界。
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
+	defer service.StopRefreshTasks()
+	timers := make(chan usageHeaderManualTimer, 2)
+	setUsageHeaderTimerFactory(service, func(delay time.Duration) (<-chan time.Time, func()) {
+		manualTimer := usageHeaderManualTimer{delay: delay, fire: make(chan time.Time, 1)}
+		timers <- manualTimer
+		return manualTimer.fire, func() {}
+	})
+
+	// 空闲观察期内 worker 只能阻塞等待，不能创建 timer、查询数据库或写入 quota cache。
+	var databaseQueries atomic.Int64
+	queryCallback := "test:count_silent_header_queries"
+	rowCallback := "test:count_silent_header_rows"
+	if err := db.Callback().Query().After("gorm:query").Register(queryCallback, func(*gorm.DB) { databaseQueries.Add(1) }); err != nil {
+		t.Fatalf("register silent header query callback: %v", err)
+	}
+	if err := db.Callback().Row().After("gorm:row").Register(rowCallback, func(*gorm.DB) { databaseQueries.Add(1) }); err != nil {
+		t.Fatalf("register silent header row callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(queryCallback)
+		_ = db.Callback().Row().Remove(rowCallback)
+	})
+	select {
+	case timer := <-timers:
+		t.Fatalf("expected no timer without Header, got delay=%s", timer.delay)
+	case <-time.After(30 * time.Millisecond):
+	}
+	if got := databaseQueries.Load(); got != 0 {
+		t.Fatalf("expected no database work without Header, got %d queries", got)
+	}
+	if refreshTaskCount(service) != 0 {
+		t.Fatalf("expected no cache without Header, got %+v", refreshTasks(service))
+	}
+
+	// 首条 Header 创建唯一窗口，第二条只覆盖 pending，不允许创建或重置另一只 timer。
+	first := codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4")
+	second := codexUsageHeaderSnapshot("codex-auth", first.ObservedAt.Add(10*time.Second), "9")
+	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{first}) {
+		t.Fatal("expected first Header to be accepted")
+	}
+	var activeTimer usageHeaderManualTimer
+	select {
+	case activeTimer = <-timers:
+		if activeTimer.delay != time.Hour {
+			t.Fatalf("expected one-hour test window, got %s", activeTimer.delay)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected first Header to create a timer")
+	}
+	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{second}) {
+		t.Fatal("expected second Header to be accepted")
+	}
+	select {
+	case timer := <-timers:
+		t.Fatalf("expected second Header not to reset timer, got delay=%s", timer.delay)
+	case <-time.After(30 * time.Millisecond):
+	}
+	if got := databaseQueries.Load(); got != 0 || refreshTaskCount(service) != 0 {
+		t.Fatalf("expected pending window to stay query/cache silent, queries=%d cache=%+v", got, refreshTasks(service))
+	}
+
+	// 原 timer 到期后一次 flush 使用同身份较新的快照，并在无新数据时重新静默。
+	activeTimer.fire <- time.Now()
+	task := waitForRefreshTask(t, service, "codex-auth", RefreshTaskStatusCompleted)
+	if task.Quota == nil || len(task.Quota.Quota) != 1 || task.Quota.Quota[0].UsedPercent == nil || *task.Quota.Quota[0].UsedPercent != 9 {
+		t.Fatalf("expected latest pending Header after one window, got %+v", task)
+	}
+	select {
+	case timer := <-timers:
+		t.Fatalf("expected no follow-up timer without new Header, got delay=%s", timer.delay)
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestUsageHeaderArrivingDuringFlushStartsNextWindow(t *testing.T) {
+	// 第一批身份查询被人为暂停，用真实 worker 证明 flush 期间的新 Header 不会混入当前批次。
+	db := openQuotaTestDatabase(t)
+	for _, authIndex := range []string{"flush-auth-1", "flush-auth-2"} {
+		seedUsageIdentity(t, db, entities.UsageIdentity{Identity: authIndex, Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	}
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
+	defer service.StopRefreshTasks()
+	timers := make(chan usageHeaderManualTimer, 2)
+	setUsageHeaderTimerFactory(service, func(delay time.Duration) (<-chan time.Time, func()) {
+		manualTimer := usageHeaderManualTimer{delay: delay, fire: make(chan time.Time, 1)}
+		timers <- manualTimer
+		return manualTimer.fire, func() {}
+	})
+
+	flushEntered := make(chan struct{}, 1)
+	releaseFlush := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFlush) }) }
+	defer release()
+	var blocked atomic.Bool
+	callbackName := "test:block_first_header_flush"
+	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "usage_identities" && blocked.CompareAndSwap(false, true) {
+			flushEntered <- struct{}{}
+			<-releaseFlush
+		}
+	}); err != nil {
+		t.Fatalf("register first flush blocker: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{codexUsageHeaderSnapshot("flush-auth-1", time.Now(), "4")}) {
+		t.Fatal("expected first flush Header to be accepted")
+	}
+	firstTimer := <-timers
+	firstTimer.fire <- time.Now()
+	select {
+	case <-flushEntered:
+	case <-time.After(time.Second):
+		t.Fatal("expected first Header flush to enter identity query")
+	}
+	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{codexUsageHeaderSnapshot("flush-auth-2", time.Now().Add(time.Second), "8")}) {
+		t.Fatal("expected Header arriving during flush to be accepted")
+	}
+	release()
+	waitForRefreshTask(t, service, "flush-auth-1", RefreshTaskStatusCompleted)
+
+	// 第一批返回后 worker 才消费第二条 Header，并为它创建完整的新窗口。
+	var secondTimer usageHeaderManualTimer
+	select {
+	case secondTimer = <-timers:
+		if secondTimer.delay != time.Hour {
+			t.Fatalf("expected full next window, got %s", secondTimer.delay)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected Header received during flush to create the next timer")
+	}
+	if _, err := service.GetRefreshTaskByAuthIndex(context.Background(), "flush-auth-2"); err == nil {
+		t.Fatal("expected second Header to remain pending before its own timer fires")
+	}
+	secondTimer.fire <- time.Now()
+	secondTask := waitForRefreshTask(t, service, "flush-auth-2", RefreshTaskStatusCompleted)
+	if secondTask.Quota == nil || len(secondTask.Quota.Quota) != 1 || secondTask.Quota.Quota[0].UsedPercent == nil || *secondTask.Quota.Quota[0].UsedPercent != 8 {
+		t.Fatalf("expected second-window Header cache, got %+v", secondTask)
+	}
+}
+
+func TestUsageHeaderSlowFlushKeepsLatestIdentityWithoutBatchQueueOverflow(t *testing.T) {
+	// 同一身份在慢 flush 期间连续更新只应占一个 pending 槽位，不能因为累计 100 个批次而拒绝最后值。
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "latest-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
+	defer service.StopRefreshTasks()
+	timers := make(chan usageHeaderManualTimer, 2)
+	setUsageHeaderTimerFactory(service, func(delay time.Duration) (<-chan time.Time, func()) {
+		manualTimer := usageHeaderManualTimer{delay: delay, fire: make(chan time.Time, 1)}
+		timers <- manualTimer
+		return manualTimer.fire, func() {}
+	})
+
+	flushEntered := make(chan struct{}, 1)
+	releaseFlush := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFlush) }) }
+	defer release()
+	var blocked atomic.Bool
+	callbackName := "test:block_header_flush_while_latest_updates_arrive"
+	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "usage_identities" && blocked.CompareAndSwap(false, true) {
+			flushEntered <- struct{}{}
+			<-releaseFlush
+		}
+	}); err != nil {
+		t.Fatalf("register slow Header flush blocker: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	baseTime := time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local)
+	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{codexUsageHeaderSnapshot("latest-auth", baseTime, "4")}) {
+		t.Fatal("expected initial Header to be accepted")
+	}
+	firstTimer := <-timers
+	firstTimer.fire <- time.Now()
+	select {
+	case <-flushEntered:
+	case <-time.After(time.Second):
+		t.Fatal("expected initial Header flush to enter identity query")
+	}
+
+	// 101 次独立投递会填满旧的 100-batch channel；新结构应始终只保存 latest-auth 的最新值。
+	for index := 1; index <= 101; index++ {
+		usedPercent := "8"
+		if index == 101 {
+			usedPercent = "9"
+		}
+		snapshot := codexUsageHeaderSnapshot("latest-auth", baseTime.Add(time.Duration(index)*time.Second), usedPercent)
+		if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{snapshot}) {
+			t.Fatalf("expected repeated Header update %d to be accepted", index)
+		}
+	}
+	release()
+	waitForRefreshTask(t, service, "latest-auth", RefreshTaskStatusCompleted)
+
+	var secondTimer usageHeaderManualTimer
+	select {
+	case secondTimer = <-timers:
+	case <-time.After(time.Second):
+		t.Fatal("expected repeated updates to create one next-window timer")
+	}
+	secondTimer.fire <- time.Now()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		task, err := service.GetRefreshTaskByAuthIndex(context.Background(), "latest-auth")
+		if err == nil && task.Quota != nil && len(task.Quota.Quota) == 1 && task.Quota.Quota[0].UsedPercent != nil && *task.Quota.Quota[0].UsedPercent == 9 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("latest Header value did not replace the first flush result")
+}
+
+func TestApplyUsageHeaderSnapshotsProcessesAtMostTwoIdentitiesConcurrently(t *testing.T) {
+	// 三个账号共用一批 identity/resolver/calculator，但身份 job 必须有两个并发槽位。
+	db, closePools := openQuotaReaderPoolTestDatabase(t)
+	defer closePools()
+	now := time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local)
+	for index := 1; index <= 3; index++ {
+		authIndex := fmt.Sprintf("worker-auth-%d", index)
+		seedUsageIdentity(t, db, entities.UsageIdentity{Identity: authIndex, Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+		seedUsageEvent(t, db, entities.UsageEvent{AuthType: "oauth", AuthIndex: authIndex, Model: "gpt-5.5", Timestamp: now.Add(-time.Hour), TotalTokens: int64(index)})
+	}
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
+	defer service.StopRefreshTasks()
+
+	var active atomic.Int64
+	var peak atomic.Int64
+	entered := make(chan struct{}, 3)
+	release := make(chan struct{})
+	callbackName := "test:block_header_identity_usage_queries"
+	if err := db.Callback().Row().Before("gorm:row").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "usage_events" {
+			return
+		}
+		current := active.Add(1)
+		for {
+			previous := peak.Load()
+			if current <= previous || peak.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		entered <- struct{}{}
+		<-release
+		active.Add(-1)
+	}); err != nil {
+		t.Fatalf("register header worker concurrency callback: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Row().Remove(callbackName) })
+
+	done := make(chan struct{})
+	go func() {
+		applyUsageHeaderSnapshots(service, context.Background(), []UsageHeaderSnapshot{
+			codexUsageHeaderSnapshot("worker-auth-1", now, "4"),
+			codexUsageHeaderSnapshot("worker-auth-2", now, "8"),
+			codexUsageHeaderSnapshot("worker-auth-3", now, "12"),
+		})
+		close(done)
+	}()
+	for enteredCount := 0; enteredCount < 2; enteredCount++ {
+		select {
+		case <-entered:
+		case <-time.After(500 * time.Millisecond):
+			close(release)
+			<-done
+			t.Fatalf("expected two identity workers to enter usage queries, peak=%d", peak.Load())
+		}
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("header identity workers did not finish after release")
+	}
+	if got := peak.Load(); got != 2 {
+		t.Fatalf("expected identity concurrency peak 2, got %d", got)
+	}
+}
+
 func TestTryAppendUsageHeaderSnapshotsKeepsLatestPendingSnapshotPerAuthIndex(t *testing.T) {
 	db := openQuotaTestDatabase(t)
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 	older := codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local), "4")
 	newer := codexUsageHeaderSnapshot("codex-auth", time.Date(2026, 6, 22, 11, 0, 10, 0, time.Local), "9")
@@ -708,6 +1039,32 @@ func TestTryAppendUsageHeaderSnapshotsKeepsLatestPendingSnapshotPerAuthIndex(t *
 	}
 	if task.Quota == nil || len(task.Quota.Quota) != 1 || task.Quota.Quota[0].UsedPercent == nil || *task.Quota.Quota[0].UsedPercent != 9 {
 		t.Fatalf("expected latest pending snapshot to win, got %+v", task)
+	}
+}
+
+func TestUsageHeaderPendingKeepsOneThousandIdentitiesAndStillUpdatesExistingOnes(t *testing.T) {
+	// 一分钟内身份种类异常增长时内存必须有硬上限；已接收身份仍允许更新到最新 Header。
+	pending := make(map[string]UsageHeaderSnapshot)
+	firstBatch := make([]UsageHeaderSnapshot, 0, 1000)
+	baseTime := time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local)
+	for index := 0; index < 1000; index++ {
+		firstBatch = append(firstBatch, UsageHeaderSnapshot{
+			AuthType: "oauth", AuthIndex: fmt.Sprintf("bounded-auth-%04d", index), Provider: "codex", ObservedAt: baseTime,
+		})
+	}
+	mergePendingUsageHeaderSnapshots(pending, firstBatch)
+	newerExisting := UsageHeaderSnapshot{AuthType: "oauth", AuthIndex: "bounded-auth-0000", Provider: "codex", ObservedAt: baseTime.Add(time.Minute)}
+	overflow := UsageHeaderSnapshot{AuthType: "oauth", AuthIndex: "bounded-auth-overflow", Provider: "codex", ObservedAt: baseTime.Add(2 * time.Minute)}
+	mergePendingUsageHeaderSnapshots(pending, []UsageHeaderSnapshot{newerExisting, overflow})
+
+	if len(pending) != 1000 {
+		t.Fatalf("expected pending identity cap 1000, got %d", len(pending))
+	}
+	if got := pending["bounded-auth-0000"].ObservedAt; !got.Equal(newerExisting.ObservedAt) {
+		t.Fatalf("expected existing identity to update at cap, got %s", got)
+	}
+	if _, ok := pending["bounded-auth-overflow"]; ok {
+		t.Fatal("expected a new identity beyond the cap to be rejected")
 	}
 }
 
@@ -730,7 +1087,7 @@ func TestTryAppendUsageHeaderSnapshotsFlushesDifferentAuthIndexesTogether(t *tes
 		t.Fatalf("register query callback returned error: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
-	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour})
+	service := NewServiceWithRegistryAndOptions(db, NewProviderRegistry(nil), ServiceOptions{UsageHeaderSnapshotFlushInterval: time.Hour, PricingCatalog: emptyPricingCatalogForTest()})
 	defer service.StopRefreshTasks()
 
 	if !service.TryAppendUsageHeaderSnapshots([]UsageHeaderSnapshot{
@@ -758,8 +1115,8 @@ func TestTryAppendUsageHeaderSnapshotsFlushesDifferentAuthIndexesTogether(t *tes
 	if identityQueries != 1 {
 		t.Fatalf("expected flush to batch identity lookup into 1 query, got %d", identityQueries)
 	}
-	if priceQueries != 1 {
-		t.Fatalf("expected flush to reuse one price settings query, got %d", priceQueries)
+	if priceQueries != 0 {
+		t.Fatalf("expected flush to use cached pricing without DB queries, got %d", priceQueries)
 	}
 }
 
@@ -773,6 +1130,26 @@ func seedUsageEvent(t *testing.T, db *gorm.DB, event entities.UsageEvent) {
 	}
 }
 
+func openQuotaReaderPoolTestDatabase(t *testing.T) (*gorm.DB, func()) {
+	// Header worker 并发测试需要真实独立 reader；普通 quota 单池夹具无法观测两个并行查询。
+	t.Helper()
+	db, readDB, err := repository.OpenDatabasePools(config.Config{SQLitePath: filepath.Join(t.TempDir(), "quota-reader.db")})
+	if err != nil {
+		t.Fatalf("open quota reader pools: %v", err)
+	}
+	closePools := func() {
+		if readDB != nil && readDB != db {
+			if sqlDB, dbErr := readDB.DB(); dbErr == nil {
+				_ = sqlDB.Close()
+			}
+		}
+		if sqlDB, dbErr := db.DB(); dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	}
+	return db, closePools
+}
+
 func codexUsageHeaderSnapshot(authIndex string, observedAt time.Time, usedPercent string) UsageHeaderSnapshot {
 	return UsageHeaderSnapshot{
 		AuthType:   "oauth",
@@ -781,6 +1158,11 @@ func codexUsageHeaderSnapshot(authIndex string, observedAt time.Time, usedPercen
 		ObservedAt: observedAt,
 		Headers:    codexUsageHeader(usedPercent),
 	}
+}
+
+type usageHeaderManualTimer struct {
+	delay time.Duration
+	fire  chan time.Time
 }
 
 func codexUsageHeader(usedPercent string) http.Header {

@@ -146,10 +146,10 @@ function CustomRangeSummary({
         </small>
       )}
       <div className={styles.customSummaryActions}>
-        <Button type="button" variant="secondary" size="sm" className={styles.customRangeAction} data-custom-summary-cancel onClick={onCancel}>
+        <Button type="button" variant="secondary" size="sm" appearance="action" data-custom-summary-cancel onClick={onCancel}>
           {t('common.cancel')}
         </Button>
-        <Button type="button" variant="primary" size="sm" className={styles.customRangeAction} data-custom-summary-apply data-custom-range-apply onClick={onApply}>
+        <Button type="button" variant="primary" size="sm" appearance="action" data-custom-summary-apply data-custom-range-apply onClick={onApply}>
           {t('common.apply')}
         </Button>
       </div>
@@ -409,10 +409,10 @@ export function CustomRangePanel({ value, timeZone, locale, anchorMs, onChange, 
       <div className={styles.customPickerFooter}>
         <span>{formatCustomRangeLabel(value, { locale, timeZone })}</span>
         <div className={styles.customPickerActions}>
-          <Button type="button" variant="secondary" size="sm" className={styles.customRangeAction} data-custom-picker-cancel onClick={handlePickerCancel}>
+          <Button type="button" variant="secondary" size="sm" appearance="action" data-custom-picker-cancel onClick={handlePickerCancel}>
             {t('common.cancel')}
           </Button>
-          <Button type="button" variant="primary" size="sm" className={styles.customRangeAction} data-custom-range-apply onClick={handlePickerApply}>
+          <Button type="button" variant="primary" size="sm" appearance="action" data-custom-range-apply onClick={handlePickerApply}>
             {t('common.apply')}
           </Button>
         </div>

@@ -34,7 +34,8 @@ func TestBuildUsageOverviewDoesNotDependOnActivityTable(t *testing.T) {
 
 	overview, err := repository.BuildUsageOverviewWithFilter(db, repositorydto.UsageQueryFilter{
 		Range: "2h", StartTime: &start, EndTime: &end, QueryNow: &end,
-	})
+	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildUsageOverviewWithFilter should not query Activity: %v", err)
 	}

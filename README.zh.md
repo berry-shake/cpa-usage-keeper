@@ -6,37 +6,78 @@
   </picture>
 </p>
 
-# CPA Usage Keeper
-
-[English README](./README.md)
-
-`CPA Usage Keeper` 是一个独立的 CPA 用量持久化与可视化服务。
-
-它依赖 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 作为后端 CPA 数据来源，目标是在 CPA 之上补充持久化存储与统计分析能力。服务会从 CPA Redis usage 队列消费事件并写入 SQLite，定时拉取 CPA metadata，暴露聚合 API，并提供内置 Web Dashboard 用于查看 usage、pricing、request health 和 model/API 维度的统计信息。
-
-<p float="left">
-  <img src="https://images.bitskyline.com/i/2026/06/xwjnop.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/06/xwk25d.png" width="49%" />
+<p align="center">
+  <a href="./README.md">English</a> ｜ <a href="./README.zh.md"><strong>简体中文</strong></a>
 </p>
-<p float="left">
-  <img src="https://images.bitskyline.com/i/2026/06/xw9jj4.png" width="49%" />
-  <img src="https://images.bitskyline.com/i/2026/06/xybv3z.png" width="49%" />
+
+<h1 align="center">CPA Usage Keeper</h1>
+
+<p align="center">万千流转，皆有迹可循。</p>
+
+<p align="center">
+  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/github/v/release/Willxup/cpa-usage-keeper?style=flat-square" alt="最新版本" /></a>
+  <a href="https://github.com/Willxup/cpa-usage-keeper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Willxup/cpa-usage-keeper/ci.yml?branch=main&amp;style=flat-square&amp;label=CI" alt="CI 状态" /></a>
+  <a href="https://github.com/Willxup/cpa-usage-keeper/pkgs/container/cpa-usage-keeper"><img src="https://img.shields.io/badge/Docker-GHCR-2496ED?style=flat-square&amp;logo=docker&amp;logoColor=white" alt="GHCR Docker 镜像" /></a>
+  <a href="https://github.com/Willxup/homebrew-cpa-usage-keeper"><img src="https://img.shields.io/badge/Homebrew-supported-FBB040?style=flat-square&amp;logo=homebrew&amp;logoColor=black" alt="支持 Homebrew" /></a>
+  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&amp;logo=linux&amp;logoColor=black" alt="支持 Linux" /></a>
+  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/badge/macOS-A2AAAD?style=flat-square&amp;logo=apple&amp;logoColor=black" alt="支持 macOS" /></a>
+  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&amp;logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIgMy41IDExIDJ2OUgyem0xMC0xLjdMMjIgLjNWMTFIMTJ6TTIgMTJoOXY5TDIgMTkuNXptMTAgMGgxMHYxMC43bC0xMC0xLjV6Ii8+PC9zdmc%2B" alt="支持 Windows" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Willxup/cpa-usage-keeper?style=flat-square" alt="MIT License" /></a>
+</p>
+
+CPA Usage Keeper 是面向 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 的独立用量持久化与分析面板。它将 CPA 用量保存到 SQLite，自动拉取 CPA 配置和凭证数据，并提供用量、成本、请求健康、限额及模型/API 统计。
+
+## 界面预览
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/overview-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/overview-light.png" />
+    <img src="./assets/screenshots/overview-light.png" alt="CPA Usage Keeper 总览" width="49%" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/analysis-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/analysis-light.png" />
+    <img src="./assets/screenshots/analysis-light.png" alt="CPA Usage Keeper 分析" width="49%" />
+  </picture>
+</p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/auth-files-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/auth-files-light.png" />
+    <img src="./assets/screenshots/auth-files-light.png" alt="CPA Usage Keeper Auth Files" width="49%" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/ai-provider-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/ai-provider-light.png" />
+    <img src="./assets/screenshots/ai-provider-light.png" alt="CPA Usage Keeper AI Provider" width="49%" />
+  </picture>
+</p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/ranking-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/ranking-light.png" />
+    <img src="./assets/screenshots/ranking-light.png" alt="CPA Usage Keeper 排名" width="49%" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/login-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/login-light.png" />
+    <img src="./assets/screenshots/login-light.png" alt="CPA Usage Keeper 登录页" width="49%" />
+  </picture>
 </p>
 
 ## 功能特性
 
-- 持久保存 CPA usage 数据到 SQLite
-- Dashboard 查看请求量、Token、成本、缓存、成功率和请求性能
-- 支持按时间范围、模型、API Key、来源和请求结果筛选用量明细
-- Request Events 提供请求级明细查看、筛选、分页、导出和自定义显示
-- 分析页面提供用量趋势、成本分析、模型/API Key/AI Provider 构成和时段热力图
-- API Key 独立查询页，可按 CPA API Key 查看专属用量
-- 凭证页面展示 Auth File 与 AI Provider 使用情况，支持限额查询、刷新、巡检和排序
-- 支持多 Provider quota 窗口用量与限额展示
-- 可维护模型价格，用于成本估算和统计展示
-- 自动同步 CPA Auth Files、API Keys、AI Providers 等 metadata 变化
-- 可选密码登录保护、SQLite 备份、Docker/Docker Compose 和 systemd 部署
-- 可通过 CPA 插件将 Keeper Dashboard 内嵌到 CPAMC 中使用
+- 将 CPA 用量持久保存到 SQLite，并支持可选的定时备份
+- 统计请求量、Token、成本、缓存、成功率、RPM/TPM 和延迟，并可按时间、模型、API Key、来源及结果筛选
+- 查看和导出请求级事件，并自定义表格列
+- 分析用量趋势、成本构成、模型/API Key/AI Provider 占比、时段热力图和延迟诊断
+- 监控 Auth Files 与 AI Providers 的用量、健康状态和限额，支持健康巡检与限额刷新
+- 可选择加入社区排名，按综合得分、Token、请求量、缓存率、平均 TTFT/延迟或峰值 TPM/RPM 对比表现
+- 为单个 CPA API Key 提供独立的只读用量视图
+- 自动同步 CPA Auth Files、API Keys 和 AI Providers，并维护模型价格用于成本估算
+- 支持 Docker/Docker Compose、Homebrew、二进制和 systemd 部署，并可启用密码保护
+- 通过 CPA 插件将 Keeper Dashboard 嵌入 CPAMC
 
 ## 赞助与特别感谢
 
@@ -48,22 +89,95 @@
 
 > 使用前请确认 CPA 配置已开启 usage 统计：`usage-statistics-enabled: true`。
 
-推荐部署路径：
+Docker Compose 是推荐部署方式：首次部署可同时运行 CPA + Keeper，已有 CPA 时则使用 Keeper-only Compose。
 
-- 第一次部署 CPA + Keeper：优先使用 [Docker Compose](#docker-compose推荐)。
-- CPA 已在宿主机运行：使用 [Docker](#dockercpa-已在宿主机运行)。
-- macOS：使用 [Homebrew](#macos-homebrew)。
-- Linux 不使用容器：使用 [Linux 二进制](#linux-二进制)。
+| 场景 | 推荐方式 | 架构 |
+| --- | --- | --- |
+| 首次部署 CPA + Keeper | [Docker Compose：CPA + Keeper](#docker-compose推荐) | `linux/amd64`、`linux/arm64` |
+| 已有 CPA | [Docker Compose：仅 Keeper](#docker-compose推荐) | `linux/amd64`、`linux/arm64` |
+| 已有 CPA，偏好 Docker CLI | [Docker](#dockercpa-已在宿主机运行) | `linux/amd64`、`linux/arm64` |
+| macOS | [Homebrew](#macos-homebrew) | `amd64`、`arm64` |
+| Linux 不使用容器 | [Linux 二进制](#linux-二进制) | `amd64`、`arm64` |
+| Windows | [Windows Binary](#windows-binary) | `amd64`、`arm64` |
 
 公网部署建议启用 `AUTH_ENABLED=true`，并配置 `LOGIN_PASSWORD` 保护数据。
+
+## 项目结构
+
+```text
+cmd/server/              应用入口
+internal/api/            HTTP 路由与处理器
+internal/app/            应用装配与启动
+internal/auth/           Session 与访问控制
+internal/poller/         CPA 用量与配置同步
+internal/repository/     SQLite 持久化与聚合
+internal/service/        用量、定价与身份服务
+internal/quota/          Provider 限额刷新与巡检
+internal/ranking/        社区排名聚合与同步
+deploy/linux/            systemd 服务模板
+web/                     React + TypeScript 前端
+```
+
+## 本地开发
+
+### 前置依赖
+
+- Go 1.26+
+- Node.js 22+
+- npm
+- 一个可用的 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 实例
+
+### 本地运行
+
+1. 将 `.env.example` 复制为 `.env`，至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。
+
+```bash
+cp .env.example .env
+vim .env
+```
+
+2. 启动后端。
+
+```bash
+go run ./cmd/server/main.go
+```
+
+3. 在另一个终端安装前端依赖并启动开发服务器。
+
+```bash
+npm --prefix ./web ci
+npm --prefix ./web run dev -- --host 127.0.0.1
+```
+
+打开 `http://127.0.0.1:5173`。前端默认将 `/api` 代理到 `http://127.0.0.1:8080`；后端使用其它端口时可通过 `VITE_API_PROXY_TARGET` 覆盖。
+
+### 测试
+
+运行完整验证：
+
+```bash
+make verify
+```
+
+也可以分别运行：
+
+```bash
+go test ./cmd/... ./internal/...
+npm --prefix ./web run test
+npm --prefix ./web run lint
+npm --prefix ./web run typecheck
+npm --prefix ./web run build
+```
 
 ## 部署方式
 
 ### Docker Compose（推荐）
 
-下面是一个同时部署 CPA 和 CPA Usage Keeper 的最简参考示例。
+Docker Compose 同时推荐用于 CPA + Keeper 联合部署和 Keeper 单独部署。
 
-仓库中的 `docker-compose.example.yml` 是 Keeper 专用模板。CPA 已经部署好时可以直接使用，也可以把其中的 `cpa-usage-keeper` 服务合并到你自己的 Compose 项目里。
+#### CPA + Keeper
+
+将下面内容保存为 `docker-compose.yml`，并替换管理密钥和登录密码：
 
 ```yaml
 services:
@@ -106,51 +220,21 @@ networks:
     driver: bridge
 ```
 
-如果想用 `.env` 文件管理 Keeper 配置，可以删除 `cpa-usage-keeper` 服务里的 `environment` 块，并添加 `env_file`：
+运行 `docker compose up -d` 启动，使用 `docker compose down` 停止。
 
-```yaml
-    env_file:
-      - .env
-    volumes:
-      - ./keeper:/data
-```
+CPA 数据保存在 `./cpa`，Keeper 数据保存在 `./keeper`。
 
-然后在宿主机的 `docker-compose.yml` 同一目录创建 `.env` 文件，例如：
+#### Keeper Only
 
-```env
-TZ=Asia/Shanghai
-CPA_BASE_URL=http://cli-proxy-api:8317
-CPA_MANAGEMENT_KEY=replace-with-your-management-key
-AUTH_ENABLED=true
-LOGIN_PASSWORD=replace-with-your-login-password
-```
-
-Docker Compose 会把 `.env` 中的配置注入 Keeper 容器环境变量。如果 CPA 使用非默认 Redis/RESP 地址，再在 `.env` 中设置 `REDIS_QUEUE_ADDR`。
-
-启动：
+CPA 已经部署好时，直接使用仓库中的 Keeper-only Compose 模板：
 
 ```bash
-docker compose up -d
-```
-
-停止：
-
-```bash
-docker compose down
-```
-
-CPA 文件放在 `./cpa`，CPA Usage Keeper 数据放在 `./keeper`。
-
-### Docker（CPA 已在宿主机运行）
-
-复制配置模板并编辑，至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。公网部署建议同时设置 `AUTH_ENABLED=true` 和 `LOGIN_PASSWORD`。如果 CPA 使用非默认 Redis/RESP 地址，再设置 `REDIS_QUEUE_ADDR`：
-
-```bash
+cp docker-compose.example.yml docker-compose.yml
 cp .env.example .env
 vim .env
 ```
 
-宿主机运行 CPA 时，`.env` 中通常需要这样设置：
+CPA 运行在 Docker 宿主机上时，可从以下配置开始：
 
 ```env
 CPA_BASE_URL=http://host.docker.internal:8317
@@ -158,6 +242,16 @@ CPA_MANAGEMENT_KEY=replace-with-your-management-key
 AUTH_ENABLED=true
 LOGIN_PASSWORD=replace-with-your-login-password
 ```
+
+其它网络环境请将 `CPA_BASE_URL` 改为容器可访问的 CPA 地址。CPA 使用非默认 Redis/RESP 地址时，再设置 `REDIS_QUEUE_ADDR`。
+
+运行 `docker compose up -d` 启动 Keeper，使用 `docker compose down` 停止。
+
+模板默认将 Keeper 数据保存在 `./data`。
+
+### Docker（CPA 已在宿主机运行）
+
+偏好使用 `docker run` 时，复用上面 Keeper-only Compose 的 `.env` 配置：
 
 ```bash
 docker run -d \
@@ -171,30 +265,21 @@ docker run -d \
 
 ### macOS Homebrew
 
-Homebrew 是 macOS 推荐的二进制安装方式。它会从 CPA Usage Keeper 的 tap 安装 macOS 包，后续新版本也可以用标准 Homebrew 命令升级。
-
-安装：
+Homebrew 是 macOS 推荐安装方式：
 
 ```bash
 brew tap Willxup/cpa-usage-keeper
 brew install cpa-usage-keeper
 ```
 
-编辑自动生成的配置文件，至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。公网部署建议同时设置 `AUTH_ENABLED=true` 和 `LOGIN_PASSWORD`：
+至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`，然后启动服务：
 
 ```bash
 vim "$(brew --prefix)/etc/cpa-usage-keeper.env"
-```
-
-启动后台服务：
-
-```bash
 brew services start cpa-usage-keeper
 ```
 
-Homebrew 会把 Keeper 数据放在 `$(brew --prefix)/var/cpa-usage-keeper`，stdout 日志放在 `$(brew --prefix)/var/log/cpa-usage-keeper.log`，stderr 日志放在 `$(brew --prefix)/var/log/cpa-usage-keeper.err.log`。
-
-常用命令：
+升级和服务管理命令：
 
 ```bash
 brew services list
@@ -203,51 +288,49 @@ brew update
 brew upgrade cpa-usage-keeper
 ```
 
+数据保存在 `$(brew --prefix)/var/cpa-usage-keeper`，日志写入 `$(brew --prefix)/var/log/`。
+
 ### Linux 二进制
 
-#### 下载
-
-在 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载对应架构的 Linux 二进制包，或使用命令行下载：
+从 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载 `linux_amd64` 或 `linux_arm64` 压缩包，然后解压并运行：
 
 ```bash
-curl -L -o cpa-usage-keeper.tar.gz "<替换为 Linux 二进制包下载地址>"
 mkdir -p cpa-usage-keeper
-tar -xzf cpa-usage-keeper.tar.gz -C cpa-usage-keeper --strip-components=1
+tar -xzf ./cpa-usage-keeper_*_linux_*.tar.gz -C cpa-usage-keeper --strip-components=1
 cd cpa-usage-keeper
-```
-
-请在 Releases 页面复制 `linux_amd64` 或 `linux_arm64` 包的下载地址，并替换上面命令中的占位符。
-
-#### 配置和运行
-
-复制配置模板并编辑，具体配置项参考 [配置](#配置)：
-
-```bash
 cp .env.example .env
 vim .env
 ./cpa-usage-keeper
 ```
 
-#### systemd 常驻运行
+#### systemd
 
-Linux 二进制包内置 `cpa-usage-keeper.service`，可直接注册为 `systemd` 服务。启动后进程由 systemd 托管，关闭 SSH 或终端不会结束进程。
-
-`systemd` 的 `WorkingDirectory` 需要绝对路径。下面的 `sed` 命令会把当前目录自动写入 service 文件：
+Linux 压缩包内置 service 模板。请在解压后的目录中运行：
 
 ```bash
-sudo cp cpa-usage-keeper.service /etc/systemd/system/cpa-usage-keeper.service # 复制 service 文件到 systemd 目录
-sudo sed -i "s|__CPA_USAGE_KEEPER_DIR__|$(pwd)|g" /etc/systemd/system/cpa-usage-keeper.service # 写入当前目录作为 WorkingDirectory
-sudo systemctl daemon-reload # 重新加载 systemd 配置
-sudo systemctl enable --now cpa-usage-keeper # 设置开机自启并立即启动服务
+sudo cp cpa-usage-keeper.service /etc/systemd/system/cpa-usage-keeper.service
+sudo sed -i "s|__CPA_USAGE_KEEPER_DIR__|$(pwd)|g" /etc/systemd/system/cpa-usage-keeper.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cpa-usage-keeper
 ```
-
-常用命令：
 
 ```bash
-sudo systemctl status cpa-usage-keeper # 查看服务状态
-sudo journalctl -u cpa-usage-keeper -f # 实时查看服务日志
-sudo systemctl restart cpa-usage-keeper # 重启服务
+sudo systemctl status cpa-usage-keeper
+sudo journalctl -u cpa-usage-keeper -f
+sudo systemctl restart cpa-usage-keeper
 ```
+
+### Windows Binary
+
+从 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载 `windows_amd64` 或 `windows_arm64` ZIP 并解压。在 PowerShell 中进入解压目录后运行：
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+.\cpa-usage-keeper.exe
+```
+
+启动前至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。公网部署还应设置 `AUTH_ENABLED=true` 和 `LOGIN_PASSWORD`。
 
 ## 配置
 
@@ -275,7 +358,9 @@ cp .env.example .env
 | `CPA_PUBLIC_URL` | 否 | 当前浏览器同源根路径 | 浏览器访问 CPA 的公开地址，用于“返回 CPA”跳转和 CPAMC frame 信任来源 |
 | `FRAME_ANCESTOR_ORIGINS` | 否 | 空 | 额外信任的 `frame-ancestors` 来源，逗号分隔，每项必须是带 host 的 `http://` 或 `https://` URL |
 
-`APP_BASE_PATH` 必须为空或以 `/` 开头；例如 `/cpa`，`/cpa/` 会规范为 `/cpa`。
+- `APP_BASE_PATH` 必须为空或以 `/` 开头；`/cpa/` 会规范为 `/cpa`。
+- `CPA_BASE_URL` 是服务端访问 CPA 的地址，可以使用内网地址或 Docker 服务名。
+- `CPA_PUBLIC_URL` 控制浏览器跳转和跨域 CPAMC frame 信任。同源且 CPA 位于 `/management.html` 时可留空；域名、端口或路径不同时应设置公开 CPA 地址。
 
 `CPA_PUBLIC_URL` 可填写域名、带协议的完整地址或相对路径，例如 `https://cpa.example.com`、`https://cpa.example.com/cpa/` 或 `/cpa/`。前端会自动追加 `management.html`，并兼容末尾已有 `/` 或已经填写到 `management.html` 的情况。未配置时，“返回 CPA”默认跳转到当前浏览器同源根路径下的 `/management.html`；如果 CPA 和 Keeper 的外部域名、端口或路径不一致，请显式设置 `CPA_PUBLIC_URL`。
 
@@ -327,11 +412,13 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 | `WORK_DIR` | 否 | `./data` | 应用工作目录；数据库、日志和备份默认分别写入 `app.db`、`logs/`、`backups/` |
 | `LOG_LEVEL` | 否 | `info` | 日志级别 |
 | `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
-| `LOG_RETENTION_DAYS` | 否 | `7` | 日志保留天数；`0` 表示不自动清理 |
+| `LOG_RETENTION_DAYS` | 否 | `7` | 综合日志保留历史天数，并额外保留当天；`0` 表示不自动清理。仅错误日志固定保留历史 30 天及当天 |
 | `CLEANUP_USAGE_EVENTS_ENABLED` | 否 | `false` | 是否在每日维护中删除过期 `usage_events` 原始事件；启用后会删除早于 90 个本地自然日前 00:00 的数据 |
 | `BACKUP_ENABLED` | 否 | `true` | 是否启用 SQLite 数据库备份 |
 | `BACKUP_INTERVAL` | 否 | `24h` | 数据库备份间隔 |
 | `BACKUP_RETENTION_DAYS` | 否 | `7` | 备份保留天数 |
+
+启用文件日志后，`cpa-usage-keeper-YYYY-MM-DD.log` 会记录所有已输出级别；error、fatal 和 panic 级别还会同时写入 `cpa-usage-keeper-error-YYYY-MM-DD.log`，该文件固定保留历史 30 个本地自然日及当天。
 
 ### 内置 HTTPS
 
@@ -354,7 +441,7 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 - 跨站点嵌入登录在 HTTPS 且浏览器支持第三方 cookie 或分区 cookie 时体验最好。如果 cookie 路径不可用，CPAMC 嵌入模式会回退到按标签页保存在浏览器 session storage 中的 header token。
 - Redis inbox 原始消息会自动清理：成功数据保留到当天结束后清理，失败数据保留 7 天。
 
-## Nginx反代
+## Nginx 反向代理
 
 部署到 `/cpa` 时设置 `APP_BASE_PATH=/cpa`，并在反向代理中保留该前缀：
 
@@ -367,92 +454,10 @@ location /cpa/ {
 }
 ```
 
-如果 CPA 管理页和 Keeper 使用同一个浏览器域名，且 CPA 管理页在该域名根路径的 `/management.html`，可以不配置 `CPA_PUBLIC_URL`。例如 Keeper 在 `https://cpa.example.com/keeper/` 时，“返回 CPA”会默认跳转到 `https://cpa.example.com/management.html`。
-
-如果 CPA 管理页在其它域名、端口或路径下，请配置 `CPA_PUBLIC_URL`，例如：
+CPA 与 Keeper 浏览器同源时，可以不设置 `CPA_PUBLIC_URL`，“返回 CPA”默认使用 `/management.html`。CPA 位于其它域名、端口或路径时，设置公开地址：
 
 ```env
 CPA_PUBLIC_URL=https://cpa.example.com
-```
-
-## 项目结构
-
-```text
-cmd/server/              应用入口
-internal/api/            HTTP 路由与处理器
-internal/app/            应用装配与启动
-internal/auth/           session 鉴权与持久化
-internal/backup/         SQLite 数据库备份管理
-internal/benchmark/      聚合性能基准测试辅助
-internal/config/         环境配置加载
-internal/cpa/            CPA 客户端与类型定义
-internal/entities/       GORM 数据模型
-internal/helper/         后端通用辅助方法与前端展示字段脱敏
-internal/logging/        日志初始化与保留策略
-internal/poller/         后台队列消费与 metadata 同步
-internal/quota/          quota 缓存、刷新与查询服务
-internal/repository/     SQLite 访问与聚合逻辑
-internal/service/        usage、pricing 与身份数据服务
-internal/timeutil/       项目时区与时间工具
-internal/updatecheck/    GitHub Release 更新检查
-internal/version/        构建版本信息
-deploy/linux/            Linux systemd 服务文件
-web/                     React + TypeScript 前端
-```
-
-## 本地开发
-
-### 前置依赖
-
-- Go 1.26+
-- Node.js 22+
-- npm
-- 已运行的 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI)
-
-### 本地启动
-
-1. 复制并编辑本地配置，至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。如果 CPA 的 Redis/RESP 端口不是默认 `8317`，同时设置 `REDIS_QUEUE_ADDR`：
-
-```bash
-cp .env.example .env
-vim .env
-```
-
-2. 启动后端：
-
-```bash
-go run ./cmd/server/main.go
-```
-
-3. 在另一个终端安装前端依赖并启动开发服务器：
-
-```bash
-npm --prefix ./web ci
-npm --prefix ./web run dev -- --host 127.0.0.1
-```
-
-前端开发服务器默认把 `/api` 代理到 `http://127.0.0.1:8080`，访问 `http://127.0.0.1:5173` 即可联调。如果后端使用了其他端口：
-
-```bash
-VITE_API_PROXY_TARGET=http://127.0.0.1:9090 npm --prefix ./web run dev -- --host 127.0.0.1
-```
-
-### 测试
-
-运行完整的本地验证基线：
-
-```bash
-make verify
-```
-
-也可以单独运行各项检查：
-
-```bash
-go test ./cmd/... ./internal/...
-npm --prefix ./web run test
-npm --prefix ./web run lint
-npm --prefix ./web run typecheck
-npm --prefix ./web run build
 ```
 
 ## Star History

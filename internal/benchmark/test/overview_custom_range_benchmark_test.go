@@ -16,6 +16,7 @@ import (
 	"cpa-usage-keeper/internal/api"
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
 	"gorm.io/gorm"
@@ -24,7 +25,7 @@ import (
 
 func BenchmarkUsageOverviewCustomDayRanges(b *testing.B) {
 	db, queryLogger := openCustomOverviewBenchmarkDatabase(b)
-	provider := service.NewUsageService(db)
+	provider := service.NewUsageService(db, pricing.NewCatalog(pricing.EmptySnapshot()))
 	router := api.NewRouter(nil, nil, provider, nil, api.AuthConfig{}, nil, "")
 	lastDay := time.Date(2026, 7, 1, 0, 0, 0, 0, time.Local)
 

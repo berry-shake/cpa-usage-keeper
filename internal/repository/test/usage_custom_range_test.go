@@ -31,7 +31,8 @@ func TestListUsageEventsExcludesCustomRangeEndBoundary(t *testing.T) {
 	page, err := repository.ListUsageEventsWithFilter(db, repodto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true,
 		Page: 1, PageSize: 20,
-	})
+	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -69,7 +70,8 @@ func TestBuildAnalysisUsesCustomHourRollupsWithoutUsageEvents(t *testing.T) {
 
 	analysis, err := repository.BuildAnalysisWithFilter(db, repodto.UsageQueryFilter{
 		Range: "custom", CustomUnit: "hour", StartTime: &start, EndTime: &end, EndExclusive: true,
-	})
+	}, emptyPricingResolverForTest())
+
 	if err != nil {
 		t.Fatalf("BuildAnalysisWithFilter returned error: %v", err)
 	}

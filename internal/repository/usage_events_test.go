@@ -29,7 +29,7 @@ func TestListUsageEventsWithFilterAppliesTimeBoundsAndPagination(t *testing.T) {
 
 	start := time.Date(2026, 4, 16, 9, 30, 0, 0, time.UTC)
 	end := time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC)
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{StartTime: &start, EndTime: &end, Page: 1, PageSize: 1})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{StartTime: &start, EndTime: &end, Page: 1, PageSize: 1}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestListUsageEventsWithFilterFindsProjectTimezoneStorageTimestamp(t *testin
 
 	start := time.Date(2026, 5, 12, 13, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 5, 12, 14, 0, 0, 0, time.UTC)
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{StartTime: &start, EndTime: &end, Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{StartTime: &start, EndTime: &end, Page: 1, PageSize: 20}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -94,11 +94,11 @@ func TestListUsageEventsWithFilterPagesByTimestampAndID(t *testing.T) {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	firstPage, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 1})
+	firstPage, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 1}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
-	secondPage, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 2, PageSize: 1})
+	secondPage, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 2, PageSize: 1}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestListUsageEventsWithFilterAppliesModelAuthIndexAndResultFilters(t *testi
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 20, Model: "claude-sonnet", AuthIndex: "auth-a", Result: "success"})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 20, Model: "claude-sonnet", AuthIndex: "auth-a", Result: "success"}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestExportUsageEventsWithFilterAppliesFiltersWithoutPagination(t *testing.T
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	rows, err := ExportUsageEventsWithFilter(db, dto.UsageQueryFilter{Model: "claude-sonnet", AuthIndex: "auth-a", Result: "success", Page: 1, PageSize: 1, Limit: 1})
+	rows, err := ExportUsageEventsWithFilter(db, dto.UsageQueryFilter{Model: "claude-sonnet", AuthIndex: "auth-a", Result: "success", Page: 1, PageSize: 1, Limit: 1}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ExportUsageEventsWithFilter returned error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestListUsageEventsWithFilterAddsBackendCost(t *testing.T) {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 20}, pricingResolverFromDBForTest(t, db))
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestListUsageEventsWithFilterMarksCostUnavailableWhenPriceMissing(t *testin
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{Page: 1, PageSize: 20}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestListUsageEventsWithFilterAppliesAuthIndexFilter(t *testing.T) {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthIndex: "auth-1", Page: 1, PageSize: 20})
+	page, err := ListUsageEventsWithFilter(db, dto.UsageQueryFilter{AuthIndex: "auth-1", Page: 1, PageSize: 20}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}

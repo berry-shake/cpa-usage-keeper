@@ -130,8 +130,6 @@ type analysisLatencyDiagnostics struct {
 	MaxLatencyMS      int64                        `json:"max_latency_ms"`
 }
 
-const analysisLatencyUnsupportedReasonRangeOutsideRecentThirtyDays = "range_outside_recent_30_days"
-
 type analysisAPIKeyInfo struct {
 	ID    string
 	Label string
@@ -169,14 +167,9 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 			return
 		}
 
-		queryNow := timeutil.NormalizeStorageTime(time.Now())
-		filter, err := parseUsageAnalysisTimeFilterQuery(c.Request, queryNow)
+		filter, err := parseUsageAnalysisTimeFilterQuery(c.Request, timeutil.NormalizeStorageTime(time.Now()))
 		if err != nil {
 			writeUsageFilterParseError(c, err)
-			return
-		}
-		if !analysisLatencyRangeSupported(filter, queryNow) {
-			c.JSON(http.StatusOK, unsupportedAnalysisLatencyDiagnosticsResponse())
 			return
 		}
 
@@ -210,24 +203,6 @@ func emptyAnalysisResponse() analysisResponse {
 
 func emptyAnalysisLatencyDiagnosticsResponse() analysisLatencyDiagnostics {
 	return analysisLatencyDiagnostics{Supported: true, Points: []analysisLatencyPoint{}, Density: []analysisLatencyDensityCell{}}
-}
-
-func unsupportedAnalysisLatencyDiagnosticsResponse() analysisLatencyDiagnostics {
-	response := emptyAnalysisLatencyDiagnosticsResponse()
-	response.Supported = false
-	response.UnsupportedReason = analysisLatencyUnsupportedReasonRangeOutsideRecentThirtyDays
-	return response
-}
-
-// Latency 依赖 raw usage_events；Custom 日范围必须完整落在最近 30 个自然日内。
-func analysisLatencyRangeSupported(filter servicedto.UsageFilter, anchor time.Time) bool {
-	if filter.Range != "custom" || filter.CustomUnit != "day" || filter.StartTime == nil {
-		return true
-	}
-	localAnchor := timeutil.NormalizeStorageTime(anchor)
-	today := time.Date(localAnchor.Year(), localAnchor.Month(), localAnchor.Day(), 0, 0, 0, 0, time.Local)
-	start := timeutil.NormalizeStorageTime(*filter.StartTime)
-	return !start.Before(today.AddDate(0, 0, -29))
 }
 
 func loadCPAAPIKeyInfos(c *gin.Context, provider service.CPAAPIKeyProvider) (map[string]analysisAPIKeyInfo, error) {

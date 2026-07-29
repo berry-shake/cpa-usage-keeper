@@ -8,11 +8,7 @@
 }
 
 .analysisCard {
-  border: 1px solid var(--border-color);
-  border-radius: 24px;
-  background: var(--bg-primary);
-  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.07);
-  padding: 20px;
+  padding: var(--keeper-card-padding);
   min-width: 0;
 }
 
@@ -42,32 +38,13 @@
   flex-direction: column;
   gap: 6px;
   margin-bottom: 16px;
-
-  h2 {
-    margin: 0;
-    font-size: 18px;
-    line-height: 1.2;
-    color: var(--text-primary);
-  }
-
-  p {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 13px;
-    line-height: 1.45;
-  }
 }
 
 .cardTitleLine {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
   gap: 14px;
   min-width: 0;
-
-  h2 {
-    min-width: 0;
-  }
 
   @include mobile {
     flex-wrap: wrap;

@@ -74,7 +74,7 @@ func TestPricingUpdateDoesNotDependOnReaderAvailability(t *testing.T) {
 	// 执行：更新定价时的存在性查询和 Save 都必须使用 writer。
 	result := make(chan error, 1)
 	go func() {
-		_, err := service.NewPricingService(db).UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
+		_, err := service.NewPricingService(db, emptyPricingCatalogForTest()).UpdatePricing(context.Background(), servicedto.UpdatePricingInput{
 			Model:                "writer-pricing-model",
 			PromptPricePer1M:     1,
 			CompletionPricePer1M: 2,
@@ -130,8 +130,9 @@ func holdResolverServiceTestReaders(t *testing.T, reader *gorm.DB) ([]*sql.Conn,
 	if err != nil {
 		t.Fatalf("load reader sql db: %v", err)
 	}
-	heldReaders := make([]*sql.Conn, 0, 4)
-	for index := 0; index < 4; index++ {
+	readerLimit := readerSQL.Stats().MaxOpenConnections
+	heldReaders := make([]*sql.Conn, 0, readerLimit)
+	for index := 0; index < readerLimit; index++ {
 		connection, err := readerSQL.Conn(context.Background())
 		if err != nil {
 			for _, held := range heldReaders {

@@ -31,7 +31,7 @@ func TestListUsageEventsWithFilterDoesNotLoadModelFilterOptions(t *testing.T) {
 	seedUsageEventModels(t, db)
 	recorder, queryDB := usageEventsQueryRecorder(db)
 
-	page, err := repository.ListUsageEventsWithFilter(queryDB, repodto.UsageQueryFilter{Page: 1, PageSize: 1})
+	page, err := repository.ListUsageEventsWithFilter(queryDB, repodto.UsageQueryFilter{Page: 1, PageSize: 1}, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}

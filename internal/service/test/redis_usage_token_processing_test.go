@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
 	repodto "cpa-usage-keeper/internal/repository/dto"
@@ -36,10 +37,13 @@ type tokenProcessorHeaderRecorder struct {
 	snapshots []quota.UsageHeaderSnapshot
 }
 
-func (r *tokenProcessorHeaderRecorder) NotifyUsageEventsCommitted(_ []entities.UsageEvent, snapshots []quota.UsageHeaderSnapshot) {
-	// 只记录事务提交后真正通知的 snapshot，用于证明 unresolved 行没有提前泄漏。
+func (r *tokenProcessorHeaderRecorder) NotifyUsageEventsCommitted(_ []entities.UsageEvent) {}
+
+func (r *tokenProcessorHeaderRecorder) TryAppendUsageHeaderSnapshots(snapshots []quota.UsageHeaderSnapshot) bool {
+	// 只记录事务提交后真正投递的 snapshot，用于证明 unresolved 行没有提前泄漏。
 	r.calls++
 	r.snapshots = append(r.snapshots, snapshots...)
+	return true
 }
 
 func (r *tokenProcessorHeaderRecorder) NotifyUsageIdentitiesChanged() {}
@@ -101,7 +105,12 @@ func TestProcessRedisUsageInboxKnownExecutorBypassesIdentityLookup(t *testing.T)
 	// quota window 读取 usage_events 的 corrected Total，但成本仍按 Input=100、Output=20 计算为 0.00014。
 	windowStart := event.Timestamp.Add(-time.Minute)
 	windowEnd := event.Timestamp.Add(time.Minute)
-	window, err := repository.SumUsageWindowStatsByAuthIndex(context.Background(), db, "missing-but-not-needed", windowStart, &windowEnd)
+	pricingSnapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
+	if err != nil {
+		t.Fatalf("load pricing snapshot: %v", err)
+	}
+	pricingCatalog := pricing.NewCatalog(pricingSnapshot)
+	window, err := repository.SumUsageWindowStatsByAuthIndex(context.Background(), db, "missing-but-not-needed", windowStart, &windowEnd, pricingCatalog.NewResolver())
 	if err != nil {
 		t.Fatalf("sum usage window stats: %v", err)
 	}
@@ -110,7 +119,7 @@ func TestProcessRedisUsageInboxKnownExecutorBypassesIdentityLookup(t *testing.T)
 	}
 
 	// Request Events 服务层也必须返回同一 corrected Total 和不受 Total 改写影响的成本。
-	page, err := service.NewUsageService(db).ListUsageEvents(context.Background(), servicedto.UsageFilter{StartTime: &windowStart, EndTime: &windowEnd})
+	page, err := service.NewUsageServiceWithOptions(db, service.UsageServiceOptions{PricingCatalog: pricingCatalog}).ListUsageEvents(context.Background(), servicedto.UsageFilter{StartTime: &windowStart, EndTime: &windowEnd})
 	if err != nil {
 		t.Fatalf("list usage events: %v", err)
 	}
@@ -164,6 +173,7 @@ func TestProcessRedisUsageInboxCommitsReadyItemsWhenIdentityLookupFails(t *testi
 		BaseURL:                  "https://cpa.example.com",
 		RecentUsageEvents:        recent,
 		UsageAggregationNotifier: headers,
+		UsageHeaderQuota:         headers,
 	})
 
 	result, err := syncService.ProcessRedisUsageInbox(context.Background())

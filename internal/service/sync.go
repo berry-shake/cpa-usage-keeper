@@ -27,10 +27,15 @@ type RecentUsageEventAppender interface {
 
 // UsageAggregationNotifier 把已提交 usage 或 identity 变化转成后台 runner 的非阻塞唤醒。
 type UsageAggregationNotifier interface {
-	// NotifyUsageEventsCommitted 只接收已经与 inbox processed 状态共同提交的事件和 snapshots。
-	NotifyUsageEventsCommitted(events []entities.UsageEvent, snapshots []quota.UsageHeaderSnapshot)
+	// NotifyUsageEventsCommitted 只接收已经与 inbox processed 状态共同提交的事件。
+	NotifyUsageEventsCommitted(events []entities.UsageEvent)
 	// NotifyUsageIdentitiesChanged 只在三类 metadata 持久化全部成功后发送 identity 变化信号。
 	NotifyUsageIdentitiesChanged()
+}
+
+// UsageHeaderSnapshotAppender 独立接收事务提交后的原始 Header 快照批次。
+type UsageHeaderSnapshotAppender interface {
+	TryAppendUsageHeaderSnapshots([]quota.UsageHeaderSnapshot) bool
 }
 
 const (
@@ -53,8 +58,8 @@ type SyncService struct {
 	recentUsage     RecentUsageEventAppender
 	// usageAggregation 只接收提交后通知，不允许热路径同步调用聚合仓储函数。
 	usageAggregation UsageAggregationNotifier
-	// usageHeaderQuota 只供没有 aggregation notifier 的兼容构造路径保留原 header 投递语义。
-	usageHeaderQuota          quota.UsageHeaderSnapshotAppender
+	// usageHeaderQuota 与聚合 runner 解耦，在 Quota worker 内按一分钟窗口自行合并。
+	usageHeaderQuota          UsageHeaderSnapshotAppender
 	cleanupUsageEventsEnabled bool
 }
 
@@ -76,8 +81,8 @@ type SyncServiceOptions struct {
 	RecentUsageEvents RecentUsageEventAppender
 	// UsageAggregationNotifier 注入 App 唯一的单 writer runner。
 	UsageAggregationNotifier UsageAggregationNotifier
-	// UsageHeaderQuota 保留旧兼容入口；生产 App 的 header gate 统一由 aggregation runner 管理。
-	UsageHeaderQuota          quota.UsageHeaderSnapshotAppender
+	// UsageHeaderQuota 独立接收原始 Header；是否配置聚合 notifier 不影响它。
+	UsageHeaderQuota          UsageHeaderSnapshotAppender
 	CleanupUsageEventsEnabled bool
 }
 
@@ -100,7 +105,7 @@ func NewSyncServiceWithOptions(db *gorm.DB, opts SyncServiceOptions) *SyncServic
 		recentUsage:     opts.RecentUsageEvents,
 		// 构造时只保存 notifier 接口，不启动额外 goroutine。
 		usageAggregation: opts.UsageAggregationNotifier,
-		// 兼容 appender 只在 notifier 为空时使用，禁止生产路径重复投递。
+		// Header appender 始终独立于聚合 notifier，生产 App 会同时注入两个接收方。
 		usageHeaderQuota:          opts.UsageHeaderQuota,
 		cleanupUsageEventsEnabled: opts.CleanupUsageEventsEnabled,
 	}
@@ -134,22 +139,28 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*servicedto.R
 	if len(processableRows) == 0 {
 		// 没有 notifier 的既有构造路径继续使用 main 的空批 catch-up，不静默停止派生统计。
 		if s.usageAggregation == nil {
-			// Overview 与 Activity 各自检查独立全局 cursor，避免空批无条件扫描 identities。
-			pendingOverview, overviewErr := repository.HasPendingUsageOverviewAggregation(ctx, writeDB)
-			if overviewErr != nil {
+			// 一次读取固定目标和三个全局水位，避免为 Overview、Activity、Latency 分别重复查库。
+			targetEventID, targetErr := repository.LoadUsageAggregationTargetEventID(ctx, writeDB)
+			if targetErr != nil {
 				result := newRedisBatchSyncResult("failed", 0)
 				result.Empty = true
-				return result, overviewErr
+				return result, targetErr
 			}
-			// Activity 失败后可能出现 Overview 已追平而 Activity 独立落后的状态。
-			pendingActivity, activityErr := repository.HasPendingUsageActivityAggregation(ctx, writeDB)
-			if activityErr != nil {
+			snapshot, snapshotErr := repository.LoadUsageAggregationCheckpointSnapshot(ctx, writeDB)
+			if snapshotErr != nil {
 				result := newRedisBatchSyncResult("failed", 0)
 				result.Empty = true
-				return result, activityErr
+				return result, snapshotErr
 			}
-			// 任一全局 cursor 落后时运行兼容完整 catch-up，并保留旧错误返回语义。
-			if pendingOverview || pendingActivity {
+			pendingIdentity, identityErr := repository.HasPendingUsageIdentityAggregation(ctx, writeDB)
+			if identityErr != nil {
+				result := newRedisBatchSyncResult("failed", 0)
+				result.Empty = true
+				return result, identityErr
+			}
+			// 任一派生结果落后时运行兼容完整 catch-up；全部追平后继续保持空批静默。
+			pendingRollup := snapshot.OverviewCursor < targetEventID || snapshot.ActivityCursor < targetEventID || snapshot.LatencyCursor < targetEventID
+			if pendingRollup || pendingIdentity {
 				if aggregateErr := s.aggregateUsageEventStatsFallback(ctx, writeDB, fetchedAt); aggregateErr != nil {
 					result := newRedisBatchSyncResult("failed", 0)
 					result.Empty = true
@@ -288,11 +299,14 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, writeDB *gorm.D
 		if persistErr != nil {
 			return persistErr
 		}
-		// validRows 和 events 按同一循环 append，索引一一对应。
+		// validRows 和 events 按同一循环 append，先固定一一对应关系，再由仓储层按 SQLite 变量上限分批标记。
+		processedUpdates := make([]repository.RedisUsageInboxProcessedUpdate, 0, len(validRows))
 		for i, row := range validRows {
-			if markErr := repository.MarkRedisUsageInboxProcessed(tx, row.ID, events[i].EventKey, fetchedAt); markErr != nil {
-				return fmt.Errorf("mark redis usage inbox processed: %w", markErr)
-			}
+			processedUpdates = append(processedUpdates, repository.RedisUsageInboxProcessedUpdate{ID: row.ID, EventKey: events[i].EventKey})
+		}
+		// 所有子批次仍在当前外层事务内；任意标记失败都会连同 usage_events 和前序标记一起回滚。
+		if markErr := repository.MarkRedisUsageInboxProcessedBatch(tx, processedUpdates, fetchedAt); markErr != nil {
+			return fmt.Errorf("mark redis usage inbox processed: %w", markErr)
 		}
 		return nil
 	})
@@ -318,12 +332,10 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, writeDB *gorm.D
 			// 缓存队列满只影响 realtime/边界缓存的新鲜度，不能反向阻塞或回滚写入链路。
 			logrus.WithField("event_count", len(events)).Warn("recent usage event cache append skipped")
 		}
-		// 同批 header snapshots 先保持既有 auth_index 去重语义，减少 runner 内存合并输入。
-		headerSnapshots = coalesceUsageHeaderSnapshotsByAuthIndex(headerSnapshots)
-		// usage 与 inbox 状态已经提交后，生产 notifier 只更新内存目标并立即返回。
+		// usage 与 inbox 状态已经提交后，生产 notifier 只更新 rollups/Identity 内存目标并立即返回。
 		if s.usageAggregation != nil {
-			// runner 用已回填自增 ID 的 events 建立 Overview checkpoint gate。
-			s.usageAggregation.NotifyUsageEventsCommitted(events, headerSnapshots)
+			// runner 只接收带自增 ID 的事件，不再持有 Header、Quota 或 auth_index 合并状态。
+			s.usageAggregation.NotifyUsageEventsCommitted(events)
 		} else {
 			// 没有 notifier 的兼容构造路径恢复 main 的同步聚合结果。
 			if aggregateErr := s.aggregateUsageEventStatsFallback(ctx, writeDB, timeutil.NormalizeStorageTime(s.now())); aggregateErr != nil {
@@ -333,10 +345,11 @@ func (s *SyncService) processRedisInboxRows(ctx context.Context, writeDB *gorm.D
 				failureResult.DiscardedRows = failureCounts.discarded
 				return failureResult, aggregateErr
 			}
-			// 兼容 appender 只在旧聚合已经追平后接收 header snapshots。
-			if s.usageHeaderQuota != nil && len(headerSnapshots) > 0 && !s.usageHeaderQuota.TryAppendUsageHeaderSnapshots(headerSnapshots) {
-				logrus.WithField("snapshot_count", len(headerSnapshots)).Warn("usage header quota cache append skipped")
-			}
+		}
+		// Header 原样交给独立 Quota worker；按 auth_index 合并属于一分钟窗口的消费职责。
+		if s.usageHeaderQuota != nil && len(headerSnapshots) > 0 && !s.usageHeaderQuota.TryAppendUsageHeaderSnapshots(headerSnapshots) {
+			// 队列拒绝只影响 quota 新鲜度，不能回滚已经提交的 usage/inbox 状态。
+			logrus.WithField("snapshot_count", len(headerSnapshots)).Warn("usage header quota cache append skipped")
 		}
 	}
 	logrus.WithFields(logrus.Fields{
@@ -384,30 +397,6 @@ func newRedisBatchSyncResult(status string, processedRows int) *servicedto.Redis
 	batchFull := processedRows >= redisInboxProcessLimit
 	// 返回统一填充批次信号的 Redis 处理结果。
 	return &servicedto.RedisBatchSyncResult{Status: status, ProcessedRows: processedRows, BatchFull: batchFull}
-}
-
-func coalesceUsageHeaderSnapshotsByAuthIndex(snapshots []quota.UsageHeaderSnapshot) []quota.UsageHeaderSnapshot {
-	if len(snapshots) <= 1 {
-		return snapshots
-	}
-	indexByAuthIndex := make(map[string]int, len(snapshots))
-	coalesced := make([]quota.UsageHeaderSnapshot, 0, len(snapshots))
-	for _, snapshot := range snapshots {
-		authIndex := strings.TrimSpace(snapshot.AuthIndex)
-		if authIndex == "" {
-			continue
-		}
-		snapshot.AuthIndex = authIndex
-		if index, ok := indexByAuthIndex[authIndex]; ok {
-			if !snapshot.ObservedAt.Before(coalesced[index].ObservedAt) {
-				coalesced[index] = snapshot
-			}
-			continue
-		}
-		indexByAuthIndex[authIndex] = len(coalesced)
-		coalesced = append(coalesced, snapshot)
-	}
-	return coalesced
 }
 
 type usageEventTypeResolver struct {
@@ -773,20 +762,22 @@ func resolveUsageEventType(event entities.UsageEvent, resolver usageEventTypeRes
 
 // aggregateUsageEventStatsFallback 只供未注入后台 notifier 的兼容构造路径保留 main 聚合语义。
 func (s *SyncService) aggregateUsageEventStatsFallback(ctx context.Context, writeDB *gorm.DB, now time.Time) error {
-	// Identity 继续保持 main 的第一执行顺序和每行 cursor 语义。
-	if err := repository.AggregateUsageIdentityStats(ctx, writeDB, now); err != nil {
-		return fmt.Errorf("aggregate usage identity stats after redis inbox processing: %w", err)
-	}
-	// Overview 继续维护旧 hourly/daily、cached_tokens 和原 checkpoint。
+	// 兼容路径同样逐类尝试；任一结果失败只保留自己的旧水位，不能阻止其它派生结果追赶。
+	errs := make([]error, 0, 4)
 	if err := repository.AggregateUsageOverviewStats(ctx, writeDB, now); err != nil {
-		return fmt.Errorf("aggregate usage overview stats after redis inbox processing: %w", err)
+		errs = append(errs, fmt.Errorf("aggregate usage overview stats after redis inbox processing: %w", err))
 	}
-	// Activity 是 PR1 新增结果，兼容路径也必须推进自己的独立 checkpoint。
 	if err := repository.AggregateUsageActivityStats(ctx, writeDB, now); err != nil {
-		return fmt.Errorf("aggregate usage activity stats after redis inbox processing: %w", err)
+		errs = append(errs, fmt.Errorf("aggregate usage activity stats after redis inbox processing: %w", err))
 	}
-	// 三类完整 catch-up 均成功后返回。
-	return nil
+	if err := repository.AggregateUsageLatencyStats(ctx, writeDB, now); err != nil {
+		errs = append(errs, fmt.Errorf("aggregate usage latency stats after redis inbox processing: %w", err))
+	}
+	// Identity 仍使用每行 cursor，但它自己的失败不再反向阻塞三个全局 rollup。
+	if err := repository.AggregateUsageIdentityStats(ctx, writeDB, now); err != nil {
+		errs = append(errs, fmt.Errorf("aggregate usage identity stats after redis inbox processing: %w", err))
+	}
+	return joinErrors(errs...)
 }
 
 // persistRedisUsageEvents 写入 Redis inbox 解码出的 usage_events。

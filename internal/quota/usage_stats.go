@@ -25,7 +25,7 @@ func (s *Service) attachWindowUsageStats(ctx context.Context, authIndex string, 
 	if s == nil {
 		return response
 	}
-	calculator, err := repository.NewUsageWindowStatsCalculator(ctx, s.db)
+	calculator, err := repository.NewUsageWindowStatsCalculator(ctx, s.db, s.pricing.NewResolver())
 	if err != nil {
 		return response
 	}

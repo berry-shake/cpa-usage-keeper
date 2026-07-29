@@ -35,15 +35,15 @@ interface CredentialTableHeaderProps {
 
 export function CredentialSectionShell({ title, subtitle, countLabel, titleExtra, actions, style, children }: CredentialSectionShellProps) {
   return (
-    <section className={styles.credentialSectionCard} style={style}>
+    <section className={`${styles.credentialSectionCard} keeper-card-surface`} style={style}>
       <div className={styles.credentialSectionHeader}>
         <div className={styles.credentialSectionTitleBlock}>
-          <div className={styles.credentialSectionTitleRow}>
-            <h3 className={styles.credentialSectionTitle}>{title}</h3>
+          <div className={`${styles.credentialSectionTitleRow} keeper-card-title-track`}>
+            <h3 className={`${styles.credentialSectionTitle} keeper-card-title`}>{title}</h3>
             <span className={styles.credentialCountBadge}>{countLabel}</span>
             {titleExtra}
           </div>
-          <p className={styles.credentialSectionSubtitle}>{subtitle}</p>
+          <p className={`${styles.credentialSectionSubtitle} keeper-card-subtitle`}>{subtitle}</p>
         </div>
         {actions && <div className={styles.credentialSectionActions}>{actions}</div>}
       </div>
