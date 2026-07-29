@@ -199,6 +199,22 @@ func TestPricingMutationCommitFailureKeepsPreviousCatalog(t *testing.T) {
 	}
 	assertPricingDatabasePrompt(t, db, "model-a", 1)
 	assertPricingCatalogCost(t, catalog, "model-a", 1)
+
+	var probeCount int64
+	if err := db.Table("pricing_commit_failure_probe").Count(&probeCount).Error; err != nil {
+		t.Fatalf("count rolled-back deferred failure rows: %v", err)
+	}
+	if probeCount != 0 {
+		t.Fatalf("expected deferred failure row to rollback, got %d", probeCount)
+	}
+	if err := db.Exec("DROP TRIGGER fail_pricing_commit").Error; err != nil {
+		t.Fatalf("drop deferred failure trigger after rollback: %v", err)
+	}
+	if _, err := pricingProvider.UpdatePricing(context.Background(), servicedto.UpdatePricingInput{Model: "model-a", PromptPricePer1M: 4}); err != nil {
+		t.Fatalf("update pricing after failed commit: %v", err)
+	}
+	assertPricingDatabasePrompt(t, db, "model-a", 4)
+	assertPricingCatalogCost(t, catalog, "model-a", 4)
 }
 
 func TestPricingMutationConcurrentWritesLeaveDatabaseAndCatalogConsistent(t *testing.T) {

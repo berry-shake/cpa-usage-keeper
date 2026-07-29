@@ -9,6 +9,7 @@ import (
 
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	repodto "cpa-usage-keeper/internal/repository/dto"
 	"gorm.io/gorm"
 )
@@ -81,7 +82,7 @@ func TestUsageAggregatesApplyModelAuthAndResultFilters(t *testing.T) {
 	}
 	filter := repodto.UsageQueryFilter{Model: "claude-sonnet", AuthIndex: "1", Result: "success"}
 
-	page, err := ListUsageEventsWithFilter(db, filter)
+	page, err := ListUsageEventsWithFilter(db, filter, emptyPricingResolverForTest())
 	if err != nil {
 		t.Fatalf("ListUsageEventsWithFilter returned error: %v", err)
 	}
@@ -110,9 +111,9 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 	}
 	events := []entities.UsageEvent{
 		{
-			EventKey:     "credential-cost-1",
-			APIGroupKey:  "provider-a",
-			Model:        "claude-sonnet",
+			EventKey:        "credential-cost-1",
+			APIGroupKey:     "provider-a",
+			Model:           "claude-sonnet",
 			Timestamp:       time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
 			Source:          "source-a",
 			AuthIndex:       "1",
@@ -161,6 +162,75 @@ func TestUsageCredentialStatsIncludeTokenCost(t *testing.T) {
 	}
 	if unknown.CostAvailable || unknown.TotalCost != 0 {
 		t.Fatalf("expected missing pricing to mark cost unavailable, got %+v", unknown)
+	}
+}
+
+func TestUsageCredentialStatsApplyPricingRulesBeforeFoldingRows(t *testing.T) {
+	db := openUsageTestDatabase(t)
+	events := []entities.UsageEvent{
+		{
+			EventKey:        "credential-rule-priority",
+			APIGroupKey:     "provider-a",
+			Model:           "model-a",
+			ServiceTier:     "priority",
+			ReasoningEffort: "xhigh",
+			Timestamp:       time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+			Source:          "source-a",
+			AuthIndex:       "1",
+			InputTokens:     1_000_000,
+			TotalTokens:     1_000_000,
+		},
+		{
+			EventKey:        "credential-rule-default",
+			APIGroupKey:     "provider-a",
+			Model:           "model-a",
+			ServiceTier:     "default",
+			ReasoningEffort: "low",
+			Timestamp:       time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC),
+			Source:          "source-a",
+			AuthIndex:       "1",
+			InputTokens:     1_000_000,
+			TotalTokens:     1_000_000,
+		},
+	}
+	if _, _, err := InsertUsageEvents(db, events); err != nil {
+		t.Fatalf("InsertUsageEvents returned error: %v", err)
+	}
+	one := 1.0
+	snapshot, err := pricing.CompileSnapshot([]pricing.ModelConfig{{
+		Pricing: entities.ModelPriceSetting{
+			Model:            "model-a",
+			PricingStyle:     entities.ModelPricingStyleOpenAI,
+			PromptPricePer1M: 1,
+			PriceMultiplier:  &one,
+		},
+		Rules: []pricing.RuleConfig{
+			{Key: "service_tier", Value: "priority", Multiplier: 2},
+			{Key: "reasoning_effort", Value: "xhigh", Multiplier: 3},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("CompileSnapshot returned error: %v", err)
+	}
+
+	rows, err := ListUsageCredentialStatsWithFilter(
+		db,
+		repodto.UsageQueryFilter{},
+		pricing.NewCatalog(snapshot).NewResolver(),
+	)
+	if err != nil {
+		t.Fatalf("ListUsageCredentialStatsWithFilter returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected pricing dimensions to fold back into one credential row, got %+v", rows)
+	}
+	got := rows[0]
+	if got.RequestCount != 2 || got.InputTokens != 2_000_000 || got.TotalTokens != 2_000_000 {
+		t.Fatalf("expected both pricing groups in credential totals, got %+v", got)
+	}
+	// The priority/xhigh event costs 1 * 2 * 3, and the default/low event costs 1.
+	if !got.CostAvailable || math.Abs(got.TotalCost-7) > 0.000000001 {
+		t.Fatalf("expected pricing-rule cost 7 after folding, got %+v", got)
 	}
 }
 

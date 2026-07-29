@@ -20,7 +20,8 @@ func TestAggregatorBuildsOneUTCDayFromUsageEvents(t *testing.T) {
 	ttft200 := int64(200)
 	ttftOutside := int64(999)
 	events := []entities.UsageEvent{
-		{EventKey: "before", Timestamp: start.Add(-time.Nanosecond), TTFTMS: &ttftOutside, LatencyMS: 999, InputTokens: 999, TotalTokens: 999},
+		// storageTime persists second precision, so keep the out-of-range fixture one full second before start.
+		{EventKey: "before", Timestamp: start.Add(-time.Second), TTFTMS: &ttftOutside, LatencyMS: 999, InputTokens: 999, TotalTokens: 999},
 		{EventKey: "valid-a", Timestamp: start.Add(time.Minute), TTFTMS: &ttft100, LatencyMS: 500, InputTokens: 10, OutputTokens: 1, ReasoningTokens: 2, CacheReadTokens: 3, CacheCreationTokens: 4, TotalTokens: 100},
 		{EventKey: "valid-b", Timestamp: start.Add(4 * time.Minute), TTFTMS: &ttft200, LatencyMS: 600, InputTokens: 20, OutputTokens: 2, ReasoningTokens: 3, CacheReadTokens: 4, CacheCreationTokens: 5, TotalTokens: 200},
 		{EventKey: "failed", Timestamp: start.Add(6 * time.Minute), Failed: true, TTFTMS: &ttftOutside, LatencyMS: 900, InputTokens: 30, OutputTokens: 3, ReasoningTokens: 4, CacheReadTokens: 5, CacheCreationTokens: 6, TotalTokens: 400},

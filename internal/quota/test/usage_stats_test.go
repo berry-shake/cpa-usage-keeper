@@ -9,6 +9,7 @@ import (
 
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricing"
 	. "cpa-usage-keeper/internal/quota"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/repository/dto"
@@ -205,8 +206,6 @@ func TestAttachWindowUsageStatsOnlyBackfillsMissingKnownWindowScopeRows(t *testi
 
 func TestAttachWindowUsageStatsBackfillsFableModelRowWithModelFilteredUsage(t *testing.T) {
 	db := openQuotaUsageStatsTestDB(t)
-	service := NewServiceWithRegistry(db, NewProviderRegistry(nil))
-	defer service.StopRefreshTasks()
 	weeklySeconds := int64(7 * 24 * 60 * 60)
 	resetAt := time.Date(2026, 6, 2, 5, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 6, 2, 3, 0, 0, 0, time.UTC)
@@ -217,6 +216,12 @@ func TestAttachWindowUsageStatsBackfillsFableModelRowWithModelFilteredUsage(t *t
 	if _, err := repository.UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-sonnet-5", PromptPricePer1M: 20}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}
+	snapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
+	if err != nil {
+		t.Fatalf("LoadPricingSnapshot returned error: %v", err)
+	}
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), pricing.NewCatalog(snapshot))
+	defer service.StopRefreshTasks()
 	events := []entities.UsageEvent{
 		{AuthIndex: "auth-fable", Model: "claude-fable-5", Timestamp: now.Add(-time.Hour), InputTokens: 1_000_000, TotalTokens: 1_000_000},
 		{AuthIndex: "auth-fable", Model: "claude-sonnet-5", Timestamp: now.Add(-time.Hour), InputTokens: 2_000_000, TotalTokens: 2_000_000},
