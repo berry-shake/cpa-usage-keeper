@@ -55,6 +55,15 @@ describe('Credential stats Apple-style interaction contract', () => {
     expect(marker).not.toContain('border-radius: 50%;');
   });
 
+  it('keeps the original success and cache rate palette in light and dark themes', () => {
+    expect(styles).toContain('--credential-stats-tone-success: #16a34a;');
+    expect(styles).toContain('--credential-stats-tone-warning: #d97706;');
+    expect(styles).toContain('--credential-stats-tone-danger: #dc2626;');
+    expect(styles).toContain('--credential-stats-tone-success: #4ade80;');
+    expect(styles).toContain('--credential-stats-tone-warning: #fbbf24;');
+    expect(styles).toContain('--credential-stats-tone-danger: #f87171;');
+  });
+
   it('adapts material and motion to user accessibility preferences', () => {
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
     expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
