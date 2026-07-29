@@ -1,20 +1,27 @@
-import { Fragment, useMemo, useState } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { IconChevronDown } from '@/components/ui/icons';
-import { calculateCacheReadRate, formatCompactNumber, formatUsd } from '@/utils/usage';
+import { calculateCacheReadRate, formatUsd } from '@/utils/usage';
 import type { UsageCredential } from '@/lib/types';
 import {
   cacheReadRateTone,
+  CredentialBadge,
   CredentialSectionShell,
+  CredentialTableHeader,
   formatCredentialNumber,
   formatCredentialPercent,
+  MetricPill,
+  RequestMetric,
   successRateTone,
+  TonePercent,
 } from './credentials/CredentialSectionShell';
 import styles from './CredentialStatsCard.module.scss';
 
 export interface CredentialStatsCardProps {
   credentials: UsageCredential[];
   loading: boolean;
+  error?: string;
 }
 
 export interface CredentialRow {
@@ -24,7 +31,7 @@ export interface CredentialRow {
   success: number;
   failure: number;
   total: number;
-  successRate: number;
+  successRate: number | null;
   tokens: number;
   inputTokens: number;
   cachedTokens: number;
@@ -39,13 +46,70 @@ export interface CredentialModelRow {
   success: number;
   failure: number;
   total: number;
-  successRate: number;
+  successRate: number | null;
   tokens: number;
   inputTokens: number;
   cachedTokens: number;
   cacheRate: number | null;
   cost: number;
   costAvailable: boolean;
+}
+
+interface CredentialMetricValues {
+  success: number;
+  failure: number;
+  total: number;
+  successRate: number | null;
+  tokens: number;
+  cacheRate: number | null;
+  cost: number;
+  costAvailable: boolean;
+}
+
+interface CredentialMetricLabels {
+  requests: string;
+  success: string;
+  failure: string;
+  successRate: string;
+  tokens: string;
+  cacheRate: string;
+  cost: string;
+}
+
+type CredentialMetricTone = ReturnType<typeof successRateTone>;
+
+function metricToneClassName(tone: CredentialMetricTone): string {
+  switch (tone) {
+    case 'success':
+      return styles.metricToneSuccess;
+    case 'warning':
+      return styles.metricToneWarning;
+    case 'danger':
+      return styles.metricToneDanger;
+    default:
+      return '';
+  }
+}
+
+function buildCredentialMetricDescription(
+  row: CredentialMetricValues,
+  labels: CredentialMetricLabels,
+  showCost: boolean,
+): string {
+  const description = [
+    `${labels.requests}: ${formatCredentialNumber(row.total)}`,
+    `${labels.success}: ${formatCredentialNumber(row.success)}`,
+    `${labels.failure}: ${formatCredentialNumber(row.failure)}`,
+    `${labels.successRate}: ${formatCredentialPercent(row.successRate)}`,
+    `${labels.tokens}: ${formatCredentialNumber(row.tokens)}`,
+    `${labels.cacheRate}: ${formatCredentialPercent(row.cacheRate)}`,
+  ];
+
+  if (showCost) {
+    description.push(`${labels.cost}: ${formatCredentialCost(row)}`);
+  }
+
+  return description.join('; ');
 }
 
 export function buildCredentialModelRows(models: UsageCredential['models'] = []): CredentialModelRow[] {
@@ -62,7 +126,7 @@ export function buildCredentialModelRows(models: UsageCredential['models'] = [])
         success,
         failure,
         total,
-        successRate: total > 0 ? (success / total) * 100 : 100,
+        successRate: total > 0 ? (success / total) * 100 : null,
         tokens: Number(model.total_tokens) || 0,
         inputTokens,
         cachedTokens,
@@ -98,7 +162,7 @@ export function buildCredentialRows(credentials: UsageCredential[]): CredentialR
         success,
         failure,
         total,
-        successRate: total > 0 ? (success / total) * 100 : 100,
+        successRate: total > 0 ? (success / total) * 100 : null,
         tokens: Number(credential.total_tokens) || 0,
         inputTokens,
         cachedTokens,
@@ -115,61 +179,94 @@ export function formatCredentialCost(row: Pick<CredentialRow, 'cost' | 'costAvai
   return row.costAvailable || row.cost > 0 ? formatUsd(row.cost) : '--';
 }
 
-function RequestMetricValue({ total, success, failure }: { total: number; success: number; failure: number }) {
+function MetricCell({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <span className={styles.requestMetric}>
-      <strong>{formatCredentialNumber(total)}</strong>
-      <span className={styles.requestBreakdown}>
-        (<span className={styles.metricValueSuccess}>{formatCredentialNumber(success)}</span>/<span className={styles.metricValueDanger}>{formatCredentialNumber(failure)}</span>)
+    <span className={`${styles.metricCell} ${className}`.trim()}>
+      <span className={styles.mobileMetricLabel}>{label}</span>
+      {children}
+    </span>
+  );
+}
+
+function CredentialMetrics({ row, labels, showCost }: {
+  row: CredentialMetricValues;
+  labels: CredentialMetricLabels;
+  showCost: boolean;
+}) {
+  const successTone = successRateTone(row.successRate);
+  const cacheTone = cacheReadRateTone(row.cacheRate);
+
+  return (
+    <>
+      <span className={styles.metricGroup}>
+        <MetricCell label={labels.requests}>
+          <MetricPill value={<RequestMetric total={row.total} success={row.success} failure={row.failure} />} />
+        </MetricCell>
+        <MetricCell label={labels.successRate} className={metricToneClassName(successTone)}>
+          <MetricPill value={<TonePercent value={row.successRate} tone={successTone} />} />
+        </MetricCell>
+        <MetricCell label={labels.tokens}>
+          <MetricPill value={formatCredentialNumber(row.tokens)} />
+        </MetricCell>
+        <MetricCell label={labels.cacheRate} className={metricToneClassName(cacheTone)}>
+          <MetricPill value={<TonePercent value={row.cacheRate} tone={cacheTone} />} />
+        </MetricCell>
       </span>
-    </span>
+      {showCost && (
+        <MetricCell label={labels.cost} className={styles.costCell}>
+          <MetricPill value={formatCredentialCost(row)} />
+        </MetricCell>
+      )}
+    </>
   );
 }
 
-function MetricPill({ label, value, valueClassName }: { label: string; value: React.ReactNode; valueClassName?: string }) {
+function CredentialStatsSkeleton({ loadingLabel }: { loadingLabel: string }) {
   return (
-    <span className={styles.metricPill}>
-      <span className={styles.metricLabel}>{label}</span>
-      <span className={`${styles.metricValue} ${valueClassName ?? ''}`.trim()}>{value}</span>
-    </span>
+    <div className={styles.skeleton} role="status" aria-label={loadingLabel} aria-busy="true">
+      {[0, 1, 2].map((index) => (
+        <div key={index} className={styles.skeletonRow} aria-hidden="true">
+          <span className={styles.skeletonIdentity}>
+            <span className={`${styles.skeletonBar} ${styles.skeletonBarWide}`.trim()} />
+            <span className={styles.skeletonBadge} />
+          </span>
+          <span className={styles.skeletonMetricGroup}>
+            <span className={`${styles.skeletonBar} ${styles.skeletonBarWide}`.trim()} />
+            <span className={styles.skeletonBar} />
+            <span className={styles.skeletonBar} />
+            <span className={styles.skeletonBar} />
+          </span>
+          <span className={`${styles.skeletonBar} ${styles.skeletonBarShort}`.trim()} />
+        </div>
+      ))}
+    </div>
   );
 }
 
-function successRateValueClass(rate: number): string {
-  const tone = successRateTone(rate);
-  switch (tone) {
-    case 'success':
-      return styles.metricValueSuccess;
-    case 'warning':
-      return styles.metricValueWarning;
-    case 'danger':
-      return styles.metricValueDanger;
-    default:
-      return '';
-  }
-}
-
-function cacheRateValueClass(rate: number | null): string {
-  const tone = cacheReadRateTone(rate);
-  switch (tone) {
-    case 'success':
-      return styles.metricValueSuccess;
-    case 'warning':
-      return styles.metricValueWarning;
-    case 'danger':
-      return styles.metricValueDanger;
-    default:
-      return '';
-  }
-}
-
-export function CredentialStatsCard({ credentials, loading }: CredentialStatsCardProps) {
+export function CredentialStatsCard({ credentials, loading, error = '' }: CredentialStatsCardProps) {
   const { t } = useTranslation();
+  const disclosureId = useId().replace(/[^a-zA-Z0-9_-]/g, '') || 'stats';
   const [expandedCredentials, setExpandedCredentials] = useState<Set<string>>(new Set());
+  const [revealedCredentials, setRevealedCredentials] = useState<Set<string>>(new Set());
   const rows = useMemo(() => buildCredentialRows(credentials), [credentials]);
   const showCost = useMemo(() => rows.some((row) => row.costAvailable || row.cost > 0), [rows]);
+  const metricLabels: CredentialMetricLabels = {
+    requests: t('usage_stats.requests_count'),
+    success: t('usage_stats.success'),
+    failure: t('usage_stats.failure'),
+    successRate: t('usage_stats.success_rate'),
+    tokens: t('usage_stats.tokens_count'),
+    cacheRate: t('usage_stats.cache_rate'),
+    cost: t('usage_stats.total_cost'),
+  };
 
   const toggleExpand = (key: string) => {
+    setRevealedCredentials((current) => {
+      if (current.has(key)) return current;
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
     setExpandedCredentials((current) => {
       const next = new Set(current);
       if (next.has(key)) {
@@ -186,114 +283,128 @@ export function CredentialStatsCard({ credentials, loading }: CredentialStatsCar
       title={t('usage_stats.credential_stats_title')}
       subtitle={t('usage_stats.credential_stats_subtitle')}
       countLabel={t('usage_stats.credentials_count', { count: rows.length })}
-    >
-      {loading && rows.length === 0 && (
-        <div className={styles.state}>{t('common.loading')}</div>
-      )}
-      {!loading && rows.length === 0 && (
-        <div className={styles.state}>{t('usage_stats.no_data')}</div>
-      )}
-      {rows.map((row) => {
-        const isExpandable = row.models.length > 0;
-        const isExpanded = expandedCredentials.has(row.key);
-        const panelId = `credential-models-${row.key}`;
-
-        const titleNode = isExpandable ? (
-          <button
-            type="button"
-            className={styles.titleButton}
-            onClick={() => toggleExpand(row.key)}
-            aria-expanded={isExpanded}
-            aria-controls={panelId}
-          >
-            <span className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ''}`.trim()} aria-hidden="true">
-              <IconChevronDown size={14} />
-            </span>
-            <span className={styles.displayName}>{row.displayName}</span>
-          </button>
-        ) : (
-          <span className={styles.displayName}>{row.displayName}</span>
-        );
-
-        return (
-          <div
-            key={row.key}
-            className={`${styles.itemWrap} ${isExpanded ? styles.expanded : ''}`.trim()}
-          >
-            <div className={styles.row}>
-              <div className={styles.identityBlock}>
-                {titleNode}
-                {row.type && <span className={styles.typeBadge}>{row.type}</span>}
-              </div>
-              <div className={`${styles.metricGroup} ${showCost ? styles.metricGroupWithCost : ''}`.trim()}>
-                <MetricPill
-                  label={t('usage_stats.requests_count')}
-                  value={<RequestMetricValue total={row.total} success={row.success} failure={row.failure} />}
-                />
-                <MetricPill
-                  label={t('usage_stats.success_rate')}
-                  value={formatCredentialPercent(row.successRate)}
-                  valueClassName={successRateValueClass(row.successRate)}
-                />
-                <MetricPill
-                  label={t('usage_stats.tokens_count')}
-                  value={formatCompactNumber(row.tokens)}
-                />
-                <MetricPill
-                  label={t('usage_stats.cache_rate')}
-                  value={formatCredentialPercent(row.cacheRate)}
-                  valueClassName={cacheRateValueClass(row.cacheRate)}
-                />
-                {showCost && (
-                  <MetricPill label={t('usage_stats.total_cost')} value={formatCredentialCost(row)} />
-                )}
-              </div>
-            </div>
-            {isExpandable && isExpanded && (
-              <div
-                id={panelId}
-                className={styles.modelsPanel}
-              >
-                {row.models.map((model) => (
-                  <Fragment key={model.model}>
-                    <div className={`${styles.modelItem} ${showCost ? '' : styles.modelItemNoCost}`.trim()}>
-                      <span className={styles.modelName}>{model.model}</span>
-                      <span className={styles.modelMetric}>
-                        <span className={styles.modelMetricLabel}>{t('usage_stats.requests_count')}</span>
-                        <span className={styles.modelMetricValue}>
-                          <RequestMetricValue total={model.total} success={model.success} failure={model.failure} />
-                        </span>
-                      </span>
-                      <span className={styles.modelMetric}>
-                        <span className={styles.modelMetricLabel}>{t('usage_stats.success_rate')}</span>
-                        <span className={`${styles.modelMetricValue} ${successRateValueClass(model.successRate)}`.trim()}>
-                          {formatCredentialPercent(model.successRate)}
-                        </span>
-                      </span>
-                      <span className={styles.modelMetric}>
-                        <span className={styles.modelMetricLabel}>{t('usage_stats.tokens_count')}</span>
-                        <span className={styles.modelMetricValue}>{formatCompactNumber(model.tokens)}</span>
-                      </span>
-                      <span className={styles.modelMetric}>
-                        <span className={styles.modelMetricLabel}>{t('usage_stats.cache_rate')}</span>
-                        <span className={`${styles.modelMetricValue} ${cacheRateValueClass(model.cacheRate)}`.trim()}>
-                          {formatCredentialPercent(model.cacheRate)}
-                        </span>
-                      </span>
-                      {showCost && (
-                        <span className={styles.modelMetric}>
-                          <span className={styles.modelMetricLabel}>{t('usage_stats.total_cost')}</span>
-                          <span className={styles.modelMetricValue}>{formatCredentialCost(model)}</span>
-                        </span>
-                      )}
-                    </div>
-                  </Fragment>
-                ))}
-              </div>
-            )}
+      actions={loading && rows.length > 0 ? (
+        <div className={styles.refreshStatus} aria-live="polite">
+          <div className={styles.refreshIcon} aria-hidden="true">
+            <LoadingSpinner size={12} className={styles.refreshSpinner} />
           </div>
-        );
-      })}
+          <span>{t('common.loading')}</span>
+        </div>
+      ) : undefined}
+    >
+      <div className={styles.table} aria-busy={loading}>
+        {loading && rows.length === 0 && <CredentialStatsSkeleton loadingLabel={t('common.loading')} />}
+        {!loading && rows.length === 0 && error && (
+          <div className={`${styles.state} ${styles.stateError}`.trim()} role="alert">{error}</div>
+        )}
+        {!loading && rows.length === 0 && !error && (
+          <div className={styles.state}>{t('usage_stats.no_data')}</div>
+        )}
+        {rows.length > 0 && (
+          <CredentialTableHeader
+            rowClassName={`${styles.tableHeader} ${showCost ? styles.tableHeaderWithCost : ''}`.trim()}
+            nameLabel={t('usage_stats.credential_name')}
+            totalRequestsLabel={metricLabels.requests}
+            successRateLabel={metricLabels.successRate}
+            totalTokensLabel={metricLabels.tokens}
+            cacheReadRateLabel={metricLabels.cacheRate}
+            sideLabel={showCost ? metricLabels.cost : ''}
+          />
+        )}
+        {rows.map((row, index) => {
+          const isExpandable = row.models.length > 0;
+          const isExpanded = isExpandable && expandedCredentials.has(row.key);
+          const hasRevealedModels = isExpandable && revealedCredentials.has(row.key);
+          const panelId = `credential-models-${disclosureId}-${index}`;
+          const labelId = `${panelId}-label`;
+          const descriptionId = `${panelId}-metrics`;
+          const rowClassName = [
+            styles.row,
+            showCost ? styles.rowWithCost : '',
+            isExpandable ? styles.rowInteractive : '',
+            isExpanded ? styles.rowExpanded : '',
+          ].filter(Boolean).join(' ');
+
+          const rowContent = (
+            <>
+              <span className={styles.identityBlock}>
+                <span className={`${styles.nameRow} ${isExpandable ? '' : styles.nameRowStatic}`.trim()}>
+                  {isExpandable && (
+                    <span className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ''}`.trim()} aria-hidden="true">
+                      <IconChevronDown size={14} />
+                    </span>
+                  )}
+                  <span id={labelId} className={styles.displayName}>{row.displayName}</span>
+                </span>
+                {row.type && (
+                  <span className={styles.typeBadgeWrap}>
+                    <CredentialBadge>{row.type}</CredentialBadge>
+                  </span>
+                )}
+              </span>
+              <CredentialMetrics row={row} labels={metricLabels} showCost={showCost} />
+            </>
+          );
+
+          return (
+            <article
+              key={row.key}
+              className={`${styles.itemWrap} ${isExpanded ? styles.itemWrapExpanded : ''}`.trim()}
+            >
+              {isExpandable ? (
+                <button
+                  type="button"
+                  className={rowClassName}
+                  onClick={() => toggleExpand(row.key)}
+                  aria-expanded={isExpanded}
+                  aria-controls={panelId}
+                  aria-labelledby={labelId}
+                  aria-describedby={descriptionId}
+                >
+                  {rowContent}
+                </button>
+              ) : (
+                <div className={rowClassName}>{rowContent}</div>
+              )}
+              {isExpandable && (
+                <span id={descriptionId} className={styles.visuallyHidden}>
+                  {buildCredentialMetricDescription(row, metricLabels, showCost)}
+                </span>
+              )}
+              {isExpandable && (
+                <div
+                  id={panelId}
+                  className={styles.modelsDisclosure}
+                  data-state={isExpanded ? 'open' : 'closed'}
+                  role="region"
+                  aria-labelledby={labelId}
+                  aria-hidden={!isExpanded}
+                  inert={!isExpanded}
+                >
+                  <div className={styles.modelsClip}>
+                    {hasRevealedModels && (
+                      <div className={styles.modelsPanel}>
+                        {row.models.map((model) => (
+                          <div
+                            key={model.model}
+                            className={`${styles.modelRow} ${showCost ? styles.rowWithCost : ''}`.trim()}
+                          >
+                            <span className={`${styles.identityBlock} ${styles.modelIdentity}`.trim()}>
+                              <span className={styles.modelMarker} aria-hidden="true" />
+                              <span className={styles.modelName}>{model.model}</span>
+                            </span>
+                            <CredentialMetrics row={model} labels={metricLabels} showCost={showCost} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
     </CredentialSectionShell>
   );
 }

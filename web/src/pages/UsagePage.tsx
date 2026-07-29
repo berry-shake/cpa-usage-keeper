@@ -2178,10 +2178,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
             {credentialSectionVisibility.enabled && (
               <>
-                {credentialStatsError && <div className={styles.errorBox}>{credentialStatsError}</div>}
                 <CredentialStatsCard
                   credentials={credentialStatsCredentialsForTab}
                   loading={credentialStatsLoading}
+                  error={credentialStatsError}
                 />
                 {credentialsData.error && <div className={styles.errorBox}>{credentialsData.error}</div>}
                 <CredentialProviderFilterBar
