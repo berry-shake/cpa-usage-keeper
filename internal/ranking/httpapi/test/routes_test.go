@@ -67,6 +67,10 @@ func (s *rankingProviderStub) Leaderboard(_ context.Context, period ranking.Lead
 	return ranking.Leaderboard{
 		Period: period, PeriodKey: "2026-07-24", Metric: metric,
 		GeneratedAt: time.Date(2026, 7, 24, 4, 0, 0, 0, time.UTC), Entries: []ranking.LeaderboardEntry{},
+		ScoreExplanation: &ranking.ScoreExplanation{
+			Version: 2,
+			Texts:   map[string]string{"en": "Overall score V2", "zh": "综合分 V2", "zh-TW": "綜合分 V2"},
+		},
 	}, nil
 }
 
@@ -176,6 +180,9 @@ func TestRankingLeaderboardValidatesAndForwardsSelection(t *testing.T) {
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/ranking/leaderboards?period=today&metric=overall", nil))
 	if response.Code != http.StatusOK || provider.boardPeriod != ranking.LeaderboardToday || provider.boardMetric != ranking.MetricOverall {
 		t.Fatalf("unexpected leaderboard result: status=%d body=%s provider=%+v", response.Code, response.Body.String(), provider)
+	}
+	if !strings.Contains(response.Body.String(), `"score_explanation":{"version":2`) || !strings.Contains(response.Body.String(), `"zh":"综合分 V2"`) {
+		t.Fatalf("leaderboard response dropped score explanation: %s", response.Body.String())
 	}
 	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" || response.Header().Get("Expires") != "0" {
 		t.Fatalf("leaderboard response allowed browser caching: %+v", response.Header())

@@ -98,8 +98,11 @@ func shouldBackfillWindowUsageStats(row QuotaRow) bool {
 	if row.WindowUsageTokens != nil && row.WindowUsageCost != nil {
 		return false
 	}
-	// 本地 usage_events 兜底适用于普通 window scope，以及显式声明了模型过滤关键字的 model scope（如 Fable）。
-	if !strings.EqualFold(strings.TrimSpace(row.Scope), "window") && strings.TrimSpace(row.WindowUsageModelKeyword) == "" {
+	// 普通窗口、显式声明模型过滤关键字的 model scope（如 Fable），以及 xAI canonical Weekly
+	// 都能安全映射到当前 auth_index 的明确时间范围。
+	ordinaryWindow := strings.EqualFold(strings.TrimSpace(row.Scope), "window")
+	modelFilteredWindow := strings.TrimSpace(row.WindowUsageModelKeyword) != ""
+	if !ordinaryWindow && !modelFilteredWindow && !isXAIWeeklyUsageWindowQuotaRow(row) {
 		return false
 	}
 	if row.Window == nil || row.Window.Seconds == nil {

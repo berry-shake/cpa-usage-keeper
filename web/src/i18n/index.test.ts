@@ -131,6 +131,16 @@ describe('i18n resources', () => {
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.speed_hint')).toBe('首字後輸出 token 的平均速度');
   });
 
+  it('labels request event client metadata across languages', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.client_ip')).toBe('Client IP');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.x_forwarded_for')).toBe('X-Forwarded-For');
+    expect(i18n.getResource('en', 'translation', 'usage_stats.user_agent')).toBe('User Agent');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.client_ip')).toBe('客户端 IP');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.user_agent')).toBe('用户代理');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.client_ip')).toBe('用戶端 IP');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.user_agent')).toBe('使用者代理');
+  });
+
   it('uses compact Chinese labels for request event type column', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.request_type')).toBe('Type');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.request_type')).toBe('类型');

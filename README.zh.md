@@ -320,6 +320,15 @@ sudo journalctl -u cpa-usage-keeper -f
 sudo systemctl restart cpa-usage-keeper
 ```
 
+### 命令行参数
+
+二进制支持以下可选启动参数：
+
+```bash
+cpa-usage-keeper --host 127.0.0.1 # 仅为当前进程覆盖 APP_HOST。
+cpa-usage-keeper -v               # 输出构建版本并退出；也支持 --version。
+```
+
 ### Windows Binary
 
 从 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载 `windows_amd64` 或 `windows_arm64` ZIP 并解压。在 PowerShell 中进入解压目录后运行：
@@ -353,11 +362,14 @@ cp .env.example .env
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
+| `APP_HOST` | 否 | 所有接口 | Keeper HTTP 监听主机；原生部署仅允许本机访问时可设为 `127.0.0.1` |
 | `APP_PORT` | 否 | `8080` | Keeper HTTP 监听端口 |
 | `APP_BASE_PATH` | 否 | 根路径 | Keeper 子路径部署前缀，例如 `/keeper`；留空表示部署在 `/` |
 | `CPA_PUBLIC_URL` | 否 | 当前浏览器同源根路径 | 浏览器访问 CPA 的公开地址，用于“返回 CPA”跳转和 CPAMC frame 信任来源 |
 | `FRAME_ANCESTOR_ORIGINS` | 否 | 空 | 额外信任的 `frame-ancestors` 来源，逗号分隔，每项必须是带 host 的 `http://` 或 `https://` URL |
 
+- 启动参数 `--host` 的优先级高于 `APP_HOST`。两者都未设置时，Keeper 保持现有行为，监听所有可用网络接口。
+- Docker/Compose 请保持 `APP_HOST` 为空；如需仅允许 Docker 宿主机访问，请将端口发布为 `127.0.0.1:8080:8080`。
 - `APP_BASE_PATH` 必须为空或以 `/` 开头；`/cpa/` 会规范为 `/cpa`。
 - `CPA_BASE_URL` 是服务端访问 CPA 的地址，可以使用内网地址或 Docker 服务名。
 - `CPA_PUBLIC_URL` 控制浏览器跳转和跨域 CPAMC frame 信任。同源且 CPA 位于 `/management.html` 时可留空；域名、端口或路径不同时应设置公开 CPA 地址。
@@ -459,17 +471,6 @@ CPA 与 Keeper 浏览器同源时，可以不设置 `CPA_PUBLIC_URL`，“返回
 ```env
 CPA_PUBLIC_URL=https://cpa.example.com
 ```
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=willxup%2Fcpa-usage-keeper&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&legend=top-left" />
- </picture>
-</a>
-
 
 ## License
 

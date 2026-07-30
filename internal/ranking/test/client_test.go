@@ -182,7 +182,7 @@ func TestCenterClientReadsLeaderboardWithKeeperMarker(t *testing.T) {
 			t.Fatalf("missing Keeper read marker: %v", request.Header)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"period":"today","period_key":"2026-07-24","metric":"overall","generated_at":"2026-07-24T04:05:06Z","stale":false,"entries":[]}`)
+		_, _ = io.WriteString(w, `{"period":"today","period_key":"2026-07-24","metric":"overall","generated_at":"2026-07-24T04:05:06Z","stale":false,"entries":[],"score_explanation":{"version":2,"texts":{"en":"Overall score V2","zh":"综合分 V2","zh-TW":"綜合分 V2"}}}`)
 	}))
 	defer server.Close()
 
@@ -196,6 +196,9 @@ func TestCenterClientReadsLeaderboardWithKeeperMarker(t *testing.T) {
 	}
 	if board.Period != ranking.LeaderboardToday || board.Metric != ranking.MetricOverall || board.Entries == nil {
 		t.Fatalf("unexpected leaderboard: %+v", board)
+	}
+	if board.ScoreExplanation == nil || board.ScoreExplanation.Version != 2 || board.ScoreExplanation.Texts["zh"] != "综合分 V2" {
+		t.Fatalf("score explanation was not preserved: %+v", board.ScoreExplanation)
 	}
 }
 

@@ -52,9 +52,10 @@ type UsageAggregationRunResult struct {
 	DeferredForInbox bool
 }
 
-// UsageAggregationRunnerOptions 只开放测试需要缩短的时间窗口，不增加用户配置项。
+// UsageAggregationRunnerOptions 只开放测试需要控制的时钟和时间窗口，不增加用户配置项。
 type UsageAggregationRunnerOptions struct {
 	DebounceInterval time.Duration
+	NowFunc          func() time.Time
 }
 
 // UsageAggregationRunner 在一个 goroutine 内公平调度共享 rollups 与既有 Identity。
@@ -94,15 +95,19 @@ func NewUsageAggregationRunner(db *gorm.DB) *UsageAggregationRunner {
 	return NewUsageAggregationRunnerWithOptions(db, UsageAggregationRunnerOptions{})
 }
 
-// NewUsageAggregationRunnerWithOptions 创建可缩短 debounce 的内部测试 runner。
+// NewUsageAggregationRunnerWithOptions 创建可控制时钟和 debounce 的内部测试 runner。
 func NewUsageAggregationRunnerWithOptions(db *gorm.DB, options UsageAggregationRunnerOptions) *UsageAggregationRunner {
 	debounceInterval := options.DebounceInterval
 	if debounceInterval <= 0 {
 		debounceInterval = usageAggregationDefaultDebounceInterval
 	}
+	now := options.NowFunc
+	if now == nil {
+		now = time.Now
+	}
 	return &UsageAggregationRunner{
 		db:                       db,
-		now:                      time.Now,
+		now:                      now,
 		debounceInterval:         debounceInterval,
 		nextKind:                 UsageAggregationKindRollups,
 		identityTargetGeneration: 1, // 启动时必须覆盖一次进程启动前已经存在的 identities。

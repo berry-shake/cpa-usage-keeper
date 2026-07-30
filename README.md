@@ -320,6 +320,15 @@ sudo journalctl -u cpa-usage-keeper -f
 sudo systemctl restart cpa-usage-keeper
 ```
 
+### Command-Line Options
+
+The binary supports optional startup flags:
+
+```bash
+cpa-usage-keeper --host 127.0.0.1 # Override APP_HOST for this process.
+cpa-usage-keeper -v               # Print the build version and exit; --version is also supported.
+```
+
 ### Windows Binary
 
 Download the `windows_amd64` or `windows_arm64` ZIP package from [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) and extract it. In PowerShell, open the extracted package directory and run:
@@ -353,11 +362,14 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
+| `APP_HOST` | No | all interfaces | Keeper HTTP listen host; native deployments can set `127.0.0.1` for local-only access |
 | `APP_PORT` | No | `8080` | Keeper HTTP listen port |
 | `APP_BASE_PATH` | No | root path | Keeper subpath prefix, such as `/keeper`; empty means `/` |
 | `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link and CPAMC frame trust |
 | `FRAME_ANCESTOR_ORIGINS` | No | empty | Extra trusted `frame-ancestors` origins, comma-separated; each entry must be an `http://` or `https://` URL with a host |
 
+- The `--host` startup flag overrides `APP_HOST`. When neither is set, Keeper preserves its existing behavior and listens on all available network interfaces.
+- For Docker/Compose, keep `APP_HOST` empty. To restrict access to the Docker host, publish the port as `127.0.0.1:8080:8080`.
 - `APP_BASE_PATH` must be empty or start with `/`; `/cpa/` is normalized to `/cpa`.
 - `CPA_BASE_URL` is the server-side CPA address and may use a private host or Docker service name.
 - `CPA_PUBLIC_URL` controls browser navigation and cross-origin CPAMC frame trust. Leave it empty for same-origin `/management.html`, or set an explicit public CPA URL when domains, ports, or paths differ.
@@ -459,16 +471,6 @@ When CPA and Keeper share a browser origin, `CPA_PUBLIC_URL` can be omitted and 
 ```env
 CPA_PUBLIC_URL=https://cpa.example.com
 ```
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=willxup%2Fcpa-usage-keeper&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=willxup/cpa-usage-keeper&type=date&legend=top-left" />
- </picture>
-</a>
 
 ## License
 

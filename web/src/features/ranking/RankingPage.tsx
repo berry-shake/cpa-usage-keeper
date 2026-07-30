@@ -97,6 +97,23 @@ const formatError = (error: unknown, t: Translate): string => {
 
 const profileErrorKey = (error: RankingProfileError) => `ranking.profile_error_${error}`;
 
+const resolveScoreExplanation = (
+  board: RankingLeaderboardResponse | null,
+  metric: RankingMetric,
+  language: string,
+): string => {
+  if (metric !== 'overall' || board?.metric !== 'overall' || board.score_explanation?.version !== 2) return '';
+  const texts = board.score_explanation.texts;
+  if (!texts) return '';
+  const candidates = [
+    texts[language as keyof typeof texts],
+    texts.en,
+    texts.zh,
+    texts['zh-TW'],
+  ];
+  return candidates.find((text) => text?.trim())?.trim() ?? '';
+};
+
 export function RankingPage(props: RankingPageProps) {
   const { t, i18n } = useTranslation();
   const [displayName, setDisplayName] = useState('');
@@ -571,15 +588,47 @@ function LeaderboardCard({
   t,
   language,
 }: LeaderboardCardProps) {
+  const [scoreExplanationOpen, setScoreExplanationOpen] = useState(false);
+  const scoreExplanationID = useId();
   const rows = useMemo(() => board?.entries.slice(0, 100) ?? [], [board]);
   const podium = rows.slice(0, 3);
   const tableRows = rows;
+  const scoreExplanation = resolveScoreExplanation(board, metric, language);
+  const hasRankingProfile = status?.status === 'active' || status?.status === 'paused';
+  const profileActionAriaLabel = hasRankingProfile && status.display_name
+    ? `${status.display_name} · ${t('ranking.profile_action')}`
+    : hasRankingProfile
+      ? t('ranking.profile_action')
+      : undefined;
   return (
     <article className={`card ${styles.leaderboardCard}`.trim()} aria-busy={loading}>
       <header className={styles.leaderboardHeader}>
         <div className={styles.leaderboardTitle} data-ranking-header-title>
           <div className="keeper-card-title-track">
             <h2 className="keeper-card-title">{t(`ranking.metric_${metric}`)}</h2>
+            {scoreExplanation ? (
+              <button
+                type="button"
+                className={`${styles.profilePrivacyHint} ${styles.scoreExplanationHint} ${scoreExplanationOpen ? styles.profilePrivacyHintOpen : ''}`.trim()}
+                aria-label={t('ranking.score_explanation_label')}
+                aria-describedby={scoreExplanationID}
+                aria-controls={scoreExplanationID}
+                aria-expanded={scoreExplanationOpen}
+                onClick={() => setScoreExplanationOpen((open) => !open)}
+                onBlur={() => setScoreExplanationOpen(false)}
+                data-ranking-score-explanation
+              >
+                ?
+                <span
+                  id={scoreExplanationID}
+                  className={styles.profilePrivacyTooltip}
+                  role="tooltip"
+                  data-ranking-score-explanation-tooltip
+                >
+                  {scoreExplanation}
+                </span>
+              </button>
+            ) : null}
           </div>
           {board && (
             <div className={styles.boardMeta}>
@@ -601,12 +650,13 @@ function LeaderboardCard({
           data-ranking-profile-action-shell
         >
           <MainActionButton
-            shellClassName={`${styles.profileActionShell} ${status?.status === 'active' || status?.status === 'paused' ? styles.profileActionShellActive : ''}`.trim()}
+            shellClassName={`${styles.profileActionShell} ${hasRankingProfile ? styles.profileActionShellActive : ''}`.trim()}
             onClick={onOpenProfile}
             disabled={statusLoading && !status}
+            aria-label={profileActionAriaLabel}
             data-ranking-profile-action
           >
-            {status?.status === 'active' || status?.status === 'paused' ? (
+            {hasRankingProfile ? (
               <>
                 <RankingAvatar avatarID={status.avatar_id ?? 1} name={status.display_name ?? ''} className={styles.profileActionAvatar} decorative />
                 <span className={styles.profileActionName} data-ranking-profile-name>{status.display_name || t('ranking.profile_action')}</span>

@@ -3,6 +3,7 @@ package test
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io"
@@ -292,6 +293,9 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		ReasoningEffort:     "medium",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
+		ClientIP:            usageEventStringPtr("192.0.2.10"),
+		XForwardedFor:       usageEventStringPtr("203.0.113.5, 198.51.100.8"),
+		UserAgent:           usageEventStringPtr("test-client/1.0"),
 		ExecutorType:        "responses",
 		Endpoint:            "POST /v1/responses",
 		AuthType:            "apikey",
@@ -360,6 +364,9 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	}
 	if !contains(body, `"response_service_tier":"default"`) {
 		t.Fatalf("expected response_service_tier in response body: %s", body)
+	}
+	if !contains(body, `"client_ip":"192.0.2.10"`) || !contains(body, `"x_forwarded_for":"203.0.113.5, 198.51.100.8"`) || !contains(body, `"user_agent":"test-client/1.0"`) {
+		t.Fatalf("expected client metadata in response body: %s", body)
 	}
 	if !contains(body, `"endpoint":"POST /v1/responses"`) {
 		t.Fatalf("expected endpoint in response body: %s", body)
@@ -773,6 +780,9 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 		ReasoningEffort:     "medium",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
+		ClientIP:            usageEventStringPtr("192.0.2.10"),
+		XForwardedFor:       usageEventStringPtr("203.0.113.5, 198.51.100.8"),
+		UserAgent:           usageEventStringPtr("test-client/1.0"),
 		ExecutorType:        "responses",
 		Endpoint:            "POST /v1/responses",
 		AuthType:            "apikey",
@@ -841,6 +851,9 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	if !regexp.MustCompile(`(?m)^id,timestamp,api_key,cpa_api_key_id,source,source_type,auth_index,is_identity_deleted,model,model_alias,reasoning_effort,`).MatchString(body) {
 		t.Fatalf("expected model_alias to follow model in csv header, got %s", body)
 	}
+	if !contains(body, "speed_tps,client_ip,x_forwarded_for,user_agent,input_tokens") || !contains(body, ",30.5,192.0.2.10,\"203.0.113.5, 198.51.100.8\",test-client/1.0,10,") {
+		t.Fatalf("expected client metadata after speed in csv export, got %s", body)
+	}
 	if !contains(body, "service_tier,response_service_tier,executor_type") || !contains(body, ",auto,default,responses,") {
 		t.Fatalf("expected separate request and response service tiers in csv export, got %s", body)
 	}
@@ -852,6 +865,49 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	}
 	if !contains(body, "Export Key") || !contains(body, ",7,") || !contains(body, "authidx-export-main") || !contains(body, "sonnet-export") || !contains(body, "responses") || !contains(body, "failed") {
 		t.Fatalf("expected exported row values, got %s", body)
+	}
+}
+
+func TestUsageEventsExportCSVFormatsClientMetadataAsText(t *testing.T) {
+	provider := &usageEventsStub{exportEvents: []servicedto.UsageEventRecord{{
+		ID:            54,
+		Timestamp:     time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC),
+		ClientIP:      usageEventStringPtr("=1+1"),
+		XForwardedFor: usageEventStringPtr("+SUM(1,1)"),
+		UserAgent:     usageEventStringPtr("@HYPERLINK(\"https://example.invalid\")"),
+	}}}
+	router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/events/export?range=24h&format=csv", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	records, err := csv.NewReader(strings.NewReader(resp.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv export: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected header and one row, got %d records", len(records))
+	}
+	columnIndexes := map[string]int{}
+	for index, column := range records[0] {
+		columnIndexes[column] = index
+	}
+	for column, want := range map[string]string{
+		"client_ip":       "'=1+1",
+		"x_forwarded_for": "'+SUM(1,1)",
+		"user_agent":      "'@HYPERLINK(\"https://example.invalid\")",
+	} {
+		index, ok := columnIndexes[column]
+		if !ok {
+			t.Fatalf("expected %s column in csv header", column)
+		}
+		if got := records[1][index]; got != want {
+			t.Fatalf("expected %s to be exported as text %q, got %q", column, want, got)
+		}
 	}
 }
 
@@ -935,6 +991,9 @@ func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 		ModelAlias:          "gpt-json-alias",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
+		ClientIP:            usageEventStringPtr("192.0.2.11"),
+		XForwardedFor:       usageEventStringPtr("203.0.113.6"),
+		UserAgent:           usageEventStringPtr("json-client/1.0"),
 		ExecutorType:        "chat_completions",
 		Endpoint:            "GET /v1/responses",
 		AuthType:            "oauth",
@@ -986,6 +1045,9 @@ func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 	}
 	if !contains(body, `"service_tier":"auto"`) || !contains(body, `"response_service_tier":"default"`) {
 		t.Fatalf("expected separate request and response service tiers in json export, got %s", body)
+	}
+	if !contains(body, `"client_ip":"192.0.2.11"`) || !contains(body, `"x_forwarded_for":"203.0.113.6"`) || !contains(body, `"user_agent":"json-client/1.0"`) {
+		t.Fatalf("expected client metadata in json export, got %s", body)
 	}
 	if contains(body, `"cached_tokens"`) || !contains(body, `"cache_read_tokens":3`) || !contains(body, `"cache_creation_tokens":4`) || !contains(body, `"cache_read_rate":33.33333333333333`) {
 		t.Fatalf("expected canonical cache token fields in json export, got %s", body)
@@ -1857,6 +1919,10 @@ func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 }
 
 func usageEventInt64Ptr(value int64) *int64 {
+	return &value
+}
+
+func usageEventStringPtr(value string) *string {
 	return &value
 }
 

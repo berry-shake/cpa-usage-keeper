@@ -440,10 +440,17 @@ func parseKimiUsageDetail(object map[string]json.RawMessage) *KimiUsageDetail {
 	if object == nil {
 		return nil
 	}
+	used, hasUsed := floatValue(object, "used")
+	limit, hasLimit := floatValue(object, "limit")
+	remaining, hasRemaining := floatValue(object, "remaining")
+	// Kimi 省略 used 时，只有 parser 仍能区分字段缺失与显式零值，因此在这里按上游额度关系补齐。
+	if !hasUsed && hasLimit && hasRemaining {
+		used = limit - remaining
+	}
 	return &KimiUsageDetail{
-		Used:      floatField(object, "used"),
-		Limit:     floatField(object, "limit"),
-		Remaining: floatField(object, "remaining"),
+		Used:      used,
+		Limit:     limit,
+		Remaining: remaining,
 		Name:      stringField(object, "name"),
 		Title:     stringField(object, "title"),
 		ResetAt:   stringField(object, "resetAt", "reset_at", "resetTime", "reset_time"),

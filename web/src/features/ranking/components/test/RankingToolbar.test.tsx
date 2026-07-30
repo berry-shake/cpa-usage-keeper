@@ -9,9 +9,13 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key === 'ranking.metric_ttft_average'
-      ? 'This is the longest translated ranking metric'
-      : key,
+    t: (key: string) => {
+      if (key === 'ranking.metric_ttft_average') {
+        return 'This is the longest translated ranking metric';
+      }
+      if (key === 'ranking.metric_short_ttft_average') return 'TTFT';
+      return key;
+    },
   }),
 }));
 
@@ -35,7 +39,7 @@ describe('RankingToolbar', () => {
     act(() => root.render(
       <RankingToolbar
         period="today"
-        metric="overall"
+        metric="ttft_average"
         onPeriodChange={onPeriodChange}
         onMetricChange={vi.fn()}
       />,
@@ -49,12 +53,16 @@ describe('RankingToolbar', () => {
 
     const metricTrigger = container.querySelector<HTMLButtonElement>('[data-ranking-metric] button');
     expect(metricTrigger).not.toBeNull();
-    expect(metricTrigger?.textContent).toContain('ranking.metric_overall');
+    expect(metricTrigger?.textContent).toContain('TTFT');
+    expect(metricTrigger?.textContent).not.toContain('This is the longest translated ranking metric');
     const metricSizer = container.querySelector('[data-ranking-metric-sizer]');
     expect(metricSizer?.querySelectorAll('span')).toHaveLength(8);
-    expect(metricSizer?.textContent).toContain('This is the longest translated ranking metric');
+    expect(metricSizer?.textContent).toContain('TTFT');
+    expect(metricSizer?.textContent).not.toContain('This is the longest translated ranking metric');
     act(() => metricTrigger?.click());
-    expect(document.querySelector<HTMLElement>('[role="listbox"]')?.style.width).toBe('260px');
+    const listbox = document.querySelector<HTMLElement>('[role="listbox"]');
+    expect(listbox?.textContent).toContain('This is the longest translated ranking metric');
+    expect(listbox?.style.width).toBe('260px');
     expect(periodGroup?.compareDocumentPosition(container.querySelector('[data-ranking-metric]') as Node) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
   });

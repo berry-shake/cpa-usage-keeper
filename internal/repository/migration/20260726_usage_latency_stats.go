@@ -34,7 +34,8 @@ func usageLatencyStatsMigration(db *gorm.DB) error {
 			return fmt.Errorf("load usage latency migration target: %w", err)
 		}
 	}
-	now := timeutil.NormalizeStorageTime(time.Now())
+	// 复用数据库时钟，让 migration 与 GORM 写入及可重复测试共享同一时间来源。
+	now := timeutil.NormalizeStorageTime(db.NowFunc())
 
 	// 每页是一个独立短事务；重启时直接从已提交的 Latency checkpoint 继续。
 	for {

@@ -131,13 +131,19 @@ type LeaderboardEntry struct {
 	Metrics         map[LeaderboardMetric]int64 `json:"metrics,omitempty"`
 }
 
+type ScoreExplanation struct {
+	Version int               `json:"version"`
+	Texts   map[string]string `json:"texts"`
+}
+
 type Leaderboard struct {
-	Period      LeaderboardPeriod  `json:"period"`
-	PeriodKey   string             `json:"period_key"`
-	Metric      LeaderboardMetric  `json:"metric"`
-	GeneratedAt time.Time          `json:"generated_at"`
-	Stale       bool               `json:"stale"`
-	Entries     []LeaderboardEntry `json:"entries"`
+	Period           LeaderboardPeriod  `json:"period"`
+	PeriodKey        string             `json:"period_key"`
+	Metric           LeaderboardMetric  `json:"metric"`
+	GeneratedAt      time.Time          `json:"generated_at"`
+	Stale            bool               `json:"stale"`
+	Entries          []LeaderboardEntry `json:"entries"`
+	ScoreExplanation *ScoreExplanation  `json:"score_explanation,omitempty"`
 }
 
 type LeaderboardPeriodMetadata struct {

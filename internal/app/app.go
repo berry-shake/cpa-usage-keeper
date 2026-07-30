@@ -40,6 +40,7 @@ type StatusProvider interface {
 
 type Options struct {
 	EnvFile string
+	AppHost string
 }
 
 type QuotaRunner interface {
@@ -112,7 +113,7 @@ func New() (*App, error) {
 }
 
 func NewWithOptions(options Options) (*App, error) {
-	cfg, err := config.Load(config.LoadOptions{EnvFile: options.EnvFile})
+	cfg, err := config.Load(config.LoadOptions{EnvFile: options.EnvFile, AppHost: options.AppHost})
 	if err != nil {
 		return nil, err
 	}
@@ -494,7 +495,7 @@ func (a *App) Run() error {
 	}
 
 	server := &http.Server{
-		Addr:     ":" + a.Config.AppPort,
+		Addr:     a.Config.ListenAddress(),
 		Handler:  a.Router,
 		ErrorLog: logging.NewStandardLogger(logrus.ErrorLevel),
 	}

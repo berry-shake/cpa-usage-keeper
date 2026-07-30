@@ -69,6 +69,8 @@ const (
 	migrationUsageAggregationCheckpoints = "20260726_usage_aggregation_checkpoints"
 	// migrationUsageLatencyStats 用可恢复短事务回填 Latency hour/day 单表。
 	migrationUsageLatencyStats = "20260726_usage_latency_stats"
+	// migrationAddUsageEventClientMetadata 保存 CPA 新增的客户端请求元数据，历史行保持 NULL。
+	migrationAddUsageEventClientMetadata = "20260729_add_usage_event_client_metadata"
 )
 
 type schemaMigration struct {
@@ -181,6 +183,7 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationUsageAggregationCheckpoints, run: usageAggregationCheckpointsMigration},
 		// Latency 回填逐页提交，外层长事务会破坏断点续跑语义。
 		{version: migrationUsageLatencyStats, run: usageLatencyStatsMigration, disableTransaction: true},
+		{version: migrationAddUsageEventClientMetadata, run: addUsageEventClientMetadataMigration},
 	}
 }
 

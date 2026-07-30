@@ -42,7 +42,7 @@ func TestUsageAggregationRunnerSharedTurnReadsOneEventPageAndAdvancesAllRollups(
 	}
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
 
-	runner := poller.NewUsageAggregationRunnerWithOptions(db, poller.UsageAggregationRunnerOptions{DebounceInterval: 10 * time.Millisecond})
+	runner := newUsageAggregationRunnerAt(db, now, 10*time.Millisecond)
 	result, err := runner.RunOnce(context.Background())
 	if err != nil {
 		t.Fatalf("run shared rollups turn: %v", err)
@@ -115,7 +115,7 @@ func TestUsageAggregationRunnerFallbackCatchesUpEachCursorThenRestoresSharedRead
 	}
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
 
-	runner := poller.NewUsageAggregationRunner(db)
+	runner := newUsageAggregationRunnerAt(db, now, 0)
 	result, err := runner.RunOnce(context.Background())
 	if err != nil {
 		t.Fatalf("run fallback rollups turn: %v", err)
@@ -203,7 +203,7 @@ func TestUsageAggregationRunnerPreservesEarlierRollupCommitsWhenLaterWriteFails(
 				t.Fatalf("create write-failure trigger: %v", err)
 			}
 
-			runner := poller.NewUsageAggregationRunner(db)
+			runner := newUsageAggregationRunnerAt(db, now, 0)
 			result, err := runner.RunOnce(context.Background())
 			if err == nil {
 				t.Fatal("expected forced later rollup write failure")
@@ -237,7 +237,7 @@ func TestUsageAggregationRunnerIdentityFailureDoesNotFreezeLaterRollups(t *testi
 		t.Fatalf("create identity failure trigger: %v", err)
 	}
 
-	runner := poller.NewUsageAggregationRunnerWithOptions(db, poller.UsageAggregationRunnerOptions{DebounceInterval: 20 * time.Millisecond})
+	runner := newUsageAggregationRunnerAt(db, now, 20*time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx) }()
@@ -286,7 +286,7 @@ func TestUsageAggregationRunnerSkipsEmptyIdentityTurnBetweenRollupPages(t *testi
 		t.Fatalf("seed multi-page rollup backlog: %v", err)
 	}
 
-	runner := poller.NewUsageAggregationRunner(db)
+	runner := newUsageAggregationRunnerAt(db, now, 0)
 	for turn := 1; turn <= 3; turn++ {
 		if _, err := runner.RunOnce(context.Background()); err != nil {
 			t.Fatalf("prepare turn %d: %v", turn, err)
@@ -326,7 +326,7 @@ func TestUsageAggregationRunnerStopsBetweenRollupWritesWhenCPAInboxAppears(t *te
 		t.Fatalf("create between-write inbox trigger: %v", err)
 	}
 
-	runner := poller.NewUsageAggregationRunner(db)
+	runner := newUsageAggregationRunnerAt(db, now, 0)
 	result, err := runner.RunOnce(context.Background())
 	if err != nil {
 		t.Fatalf("run inbox-priority turn: %v", err)
@@ -360,7 +360,7 @@ func TestUsageAggregationRunnerAlternatesOneRollupPageWithOneIdentityPage(t *tes
 		t.Fatalf("seed fair events: %v", err)
 	}
 
-	runner := poller.NewUsageAggregationRunner(db)
+	runner := newUsageAggregationRunnerAt(db, now, 0)
 	wantKinds := []poller.UsageAggregationKind{
 		poller.UsageAggregationKindRollups,
 		poller.UsageAggregationKindIdentity,
@@ -485,7 +485,7 @@ func TestUsageAggregationRunnerDebounceDoesNotResetAndStartupDoesNotWait(t *test
 		if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "startup-immediate", APIGroupKey: "provider-a", Model: "model-a", Timestamp: now}}); err != nil {
 			t.Fatalf("insert startup event: %v", err)
 		}
-		runner := poller.NewUsageAggregationRunnerWithOptions(db, poller.UsageAggregationRunnerOptions{DebounceInterval: 500 * time.Millisecond})
+		runner := newUsageAggregationRunnerAt(db, now, 500*time.Millisecond)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- runner.Run(ctx) }()
@@ -500,13 +500,13 @@ func TestUsageAggregationRunnerDebounceDoesNotResetAndStartupDoesNotWait(t *test
 
 	t.Run("later notifications share the first fixed window", func(t *testing.T) {
 		db := openUsageAggregationRunnerDatabase(t)
-		runner := poller.NewUsageAggregationRunnerWithOptions(db, poller.UsageAggregationRunnerOptions{DebounceInterval: 500 * time.Millisecond})
+		now := time.Date(2026, 7, 26, 12, 30, 0, 0, time.UTC)
+		runner := newUsageAggregationRunnerAt(db, now, 500*time.Millisecond)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- runner.Run(ctx) }()
 		// 等待启动 MAX(id) 与空 Identity 扫描结束，后续事件只能走 debounce 路径。
 		time.Sleep(80 * time.Millisecond)
-		now := time.Date(2026, 7, 26, 12, 30, 0, 0, time.UTC)
 		if _, _, err := repository.InsertUsageEvents(db, []entities.UsageEvent{{EventKey: "debounce-1", APIGroupKey: "provider-a", Model: "model-a", Timestamp: now}}); err != nil {
 			t.Fatalf("insert first debounce event: %v", err)
 		}
@@ -561,7 +561,7 @@ func TestUsageAggregationRunnerBackgroundFailureStillLetsIdentityRun(t *testing.
 		BEGIN SELECT RAISE(ABORT, 'forced background activity failure'); END`).Error; err != nil {
 		t.Fatalf("create background failure trigger: %v", err)
 	}
-	runner := poller.NewUsageAggregationRunner(db)
+	runner := newUsageAggregationRunnerAt(db, now, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx) }()
@@ -593,7 +593,7 @@ func TestUsageAggregationRunnerPersistentRollupFailureDoesNotFreezeHealthyRollup
 		t.Fatalf("create persistent Activity failure trigger: %v", err)
 	}
 
-	runner := poller.NewUsageAggregationRunnerWithOptions(db, poller.UsageAggregationRunnerOptions{DebounceInterval: 20 * time.Millisecond})
+	runner := newUsageAggregationRunnerAt(db, now, 20*time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx) }()
@@ -671,4 +671,11 @@ func waitForUsageAggregationRunnerCondition(t *testing.T, timeout time.Duration,
 	if !condition() {
 		t.Fatal("usage aggregation runner condition was not reached before timeout")
 	}
+}
+
+func newUsageAggregationRunnerAt(db *gorm.DB, now time.Time, debounceInterval time.Duration) *poller.UsageAggregationRunner {
+	return poller.NewUsageAggregationRunnerWithOptions(db, poller.UsageAggregationRunnerOptions{
+		DebounceInterval: debounceInterval,
+		NowFunc:          func() time.Time { return now },
+	})
 }

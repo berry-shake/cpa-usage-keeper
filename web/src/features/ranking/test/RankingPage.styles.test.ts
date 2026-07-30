@@ -114,6 +114,16 @@ describe('Ranking table context styles', () => {
     expect(styles).toContain('.profilePrivacyHintOpen .profilePrivacyTooltip');
   });
 
+  it('reuses the participation question style beside the overall title', () => {
+    const titleTrack = rule('.leaderboardTitle :global(.keeper-card-title-track)');
+    const scoreHint = rule('.scoreExplanationHint');
+    expect(source).toContain('styles.profilePrivacyHint');
+    expect(source).toContain('styles.profilePrivacyTooltip');
+    expect(source).toContain('data-ranking-score-explanation');
+    expect(titleTrack).toContain('position: relative;');
+    expect(scoreHint).not.toContain('position: relative;');
+  });
+
   it('aligns the title with the top filters and keeps the profile entry directly below them', () => {
     const header = rule('.leaderboardHeader');
     expect(header).toContain('display: grid;');
@@ -133,7 +143,7 @@ describe('Ranking table context styles', () => {
     expect(rule('.toolbar')).toContain('row-gap: 10px;');
   });
 
-  it('keeps long titles on one line and reflows the header when the card narrows', () => {
+  it('keeps long titles on one line and reflows narrow-card filters into one scrollable row', () => {
     const card = rule('.leaderboardCard:global(.card)');
     const title = rule('.leaderboardTitle :global(.keeper-card-title)');
     const stackedStart = styles.indexOf('@mixin ranking-header-stacked');
@@ -148,9 +158,22 @@ describe('Ranking table context styles', () => {
     expect(title).toContain('white-space: nowrap;');
     expect(title).toContain('overflow: hidden;');
     expect(title).toContain('text-overflow: ellipsis;');
-    expect(stacked).toContain("grid-template-areas:\n      'title'\n      'toolbar'\n      'profile';");
+    expect(stacked).toMatch(
+      /\.leaderboardHeader\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto;[\s\S]*?'title title'[\s\S]*?'toolbar profile';/,
+    );
     expect(stacked).toMatch(/\.leaderboardHeaderToolbar\s*\{[\s\S]*?justify-self:\s*stretch;/);
-    expect(stacked).toMatch(/\.toolbar\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/);
+    expect(stacked).toMatch(
+      /\.leaderboardHeaderActions\s*\{[\s\S]*?justify-content:\s*flex-end;[\s\S]*?justify-self:\s*end;[\s\S]*?margin-right:\s*0;/,
+    );
+    expect(stacked).toMatch(
+      /\.toolbar\s*\{[\s\S]*?display:\s*flex;[\s\S]*?padding:\s*4px;[\s\S]*?overflow-x:\s*auto;[\s\S]*?scrollbar-width:\s*none;/,
+    );
+    expect(stacked).toMatch(
+      /\.periods\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, max-content\);[\s\S]*?width:\s*max-content;/,
+    );
+    expect(stacked).toMatch(
+      /\.metricControl\s*\{[\s\S]*?flex:\s*0 0 168px;[\s\S]*?width:\s*168px;/,
+    );
     expect(container).toContain('@include ranking-header-stacked;');
   });
 
@@ -172,12 +195,24 @@ describe('Ranking table context styles', () => {
     expect(rule('.profileActionAvatar')).toContain('flex: 0 0 22px;');
   });
 
-  it('stacks the header in scan order with compact time text and a centered profile entry on mobile', () => {
+  it('keeps only the active avatar visible on mobile while reusing the narrow-card header layout', () => {
     const mobileStart = styles.indexOf('@include mobile');
     const mobileEnd = styles.indexOf('@media (prefers-reduced-motion', mobileStart);
     const mobile = styles.slice(mobileStart, mobileEnd);
 
     expect(mobile).toContain('@include ranking-header-stacked;');
+    expect(mobile).toMatch(/\.profileActionShellActive\s*\{[\s\S]*?flex:\s*0 0 42px;[\s\S]*?width:\s*42px;/);
+    expect(mobile).toMatch(/\.profileActionName\s*\{[\s\S]*?display:\s*none;/);
+  });
+
+  it('lets the sticky participant column follow the display name width on mobile', () => {
+    const mobileStart = styles.indexOf('@include mobile');
+    const mobileEnd = styles.indexOf('@media (prefers-reduced-motion', mobileStart);
+    const mobile = styles.slice(mobileStart, mobileEnd);
+
+    expect(mobile).toMatch(
+      /\.participantColumn,\s*\.participantCell\s*\{[\s\S]*?min-width:\s*0;/,
+    );
   });
 
   it('gives loading, empty, and error content a tall centered viewport', () => {

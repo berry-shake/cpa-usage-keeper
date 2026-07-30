@@ -13,6 +13,7 @@ const rankingKeys = [
   'ranking.period_current_month',
   'ranking.period_previous_month',
   'ranking.metric_overall',
+  'ranking.score_explanation_label',
   'ranking.metric_total_tokens',
   'ranking.metric_request_count',
   'ranking.metric_cache_read_rate',

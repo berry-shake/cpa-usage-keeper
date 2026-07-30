@@ -78,8 +78,8 @@ const DEFAULT_USAGE_TAB: UsageTab = 'overview';
 const USAGE_TAB_STORAGE_KEY = 'cli-proxy-usage-tab-v1';
 const REQUEST_EVENTS_PAGE_SIZES = [20, 50, 100, 500, 1000] as const;
 const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 100;
-// v6 曾用于拆分 Speed Mode 列的历史偏好，新的完整列顺序格式从 v7 开始，避免误判旧数据。
-const REQUEST_EVENTS_PREFERENCES_VERSION = 7;
+// v7 是完整列顺序格式；v8 加入客户端请求元数据列，并保留历史自定义顺序。
+const REQUEST_EVENTS_PREFERENCES_VERSION = 8;
 const ALL_REQUEST_EVENTS_FILTER = '__all__';
 const OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
 const CPA_MANAGEMENT_PAGE = 'management.html';
@@ -268,6 +268,57 @@ const LEGACY_REQUEST_EVENT_COLUMN_IDS_V4 = [
   'total_cost',
 ] as const;
 
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V7 = [
+  'timestamp',
+  'api_key',
+  'source',
+  'model',
+  'model_alias',
+  'reasoning_effort',
+  'service_tier',
+  'result',
+  'request_type',
+  'endpoint',
+  'ttft',
+  'latency',
+  'speed',
+  'input_tokens',
+  'output_tokens',
+  'reasoning_tokens',
+  'cache_read_tokens',
+  'cache_creation_tokens',
+  'cache_read_rate',
+  'total_tokens',
+  'total_cost',
+] as const;
+
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V5 = LEGACY_REQUEST_EVENT_COLUMN_IDS_V7;
+
+const LEGACY_REQUEST_EVENT_COLUMN_IDS_V6 = [
+  'timestamp',
+  'api_key',
+  'source',
+  'model',
+  'model_alias',
+  'reasoning_effort',
+  'service_tier',
+  'response_service_tier',
+  'result',
+  'request_type',
+  'endpoint',
+  'ttft',
+  'latency',
+  'speed',
+  'input_tokens',
+  'output_tokens',
+  'reasoning_tokens',
+  'cache_read_tokens',
+  'cache_creation_tokens',
+  'cache_read_rate',
+  'total_tokens',
+  'total_cost',
+] as const;
+
 const LEGACY_REQUEST_EVENT_COLUMN_IDS_V2 = [
   'timestamp',
   'api_key',
@@ -381,6 +432,9 @@ const normalizeRequestEventPreferenceColumnIds = (value: unknown, version: unkno
 
   const rawColumnIds = value.filter((columnId): columnId is string => typeof columnId === 'string');
   const legacyFullSelection = version !== REQUEST_EVENTS_PREFERENCES_VERSION && (
+    (version === 7 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V7)) ||
+    (version === 6 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V6)) ||
+    (version === 5 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V5)) ||
     (version === 4 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V4)) ||
     (version === 3 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V3)) ||
     (version === 2 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V2)) ||
@@ -404,6 +458,17 @@ const normalizeRequestEventPreferenceColumnIds = (value: unknown, version: unkno
   return normalized.length > 0 ? normalized : [...REQUEST_EVENT_COLUMN_IDS];
 };
 
+const normalizeRequestEventPreferenceColumnOrder = (value: unknown, version: unknown): RequestEventColumnId[] => {
+  if (!Array.isArray(value)) {
+    return [...REQUEST_EVENT_COLUMN_IDS];
+  }
+  const rawColumnIds = value.filter((columnId): columnId is string => typeof columnId === 'string');
+  if (version === 7 && hasSameRequestEventColumnOrder(rawColumnIds, LEGACY_REQUEST_EVENT_COLUMN_IDS_V7)) {
+    return [...REQUEST_EVENT_COLUMN_IDS];
+  }
+  return normalizeRequestEventColumnOrder(rawColumnIds.filter(isRequestEventColumnId));
+};
+
 export const normalizeRequestEventsPreferences = (value: unknown): RequestEventsPreferences => {
   const preferences = isRecord(value) ? value : {};
   return {
@@ -411,11 +476,7 @@ export const normalizeRequestEventsPreferences = (value: unknown): RequestEvents
     pageSize: isRequestEventPageSize(preferences.pageSize) ? preferences.pageSize : REQUEST_EVENTS_DEFAULT_PAGE_SIZE,
     filters: normalizeRequestEventPreferenceFilters(preferences.filters),
     visibleColumnIds: normalizeRequestEventPreferenceColumnIds(preferences.visibleColumnIds, preferences.version),
-    columnOrder: normalizeRequestEventColumnOrder(
-      Array.isArray(preferences.columnOrder)
-        ? preferences.columnOrder.filter(isRequestEventColumnId)
-        : REQUEST_EVENT_COLUMN_IDS
-    ),
+    columnOrder: normalizeRequestEventPreferenceColumnOrder(preferences.columnOrder, preferences.version),
   };
 };
 
@@ -2008,7 +2069,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                         onChange={setSelectedApiKeyId}
                         className={styles.apiKeySelectControl}
                         ariaLabel={t('usage_stats.api_key_filter')}
-                        fullWidth
+                        fullWidth={false}
                         dropdownMinWidth={180}
                       />
                     </label>

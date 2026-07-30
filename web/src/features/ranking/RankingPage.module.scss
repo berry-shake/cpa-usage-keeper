@@ -41,6 +41,10 @@
   min-width: 0;
 }
 
+.leaderboardTitle :global(.keeper-card-title-track) {
+  position: relative;
+}
+
 .leaderboardTitle :global(.keeper-card-title) {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -105,6 +109,10 @@
     outline: 2px solid var(--primary-color);
     outline-offset: 2px;
   }
+}
+
+.scoreExplanationHint {
+  flex: 0 0 18px;
 }
 
 .profilePrivacyTooltip {
@@ -884,13 +892,12 @@
 
 @mixin ranking-header-stacked {
   .leaderboardHeader {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      'title'
-      'toolbar'
-      'profile';
+      'title title'
+      'toolbar profile';
     align-items: stretch;
-    column-gap: 0;
+    column-gap: 12px;
     row-gap: 14px;
     padding: 0;
   }
@@ -913,36 +920,43 @@
   }
 
   .leaderboardHeaderActions {
-    justify-content: center;
-    justify-self: center;
+    align-self: center;
+    justify-content: flex-end;
+    justify-self: end;
     max-width: 100%;
     width: auto;
     margin-right: 0;
   }
 
-  .profileActionShell,
-  .profileActionShellActive {
-    max-width: 100%;
-  }
-
   .toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    justify-content: flex-start;
     width: 100%;
+    max-width: 100%;
+    padding: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
   }
 
   .periods {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .periodButton {
-    padding-inline: 6px;
+    grid-template-columns: repeat(4, max-content);
+    flex: 0 0 auto;
+    width: max-content;
+    margin-left: auto;
   }
 
   .metricControl {
-    width: 100%;
+    flex: 0 0 168px;
+    width: 168px;
+    margin-right: auto;
   }
 }
 
@@ -952,6 +966,29 @@
 
 @include mobile {
   @include ranking-header-stacked;
+
+  .profileActionShell {
+    max-width: 160px;
+  }
+
+  .profileActionShellActive {
+    flex: 0 0 42px;
+    width: 42px;
+  }
+
+  .profileActionShellActive :global(.main-action-button) {
+    width: 32px;
+    padding-inline: 5px;
+  }
+
+  .profileActionName {
+    display: none;
+  }
+
+  .participantColumn,
+  .participantCell {
+    min-width: 0;
+  }
 
   .profileModal :global(.modal-body) {
     max-height: min(60dvh, calc(100dvh - 180px));

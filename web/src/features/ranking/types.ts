@@ -43,12 +43,18 @@ export interface RankingLeaderboardEntry {
   metrics?: Partial<Record<RankingDetailMetric, number>>;
 }
 
+export interface RankingScoreExplanation {
+  version: number;
+  texts?: Partial<Record<'en' | 'zh' | 'zh-TW', string>> | null;
+}
+
 export interface RankingLeaderboardResponse {
   period: RankingPeriod;
   period_key: string;
   metric: RankingMetric;
   generated_at: string;
   stale: boolean;
+  score_explanation?: RankingScoreExplanation;
   entries: RankingLeaderboardEntry[];
 }
 
