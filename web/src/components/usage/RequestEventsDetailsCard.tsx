@@ -136,7 +136,7 @@ type RequestEventTooltipState = {
 
 type RequestEventTooltipTarget = {
   lines: string[];
-  anchor: HTMLTableCellElement;
+  anchor: HTMLElement;
 };
 
 type RequestEventColumnDefinition = {
@@ -724,21 +724,21 @@ export function RequestEventsDetailsCard({
     );
   }, [positionRequestEventsTooltip]);
 
-  const handleRequestEventsTooltipMouseEnter = useCallback((lines: string[], anchor: HTMLTableCellElement) => {
+  const handleRequestEventsTooltipMouseEnter = useCallback((lines: string[], anchor: HTMLElement) => {
     requestEventsTooltipHoverTargetRef.current = { lines, anchor };
     syncRequestEventsTooltip();
   }, [syncRequestEventsTooltip]);
-  const handleRequestEventsTooltipMouseLeave = useCallback((anchor: HTMLTableCellElement) => {
+  const handleRequestEventsTooltipMouseLeave = useCallback((anchor: HTMLElement) => {
     if (requestEventsTooltipHoverTargetRef.current?.anchor === anchor) {
       requestEventsTooltipHoverTargetRef.current = null;
     }
     syncRequestEventsTooltip();
   }, [syncRequestEventsTooltip]);
-  const handleRequestEventsTooltipFocus = useCallback((lines: string[], anchor: HTMLTableCellElement) => {
+  const handleRequestEventsTooltipFocus = useCallback((lines: string[], anchor: HTMLElement) => {
     requestEventsTooltipFocusTargetRef.current = { lines, anchor };
     syncRequestEventsTooltip();
   }, [syncRequestEventsTooltip]);
-  const handleRequestEventsTooltipBlur = useCallback((anchor: HTMLTableCellElement) => {
+  const handleRequestEventsTooltipBlur = useCallback((anchor: HTMLElement) => {
     if (requestEventsTooltipFocusTargetRef.current?.anchor === anchor) {
       requestEventsTooltipFocusTargetRef.current = null;
     }
@@ -920,6 +920,39 @@ export function RequestEventsDetailsCard({
       </td>
     );
   }, [
+    handleRequestEventsTooltipBlur,
+    handleRequestEventsTooltipFocus,
+    handleRequestEventsTooltipMouseEnter,
+    handleRequestEventsTooltipMouseLeave,
+  ]);
+
+  const renderMobileClientMetadataItem = useCallback((
+    columnId: RequestEventColumnId,
+    label: ReactNode,
+    value: string,
+    maxLength: number,
+  ) => {
+    if (!effectiveVisibleColumnIdSet.has(columnId) || value === '-') {
+      return null;
+    }
+    const tooltipLines = [value];
+    return (
+      <div className={styles.requestEventMobileMetaItem} data-request-event-mobile-meta={columnId}>
+        <dt>{label}</dt>
+        <dd
+          tabIndex={0}
+          aria-label={value}
+          onMouseEnter={(event) => handleRequestEventsTooltipMouseEnter(tooltipLines, event.currentTarget)}
+          onMouseLeave={(event) => handleRequestEventsTooltipMouseLeave(event.currentTarget)}
+          onFocus={(event) => handleRequestEventsTooltipFocus(tooltipLines, event.currentTarget)}
+          onBlur={(event) => handleRequestEventsTooltipBlur(event.currentTarget)}
+        >
+          {truncateRequestEventMetadata(value, maxLength)}
+        </dd>
+      </div>
+    );
+  }, [
+    effectiveVisibleColumnIdSet,
     handleRequestEventsTooltipBlur,
     handleRequestEventsTooltipFocus,
     handleRequestEventsTooltipMouseEnter,
@@ -1407,6 +1440,24 @@ export function RequestEventsDetailsCard({
                       <dt>{t('usage_stats.request_events_auth_index')}</dt>
                       <dd>{row.authIndex}</dd>
                     </div>
+                    {renderMobileClientMetadataItem(
+                      'client_ip',
+                      t('usage_stats.client_ip'),
+                      row.clientIP,
+                      REQUEST_EVENT_CLIENT_IP_DISPLAY_LENGTH,
+                    )}
+                    {renderMobileClientMetadataItem(
+                      'x_forwarded_for',
+                      t('usage_stats.x_forwarded_for'),
+                      row.xForwardedFor,
+                      REQUEST_EVENT_X_FORWARDED_FOR_DISPLAY_LENGTH,
+                    )}
+                    {renderMobileClientMetadataItem(
+                      'user_agent',
+                      t('usage_stats.user_agent'),
+                      row.userAgent,
+                      REQUEST_EVENT_USER_AGENT_DISPLAY_LENGTH,
+                    )}
                     {hasLatencyData && (
                       <div className={styles.requestEventMobileMetaItem}>
                         <dt>{t('usage_stats.time')}</dt>

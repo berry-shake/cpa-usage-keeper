@@ -39,7 +39,12 @@ const baseEvent: UsageEvent = {
   pricing_style: 'openai',
 };
 
-const renderCardElement = (events: UsageEvent[]) => (
+const clientMetadataColumnIds = ['client_ip', 'x_forwarded_for', 'user_agent'] as const;
+
+const renderCardElement = (
+  events: UsageEvent[],
+  visibleColumnIds: Array<(typeof clientMetadataColumnIds)[number]> = [...clientMetadataColumnIds],
+) => (
   <RequestEventsDetailsCard
     events={events}
     loading={false}
@@ -53,8 +58,8 @@ const renderCardElement = (events: UsageEvent[]) => (
     modelFilter="__all__"
     sourceFilter="__all__"
     resultFilter="__all__"
-    visibleColumnIds={['client_ip', 'x_forwarded_for', 'user_agent']}
-    columnOrder={['client_ip', 'x_forwarded_for', 'user_agent']}
+    visibleColumnIds={visibleColumnIds}
+    columnOrder={[...clientMetadataColumnIds]}
     onPageChange={() => undefined}
     onPageSizeChange={() => undefined}
     onModelFilterChange={() => undefined}
@@ -63,12 +68,15 @@ const renderCardElement = (events: UsageEvent[]) => (
   />
 );
 
-const mountCard = async (events: UsageEvent[]) => {
+const mountCard = async (
+  events: UsageEvent[],
+  visibleColumnIds?: Array<(typeof clientMetadataColumnIds)[number]>,
+) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => root.render(renderCardElement(events)));
+  await act(async () => root.render(renderCardElement(events, visibleColumnIds)));
   return {
     container,
     unmount: async () => {
@@ -140,6 +148,51 @@ describe('RequestEventsDetailsCard client metadata columns', () => {
         cells[0].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
       });
       expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('surfaces available client metadata in mobile cards and respects column visibility', async () => {
+    const mounted = await mountCard([baseEvent], ['client_ip', 'user_agent']);
+
+    try {
+      const mobileMetadataItems = Array.from(
+        mounted.container.querySelectorAll<HTMLElement>('[data-request-event-mobile-meta]'),
+      );
+      expect(mobileMetadataItems.map((item) => item.dataset.requestEventMobileMeta)).toEqual([
+        'client_ip',
+        'user_agent',
+      ]);
+      expect(mobileMetadataItems.map((item) => item.querySelector('dd')?.textContent)).toEqual([
+        clientIP,
+        `${Array.from(userAgent).slice(0, 48).join('')}...`,
+      ]);
+      expect(mobileMetadataItems.map((item) => item.querySelector('dd')?.getAttribute('aria-label'))).toEqual([
+        clientIP,
+        userAgent,
+      ]);
+
+      const clientIPValue = mobileMetadataItems[0].querySelector<HTMLElement>('dd');
+      await act(async () => clientIPValue?.focus());
+      expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe(clientIP);
+      await act(async () => clientIPValue?.blur());
+      expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('omits unavailable client metadata from compact mobile cards', async () => {
+    const mounted = await mountCard([{
+      ...baseEvent,
+      client_ip: null,
+      x_forwarded_for: null,
+      user_agent: null,
+    }]);
+
+    try {
+      expect(mounted.container.querySelectorAll('[data-request-event-mobile-meta]')).toHaveLength(0);
     } finally {
       await mounted.unmount();
     }
