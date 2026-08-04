@@ -113,8 +113,8 @@ func TestUsageLatencyStatsMigrationResumesAfterCommittedPage(t *testing.T) {
 	}
 }
 
-func TestUsageLatencyStatsMigrationEnablesUsageEventCleanup(t *testing.T) {
-	// Latency migration 只有推进到当前最大事件 ID，才应与另外两类水位共同放行 raw cleanup。
+func TestUsageLatencyStatsMigrationEnablesUsageEventArchive(t *testing.T) {
+	// Latency migration 只有推进到当前最大事件 ID，才应与另外两类水位共同放行 raw archive。
 	previousLocal := time.Local
 	time.Local = time.UTC
 	t.Cleanup(func() { time.Local = previousLocal })
@@ -140,19 +140,19 @@ func TestUsageLatencyStatsMigrationEnablesUsageEventCleanup(t *testing.T) {
 		t.Fatalf("seed caught-up overview/activity checkpoints: %v", err)
 	}
 
-	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
+	result, err := repository.CleanupStorage(db, now)
 	if err != nil {
-		t.Fatalf("cleanup after latency migration: %v", err)
+		t.Fatalf("archive after latency migration: %v", err)
 	}
-	if result.UsageEventsDeleted != 2 {
-		t.Fatalf("expected latency migration to release two old events, got %+v", result)
+	if result.UsageEventsArchived != 2 {
+		t.Fatalf("expected latency migration to allow archiving two old events, got %+v", result)
 	}
 }
 
 func prepareUsageLatencyMigrationDatabase(t *testing.T, db *gorm.DB, events []entities.UsageEvent) {
 	// 只创建 migration 的真实前置表，避免无关历史 migration 参与结果。
 	t.Helper()
-	if err := db.AutoMigrate(&entities.UsageEvent{}, &entities.UsageAggregationCheckpoint{}); err != nil {
+	if err := db.AutoMigrate(&entities.UsageEvent{}, &entities.UsageEventArchive{}, &entities.UsageAggregationCheckpoint{}); err != nil {
 		t.Fatalf("create latency migration schema: %v", err)
 	}
 	if err := db.CreateInBatches(&events, 200).Error; err != nil {

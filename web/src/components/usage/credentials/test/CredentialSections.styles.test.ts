@@ -277,6 +277,11 @@ describe('Credential section styles', () => {
     expect(credentialStyles).not.toMatch(/\.credentialAliasDisplay\s*\{/)
   })
 
+  it('keeps the Auth File filename tooltip target on the normal arrow cursor', () => {
+    expect(credentialStyles).toMatch(/\.credentialFileNameTooltipTarget\s*\{[\s\S]*?cursor:\s*default;/)
+    expect(credentialStyles).not.toMatch(/\.credentialFileNameTooltipTarget\s*\{[\s\S]*?cursor:\s*help;/)
+  })
+
   it('keeps Auth Files inspection separate from the quota refresh pill', () => {
     expect(authFileSectionSource).toContain('credentialSectionActionButtons')
     expect(authFileSectionSource).toMatch(/<MainActionButton[\s\S]*?credentialInspectionButton[\s\S]*?<MainActionButton/)

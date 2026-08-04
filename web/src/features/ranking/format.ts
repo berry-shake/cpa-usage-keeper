@@ -1,4 +1,4 @@
-import type { RankingDetailMetric, RankingLeaderboardEntry, RankingMetric } from './types';
+import type { RankingDetailMetric, RankingLeaderboardEntry, RankingMetric, RankingScope } from './types';
 
 const formatCompactNumber = (value: number, maximumFractionDigits = 0): string => {
   const absolute = Math.abs(value);
@@ -21,7 +21,11 @@ const formatDuration = (milliseconds: number): string => {
   return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
 };
 
-export const formatLeaderboardValue = (metric: RankingMetric, entry: RankingLeaderboardEntry): string => {
+export const formatLeaderboardValue = (
+  metric: RankingMetric,
+  entry: RankingLeaderboardEntry,
+  scope: RankingScope = 'community',
+): string => {
   if (metric === 'cache_read_rate') {
     const percent = entry.rate_denominator && entry.rate_denominator > 0
       ? (entry.rate_numerator ?? 0) / entry.rate_denominator * 100
@@ -38,7 +42,7 @@ export const formatLeaderboardValue = (metric: RankingMetric, entry: RankingLead
     return formatCompactNumber(entry.value / 5, 2);
   }
   if (metric === 'overall') {
-    return `${(entry.value / 100).toFixed(2)} PTS`;
+    return scope === 'local' ? `${entry.value} PTS` : `${(entry.value / 100).toFixed(2)} PTS`;
   }
   return formatCompactNumber(entry.value);
 };

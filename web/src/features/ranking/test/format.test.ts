@@ -38,6 +38,7 @@ describe('ranking value formatting', () => {
     expect(formatLeaderboardValue('peak_tpm', entry(5_000))).toBe('1.00K');
     expect(formatLeaderboardValue('peak_rpm', entry(45))).toBe('9');
     expect(formatLeaderboardValue('overall', entry(9_325))).toBe('93.25 PTS');
+    expect(formatLeaderboardValue('overall', entry(93), 'local')).toBe('93 PTS');
   });
 
   it('formats overall supporting metrics without exposing a participant identifier', () => {

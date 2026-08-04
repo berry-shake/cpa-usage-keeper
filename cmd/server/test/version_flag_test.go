@@ -48,6 +48,7 @@ func TestHostFlagOverridesEnvFileInBuiltCLI(t *testing.T) {
 		"CPA_BASE_URL=http://127.0.0.1:1",
 		"CPA_MANAGEMENT_KEY=secret",
 		"REDIS_QUEUE_ADDR=127.0.0.1:1",
+		"AUTH_ENABLED=false",
 		"WORK_DIR=./data",
 		"LOG_FILE_ENABLED=false",
 		"BACKUP_ENABLED=false",

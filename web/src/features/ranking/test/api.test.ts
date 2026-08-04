@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   exitRanking,
+  fetchLocalRankingLeaderboard,
   fetchRankingLeaderboard,
   fetchRankingMetadata,
   fetchRankingStatus,
@@ -9,6 +10,7 @@ import {
   RankingApiError,
   resumeRanking,
   syncRanking,
+  updateLocalRankingProfile,
 } from '../api';
 
 const jsonResponse = (body: unknown, status = 200, headers?: HeadersInit) => new Response(
@@ -40,6 +42,44 @@ describe('ranking API', () => {
     expect(url.pathname).toBe('/keeper/api/v1/ranking/leaderboards');
     expect(url.search).toBe('?period=today&metric=overall');
     expect(init).toMatchObject({ credentials: 'include', cache: 'no-store' });
+  });
+
+  it('uses the dedicated local leaderboard endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: '/keeper/' });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      period: 'today',
+      period_key: '2026-07-31',
+      metric: 'overall',
+      generated_at: '2026-07-31T04:00:00Z',
+      stale: false,
+      entries: [],
+    }));
+
+    await fetchLocalRankingLeaderboard('today', 'overall');
+
+    const [rawURL, init] = fetchMock.mock.calls[0];
+    const url = new URL(String(rawURL), 'http://localhost');
+    expect(url.pathname).toBe('/keeper/api/v1/ranking/local/leaderboards');
+    expect(url.search).toBe('?period=today&metric=overall');
+    expect(init).toMatchObject({ credentials: 'include', cache: 'no-store' });
+  });
+
+  it('updates a local Key profile through the dedicated admin endpoint', async () => {
+	vi.stubGlobal('window', { __APP_BASE_PATH__: '/keeper/' });
+	const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+		participant_id: '42',
+		key_alias: 'Primary',
+		display_name: 'Primary',
+		avatar_id: 17,
+	}));
+
+	await updateLocalRankingProfile('42', { key_alias: 'Primary', avatar_id: 17 });
+
+	const [rawURL, init] = fetchMock.mock.calls[0];
+	expect(new URL(String(rawURL), 'http://localhost').pathname).toBe('/keeper/api/v1/ranking/local/profiles/42');
+	expect(init).toMatchObject({ method: 'PATCH', credentials: 'include', cache: 'no-store' });
+	expect(new Headers(init?.headers).get('X-CPA-Usage-Keeper-Request')).toBe('fetch');
+	expect(init?.body).toBe(JSON.stringify({ key_alias: 'Primary', avatar_id: 17 }));
   });
 
   it('uses the local admin endpoints and request-intent header for every mutation', async () => {

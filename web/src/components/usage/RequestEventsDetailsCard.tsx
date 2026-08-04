@@ -7,7 +7,6 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
@@ -15,6 +14,7 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MainActionButton } from '@/components/ui/MainActionButton';
 import { Modal } from '@/components/ui/Modal';
+import { PortalTooltip, usePortalTooltip } from '@/components/ui/PortalTooltip';
 import { Select } from '@/components/ui/Select';
 import { IconCheck, IconChevronDown, IconCopy, IconDownload, IconScrollText, IconSettings } from '@/components/ui/icons';
 import type { UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption } from '@/lib/types';
@@ -51,10 +51,6 @@ const REQUEST_LOG_VIRTUAL_PADDING_Y = 12;
 const REQUEST_LOG_VIRTUAL_CHUNK_CHARS = 2048;
 const REQUEST_LOG_VIRTUAL_BREAK_LOOKBACK = 256;
 const REQUEST_LOG_GRAPHEME_CONTEXT_CHARS = 64;
-const REQUEST_EVENTS_TOOLTIP_MAX_WIDTH = 280;
-const REQUEST_EVENTS_TOOLTIP_ESTIMATED_HEIGHT = 72;
-const REQUEST_EVENTS_TOOLTIP_OFFSET = 10;
-const REQUEST_EVENTS_TOOLTIP_VIEWPORT_PADDING = 8;
 const REQUEST_EVENT_CLIENT_IP_DISPLAY_LENGTH = 39;
 const REQUEST_EVENT_X_FORWARDED_FOR_DISPLAY_LENGTH = 48;
 const REQUEST_EVENT_USER_AGENT_DISPLAY_LENGTH = 48;
@@ -125,18 +121,6 @@ type RequestEventRow = {
   cacheReadRate: string;
   cost: number | null;
   costAvailable: boolean;
-};
-
-type RequestEventTooltipState = {
-  lines: string[];
-  x: number;
-  y: number;
-  placement: 'above' | 'below';
-};
-
-type RequestEventTooltipTarget = {
-  lines: string[];
-  anchor: HTMLElement;
 };
 
 type RequestEventColumnDefinition = {
@@ -662,11 +646,15 @@ export function RequestEventsDetailsCard({
   requestLogDownloading = false,
 }: RequestEventsDetailsCardProps) {
   const { t } = useTranslation();
-  const [requestEventsTooltip, setRequestEventsTooltip] = useState<RequestEventTooltipState | null>(null);
+  const {
+    tooltip: requestEventsTooltip,
+    showOnMouseEnter: handleRequestEventsTooltipMouseEnter,
+    hideOnMouseLeave: handleRequestEventsTooltipMouseLeave,
+    showOnFocus: handleRequestEventsTooltipFocus,
+    hideOnBlur: handleRequestEventsTooltipBlur,
+  } = usePortalTooltip();
   const [columnSettingsOpen, setColumnSettingsOpen] = useState(false);
   const [columnSettingsSession, setColumnSettingsSession] = useState(0);
-  const requestEventsTooltipHoverTargetRef = useRef<RequestEventTooltipTarget | null>(null);
-  const requestEventsTooltipFocusTargetRef = useRef<RequestEventTooltipTarget | null>(null);
   const requestEventsTableWrapperRef = useRef<HTMLDivElement | null>(null);
   const resultLocale = t('usage_stats.success') === 'Success' ? 'en' : 'zh';
   const latencyHint = t('usage_stats.latency_unit_hint', {
@@ -675,89 +663,6 @@ export function RequestEventsDetailsCard({
   });
   const ttftHint = t('usage_stats.ttft_hint');
   const speedHint = t('usage_stats.speed_hint');
-
-  const positionRequestEventsTooltip = useCallback((target: RequestEventTooltipTarget | null) => {
-    if (!target) {
-      setRequestEventsTooltip(null);
-      return;
-    }
-
-    // 浮层挂到 body 后不受表格滚动容器裁剪，并随当前 hover/focus 锚点保持在视口内。
-    const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
-    const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
-    const rect = target.anchor.getBoundingClientRect();
-    const tooltipWidth = Math.min(
-      REQUEST_EVENTS_TOOLTIP_MAX_WIDTH,
-      Math.max(viewportWidth - REQUEST_EVENTS_TOOLTIP_VIEWPORT_PADDING * 2, 0),
-    );
-    const halfTooltipWidth = tooltipWidth / 2;
-    const minX = REQUEST_EVENTS_TOOLTIP_VIEWPORT_PADDING + halfTooltipWidth;
-    const maxX = viewportWidth - REQUEST_EVENTS_TOOLTIP_VIEWPORT_PADDING - halfTooltipWidth;
-    const anchorX = rect.left + rect.width / 2;
-    const x = maxX >= minX ? Math.max(minX, Math.min(anchorX, maxX)) : viewportWidth / 2;
-    const spaceBelow = viewportHeight
-      - rect.bottom
-      - REQUEST_EVENTS_TOOLTIP_OFFSET
-      - REQUEST_EVENTS_TOOLTIP_VIEWPORT_PADDING;
-    const spaceAbove = rect.top
-      - REQUEST_EVENTS_TOOLTIP_OFFSET
-      - REQUEST_EVENTS_TOOLTIP_VIEWPORT_PADDING;
-    const placement = spaceBelow >= REQUEST_EVENTS_TOOLTIP_ESTIMATED_HEIGHT || spaceBelow >= spaceAbove
-      ? 'below'
-      : 'above';
-    const y = placement === 'above'
-      ? rect.top - REQUEST_EVENTS_TOOLTIP_OFFSET
-      : rect.bottom + REQUEST_EVENTS_TOOLTIP_OFFSET;
-
-    setRequestEventsTooltip({ lines: target.lines, x, y, placement });
-  }, []);
-
-  const syncRequestEventsTooltip = useCallback(() => {
-    if (requestEventsTooltipHoverTargetRef.current && !requestEventsTooltipHoverTargetRef.current.anchor.isConnected) {
-      requestEventsTooltipHoverTargetRef.current = null;
-    }
-    if (requestEventsTooltipFocusTargetRef.current && !requestEventsTooltipFocusTargetRef.current.anchor.isConnected) {
-      requestEventsTooltipFocusTargetRef.current = null;
-    }
-    positionRequestEventsTooltip(
-      requestEventsTooltipHoverTargetRef.current ?? requestEventsTooltipFocusTargetRef.current,
-    );
-  }, [positionRequestEventsTooltip]);
-
-  const handleRequestEventsTooltipMouseEnter = useCallback((lines: string[], anchor: HTMLElement) => {
-    requestEventsTooltipHoverTargetRef.current = { lines, anchor };
-    syncRequestEventsTooltip();
-  }, [syncRequestEventsTooltip]);
-  const handleRequestEventsTooltipMouseLeave = useCallback((anchor: HTMLElement) => {
-    if (requestEventsTooltipHoverTargetRef.current?.anchor === anchor) {
-      requestEventsTooltipHoverTargetRef.current = null;
-    }
-    syncRequestEventsTooltip();
-  }, [syncRequestEventsTooltip]);
-  const handleRequestEventsTooltipFocus = useCallback((lines: string[], anchor: HTMLElement) => {
-    requestEventsTooltipFocusTargetRef.current = { lines, anchor };
-    syncRequestEventsTooltip();
-  }, [syncRequestEventsTooltip]);
-  const handleRequestEventsTooltipBlur = useCallback((anchor: HTMLElement) => {
-    if (requestEventsTooltipFocusTargetRef.current?.anchor === anchor) {
-      requestEventsTooltipFocusTargetRef.current = null;
-    }
-    syncRequestEventsTooltip();
-  }, [syncRequestEventsTooltip]);
-
-  useEffect(() => {
-    const repositionRequestEventsTooltip = () => {
-      if (requestEventsTooltipHoverTargetRef.current || requestEventsTooltipFocusTargetRef.current) {
-        syncRequestEventsTooltip();
-      }
-    };
-    window.addEventListener('resize', repositionRequestEventsTooltip);
-    window.addEventListener('scroll', repositionRequestEventsTooltip, true);
-    return () => {
-      window.removeEventListener('resize', repositionRequestEventsTooltip);
-      window.removeEventListener('scroll', repositionRequestEventsTooltip, true);
-    };
-  }, [syncRequestEventsTooltip]);
 
   const rows = useMemo<RequestEventRow[]>(() => {
     return events.map((event, index) => {
@@ -1544,24 +1449,7 @@ export function RequestEventsDetailsCard({
         onApply={handleColumnSettingsApply}
         onClose={() => setColumnSettingsOpen(false)}
       />
-      {requestEventsTooltip && typeof document !== 'undefined'
-        ? createPortal(
-            <div
-              className={styles.requestEventsSpeedModeTooltip}
-              role="tooltip"
-              style={{
-                left: requestEventsTooltip.x,
-                top: requestEventsTooltip.y,
-                transform: requestEventsTooltip.placement === 'above'
-                  ? 'translate(-50%, -100%)'
-                  : 'translateX(-50%)',
-              }}
-            >
-              {requestEventsTooltip.lines.map((line) => <span key={line}>{line}</span>)}
-            </div>,
-            document.body,
-          )
-        : null}
+      <PortalTooltip tooltip={requestEventsTooltip} />
       <Modal
         open={requestLogOpen}
         title={requestLogTitle}

@@ -1,5 +1,7 @@
 import { apiPath } from '@/lib/api';
 import type {
+  LocalRankingProfileRequest,
+  LocalRankingProfileResponse,
   RankingLeaderboardResponse,
   RankingMetadataResponse,
   RankingMetric,
@@ -90,6 +92,29 @@ export const fetchRankingLeaderboard = (
   const query = new URLSearchParams({ period, metric });
   return requestRankingJSON<RankingLeaderboardResponse>(`/ranking/leaderboards?${query.toString()}`, { signal });
 };
+
+export const fetchLocalRankingLeaderboard = (
+  period: RankingPeriod,
+  metric: RankingMetric,
+  signal?: AbortSignal,
+) => {
+  const query = new URLSearchParams({ period, metric });
+  return requestRankingJSON<RankingLeaderboardResponse>(`/ranking/local/leaderboards?${query.toString()}`, { signal });
+};
+
+export const updateLocalRankingProfile = (
+  participantID: string,
+  profile: LocalRankingProfileRequest,
+  signal?: AbortSignal,
+) => requestRankingJSON<LocalRankingProfileResponse>(
+  `/ranking/local/profiles/${encodeURIComponent(participantID)}`,
+  {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+    signal,
+  },
+);
 
 export const fetchRankingMetadata = (signal?: AbortSignal) => requestRankingJSON<RankingMetadataResponse>(
   '/ranking/leaderboards/metadata',

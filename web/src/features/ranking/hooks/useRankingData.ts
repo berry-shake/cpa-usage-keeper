@@ -194,7 +194,8 @@ export function useRankingData({
     if (!silent) {
       setLeaderboardLoading(true);
       setLeaderboardError(null);
-      setLeaderboard(cachedBoard);
+      // 目标缓存缺失时保留上一份响应；页面会按 period/metric 过滤内容，但标题栏无需闪动。
+      setLeaderboard((current) => cachedBoard ?? current);
     }
     try {
       const nextLeaderboard = await api.leaderboard(nextPeriod, nextMetric, controller.signal);

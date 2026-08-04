@@ -710,7 +710,7 @@ func TestDatabaseTimeFieldsUseProjectTimezoneRFC3339Nano(t *testing.T) {
 	}
 }
 
-func TestCleanupStorageCleansRedisInboxAndVacuums(t *testing.T) {
+func TestCleanupStorageCleansRedisInboxAndAppliesVacuumPolicy(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -784,23 +784,23 @@ func TestCleanupStorageRetainsNinetyLocalDays(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
-	// 准备：只有 Overview 与 Activity 都追平后，旧 raw events 才具备删除安全水位。
+	// 准备：只有 Overview 与 Activity 都追平后，旧 raw events 才具备归档安全水位。
 	if err := repository.AggregateUsageOverviewStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate overview before cleanup: %v", err)
 	}
 	if err := repository.AggregateUsageActivityStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate activity before cleanup: %v", err)
 	}
-	// Task 1 尚未实现 Latency 回填，测试显式推进第三行后才满足最终 cleanup 门禁。
+	// 测试显式推进第三个全局 checkpoint 后，才满足 raw event 归档门禁。
 	seedCaughtUpLatencyCheckpoint(t, db, now)
 
-	// 执行：在两个全局 checkpoint 已追平且没有 identity delta 时运行清理。
-	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
+	// 执行：三个全局 checkpoint 已追平且没有 identity delta 时运行维护。
+	result, err := repository.CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsDeleted != 1 {
-		t.Fatalf("expected one old usage event to be deleted, got %+v", result)
+	if result.UsageEventsArchived != 1 {
+		t.Fatalf("expected one old usage event to be archived, got %+v", result)
 	}
 
 	var remainingKeys []string
@@ -842,15 +842,15 @@ func TestCleanupStorageUsesLocalCalendarDaysAcrossDST(t *testing.T) {
 	if err := repository.AggregateUsageActivityStats(context.Background(), db, now); err != nil {
 		t.Fatalf("aggregate activity before cleanup: %v", err)
 	}
-	// Latency 行必须和另外两类一起覆盖当前最大 ID，raw event 才可删除。
+	// Latency 行必须和另外两类一起覆盖当前最大 ID，raw event 才可离开 hot 表。
 	seedCaughtUpLatencyCheckpoint(t, db, now)
 
-	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
+	result, err := repository.CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsDeleted != 1 {
-		t.Fatalf("expected only the event before the local calendar cutoff to be deleted, got %+v", result)
+	if result.UsageEventsArchived != 1 {
+		t.Fatalf("expected only the event before the local calendar cutoff to be archived, got %+v", result)
 	}
 
 	var remainingKeys []string
@@ -875,14 +875,17 @@ func TestCleanupStorageDefersUsageEventsUntilOverviewAndActivityCatchUp(t *testi
 		t.Fatalf("InsertUsageEvents returned error: %v", err)
 	}
 
-	// 执行：全局 checkpoint 尚未创建时尝试清理 raw events。
-	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
+	// 执行：全局 checkpoint 尚未创建时尝试归档 raw events。
+	result, err := repository.CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
 	// 断言：清理必须让路，避免异步聚合再也读取不到两条事件。
-	if result.UsageEventsDeleted != 0 {
+	if result.UsageEventsArchived != 0 {
 		t.Fatalf("expected pending overview/activity events to remain, got %+v", result)
+	}
+	if result.UsageEventsArchiveStatus != dto.UsageEventArchiveStatusAggregationLagging {
+		t.Fatalf("expected aggregation lagging archive status, got %+v", result)
 	}
 
 	var remainingCount int64
@@ -925,11 +928,11 @@ func TestCleanupStorageDefersUsageEventsUntilLatencyCatchUp(t *testing.T) {
 		t.Fatalf("seed lagging latency checkpoint: %v", err)
 	}
 
-	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
+	result, err := repository.CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
-	if result.UsageEventsDeleted != 0 {
+	if result.UsageEventsArchived != 0 {
 		t.Fatalf("expected lagging latency aggregation to retain raw events, got %+v", result)
 	}
 	var remainingCount int64
@@ -977,12 +980,12 @@ func TestCleanupStorageDefersUsageEventsUntilIdentityCatchUp(t *testing.T) {
 	}
 
 	// 执行：identity cursor 尚未越过第二条匹配事件时运行清理。
-	result, err := repository.CleanupStorage(db, now, repository.CleanupStorageOptions{CleanupUsageEvents: true})
+	result, err := repository.CleanupStorage(db, now)
 	if err != nil {
 		t.Fatalf("CleanupStorage returned error: %v", err)
 	}
 	// 断言：两条 raw events 都必须保留，等待 Identity 下一批安全累计。
-	if result.UsageEventsDeleted != 0 {
+	if result.UsageEventsArchived != 0 {
 		t.Fatalf("expected pending identity events to remain, got %+v", result)
 	}
 

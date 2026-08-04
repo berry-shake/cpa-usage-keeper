@@ -353,95 +353,51 @@ func InsertUsageEvents(db *gorm.DB, events []entities.UsageEvent) (int, int, err
 	return inserted, 0, nil
 }
 
-type CleanupStorageOptions struct {
-	// CleanupUsageEvents 控制是否删除过期 usage_events 原始事件；默认 false 表示保留原始事件。
-	CleanupUsageEvents bool
-}
-
 const usageEventsRetentionDays = 90
 
-// CleanupStorage 是每日维护任务的统一仓储清理入口：先清 inbox/raw events，再清 Activity 与 Latency 限期统计，最后执行 VACUUM。
-// VACUUM 必须在删除完成后单独执行，任何一步失败都会停止后续步骤并把已完成部分的结果返回给上层日志。
-func CleanupStorage(db *gorm.DB, now time.Time, options ...CleanupStorageOptions) (dto.StorageCleanupResult, error) {
-	opts := CleanupStorageOptions{}
-	if len(options) > 0 {
-		opts = options[0]
-	}
+// CleanupStorage 是每日维护任务的统一仓储入口：先清 inbox、归档 raw events，再清限期统计并条件式整理空闲页。
+func CleanupStorage(db *gorm.DB, now time.Time) (dto.StorageCleanupResult, error) {
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {
 		return dto.StorageCleanupResult{RedisInbox: redisResult}, err
 	}
-	var usageEventsDeleted int64
-	if opts.CleanupUsageEvents {
-		usageEventsDeleted, err = cleanupUsageEvents(db, now)
-		if err != nil {
-			return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
-		}
+	usageEventsArchive, err := ArchiveExpiredUsageEvents(databaseContext(db), db, now)
+	result := dto.StorageCleanupResult{
+		RedisInbox:               redisResult,
+		UsageEventsArchived:      usageEventsArchive.Archived,
+		UsageEventsArchiveStatus: usageEventsArchive.Status,
+	}
+	if err != nil {
+		return result, err
 	}
 	// Activity 的 short/medium/long 分别按自身 retention 清理，daily 永久保留。
 	if err := CleanupUsageActivityStats(db, now); err != nil {
-		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+		return result, err
 	}
-	// Latency 小时保留 3 天、自然日保留 365 天，并复用本轮最后一次 VACUUM。
+	// Latency 小时保留 3 天、自然日保留 365 天；空闲页由后面的条件式 VACUUM 统一评估。
 	if err := CleanupUsageLatencyStats(db, now); err != nil {
-		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
+		return result, err
 	}
-	// SQLite 删除不会立即缩小文件，维护窗口最后统一 VACUUM。
-	if err := db.Exec("VACUUM").Error; err != nil {
-		return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, err
-	}
-	return dto.StorageCleanupResult{RedisInbox: redisResult, UsageEventsDeleted: usageEventsDeleted}, nil
-}
-
-// cleanupUsageEvents 严格删除早于“time.Local 当日零点向前 90 个自然日”边界的原始 usage_events。
-func cleanupUsageEvents(db *gorm.DB, now time.Time) (int64, error) {
-	if db == nil {
-		return 0, fmt.Errorf("database is nil")
-	}
-	// deleted 只在安全水位检查和 DELETE 同一事务提交后返回。
-	deleted := int64(0)
-	// 安全检查与删除共用事务，禁止新 usage event 在两者之间插入并被误删。
-	err := db.Transaction(func(tx *gorm.DB) error {
-		// 三类聚合任一落后时，本轮跳过 raw event 删除并等待下一次维护窗口。
-		safe, err := usageEventAggregationsCaughtUp(tx)
-		if err != nil {
-			return err
-		}
-		// 跳过删除不是维护失败，Activity retention 和 VACUUM 仍可继续执行。
-		if !safe {
-			return nil
-		}
-		// 只有安全水位已经覆盖当前最大 ID 时才计算时间保留线。
-		cutoff := usageEventsCleanupCutoff(now)
-		// DELETE 保持严格小于 cutoff，边界时刻本身必须保留。
-		result := tx.Unscoped().Where("timestamp < ?", timeutil.FormatStorageTime(cutoff)).Delete(&entities.UsageEvent{})
-		if result.Error != nil {
-			return fmt.Errorf("cleanup usage events: %w", result.Error)
-		}
-		// 事务成功返回前记录本次真实删除行数。
-		deleted = result.RowsAffected
-		return nil
-	})
-	// 事务失败时不报告未提交的删除数量。
+	vacuumResult, err := maybeVacuumStorage(db)
+	result.Vacuum = vacuumResult
 	if err != nil {
-		return 0, err
+		return result, err
 	}
-	// 返回已经提交的删除数量；聚合落后时固定为 0。
-	return deleted, nil
+	return result, nil
 }
 
 func usageEventAggregationsCaughtUp(tx *gorm.DB) (bool, error) {
 	// 当前最大 event ID 是三个全局 checkpoint 和每行 Identity cursor 的共同安全目标。
 	var maxEventID int64
 	if err := tx.Model(&entities.UsageEvent{}).Select("COALESCE(MAX(id), 0)").Scan(&maxEventID).Error; err != nil {
-		return false, fmt.Errorf("load usage event cleanup watermark: %w", err)
+		return false, fmt.Errorf("load usage event archive watermark: %w", err)
 	}
-	// 空 raw event 表没有待聚合数据，可以直接执行空删除。
+	// 空 hot 表没有待聚合数据，也没有需要归档的事件。
 	if maxEventID == 0 {
 		return true, nil
 	}
 
-	// 同一事务内一次读取三行，避免分别查询时观察到不一致水位或继续依赖已删除旧表。
+	// 同一事务内一次读取三行，避免分别查询时观察到不一致水位。
 	var checkpoints []entities.UsageAggregationCheckpoint
 	names := []entities.UsageAggregationCheckpointName{
 		entities.UsageAggregationCheckpointOverview,
@@ -449,7 +405,7 @@ func usageEventAggregationsCaughtUp(tx *gorm.DB) (bool, error) {
 		entities.UsageAggregationCheckpointLatency,
 	}
 	if err := tx.Where("name IN ?", names).Find(&checkpoints).Error; err != nil {
-		return false, fmt.Errorf("load usage aggregation cleanup watermarks: %w", err)
+		return false, fmt.Errorf("load usage aggregation archive watermarks: %w", err)
 	}
 	// 缺行、重复异常或任一 cursor 落后都必须保守保留 raw events。
 	ready := make(map[entities.UsageAggregationCheckpointName]bool, len(names))
@@ -462,16 +418,16 @@ func usageEventAggregationsCaughtUp(tx *gorm.DB) (bool, error) {
 		}
 	}
 
-	// Identity 没有全局 checkpoint；复用兼容追赶的同一 EXISTS 判断，但保持在当前 cleanup 事务内读取。
+	// Identity 没有全局 checkpoint；复用兼容追赶的同一 EXISTS 判断，但保持在当前 archive 事务内读取。
 	pendingIdentity, err := hasPendingUsageIdentityAggregation(tx)
 	if err != nil {
-		return false, fmt.Errorf("check identity cleanup watermark: %w", err)
+		return false, fmt.Errorf("check identity archive watermark: %w", err)
 	}
-	// 任一 active/deleted identity 仍有 delta 时都禁止删除；不存在匹配 delta 才算安全。
+	// 任一 active/deleted identity 仍有 delta 时都禁止事件离开 hot 表。
 	return !pendingIdentity, nil
 }
 
-func usageEventsCleanupCutoff(now time.Time) time.Time {
+func usageEventsArchiveCutoff(now time.Time) time.Time {
 	localNow := now.In(time.Local)
 	localDayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)
 	return localDayStart.AddDate(0, 0, -usageEventsRetentionDays)

@@ -1,5 +1,8 @@
 import type { RankingDataAPI } from './hooks/useRankingData';
+import type { LocalRankingDataAPI } from './hooks/useLocalRankingData';
 import type {
+  LocalRankingProfileRequest,
+  LocalRankingProfileResponse,
   RankingDetailMetric,
   RankingLeaderboardEntry,
   RankingLeaderboardResponse,
@@ -68,6 +71,8 @@ const PARTICIPANT_AVATARS = [12, 7, 3, 45, 22, 61, 30, 5, 52, 18, 34, 66, 9, 41,
 interface PreviewParticipant {
   participantID: string;
   displayName: string;
+  keyAlias?: string;
+  fallbackDisplayName?: string;
   avatarID: number;
   score: number;
   metrics: Record<RankingDetailMetric, number>;
@@ -108,20 +113,32 @@ const buildEntry = (
     DETAIL_METRICS.map((item) => [item, scaleMetric(item, participant.metrics[item], factor)]),
   ) as Record<RankingDetailMetric, number>;
   const periodScoreOffset = period === 'current_month' ? 20 : period === 'previous_month' ? -35 : 0;
+  const displayName = participant.keyAlias === undefined
+    ? participant.displayName
+    : participant.keyAlias || participant.fallbackDisplayName || participant.displayName;
   return {
     rank: 0,
     participant_id: participant.participantID,
-    display_name: participant.displayName,
+    display_name: displayName,
     avatar_id: participant.avatarID,
     value: metric === 'overall' ? participant.score + periodScoreOffset : metrics[metric],
     metrics,
   };
 };
 
-const buildLeaderboard = (period: RankingPeriod, metric: RankingMetric): RankingLeaderboardResponse => {
+const buildLeaderboard = (
+  period: RankingPeriod,
+  metric: RankingMetric,
+  local = false,
+  participants: PreviewParticipant[] = PARTICIPANTS,
+): RankingLeaderboardResponse => {
   const direction = isLowerBetter(metric) ? 1 : -1;
-  const entries = PARTICIPANTS
-    .map((participant) => buildEntry(participant, period, metric))
+  const entries = participants
+    .map((participant) => {
+      const entry = buildEntry(participant, period, metric);
+      const localEntry = local ? { ...entry, key_alias: participant.keyAlias ?? '' } : entry;
+      return local && metric === 'overall' ? { ...localEntry, value: Math.round(entry.value / 100) } : localEntry;
+    })
     .sort((left, right) => (left.value - right.value) * direction)
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
   return {
@@ -131,6 +148,31 @@ const buildLeaderboard = (period: RankingPeriod, metric: RankingMetric): Ranking
     generated_at: new Date().toISOString(),
     stale: false,
     entries,
+  };
+};
+
+export const createLocalRankingPreviewAPI = (): LocalRankingDataAPI => {
+  const participants = PARTICIPANTS.map((participant, index) => ({
+    ...participant,
+    keyAlias: participant.displayName,
+    fallbackDisplayName: `sk-*********${String(index + 1).padStart(4, '0')}`,
+    metrics: { ...participant.metrics },
+  }));
+  return {
+    leaderboard: async (period, metric) => buildLeaderboard(period, metric, true, participants),
+    updateProfile: async (participantID: string, profile: LocalRankingProfileRequest): Promise<LocalRankingProfileResponse> => {
+      const participant = participants.find((item) => item.participantID === participantID);
+      if (!participant) throw new Error('local ranking preview profile not found');
+      participant.keyAlias = profile.key_alias.trim();
+      participant.avatarID = profile.avatar_id;
+      const displayName = participant.keyAlias || participant.fallbackDisplayName || participant.displayName;
+      return {
+        participant_id: participantID,
+        key_alias: participant.keyAlias,
+        display_name: displayName,
+        avatar_id: participant.avatarID,
+      };
+    },
   };
 };
 
@@ -205,9 +247,16 @@ export const createRankingPreviewAPI = (): RankingDataAPI => {
 };
 
 let previewAPI: RankingDataAPI | undefined;
+let localPreviewAPI: LocalRankingDataAPI | undefined;
 
 export const resolveRankingPreviewAPI = (enabled?: string): RankingDataAPI | undefined => {
   if (enabled !== 'true') return undefined;
   previewAPI ??= createRankingPreviewAPI();
   return previewAPI;
+};
+
+export const resolveLocalRankingPreviewAPI = (enabled?: string): LocalRankingDataAPI | undefined => {
+  if (enabled !== 'true') return undefined;
+  localPreviewAPI ??= createLocalRankingPreviewAPI();
+  return localPreviewAPI;
 };

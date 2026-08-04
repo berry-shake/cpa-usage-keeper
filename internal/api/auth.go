@@ -2,8 +2,8 @@ package api
 
 import (
 	"crypto/subtle"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +26,12 @@ const (
 	requestIntentHeaderValueFetch = "fetch"
 )
 
-const maxFailedLoginAttempts = 5
+const (
+	maxFailedLoginAttempts = 5
+	loginAttemptWindow     = time.Minute
+	loginAttemptGlobalMax  = 60
+	loginAttemptSourceMax  = 4096
+)
 
 type AuthConfig struct {
 	Enabled              bool
@@ -34,15 +39,16 @@ type AuthConfig struct {
 	SessionTTL           time.Duration
 	BasePath             string
 	FrameAncestorOrigins []string
+	TrustedProxyCIDRs    []string
 }
 
 type authHandler struct {
 	config            AuthConfig
 	sessions          *auth.SessionManager
 	cpaAPIKeyProvider service.CPAAPIKeyProvider
+	loginAttempts     *auth.LoginAttemptLimiter
 
 	mu                  sync.Mutex
-	failedAttempts      map[string]int
 	keyOverviewRequests map[string]time.Time
 }
 
@@ -91,7 +97,17 @@ type resolvedSessionToken struct {
 }
 
 func NewAuthHandler(config AuthConfig, sessions *auth.SessionManager) *authHandler {
-	return &authHandler{config: config, sessions: sessions, failedAttempts: make(map[string]int), keyOverviewRequests: make(map[string]time.Time)}
+	return &authHandler{
+		config:   config,
+		sessions: sessions,
+		loginAttempts: auth.NewLoginAttemptLimiter(auth.LoginAttemptLimiterOptions{
+			Window:         loginAttemptWindow,
+			PerSourceLimit: maxFailedLoginAttempts,
+			GlobalLimit:    loginAttemptGlobalMax,
+			MaxSources:     loginAttemptSourceMax,
+		}),
+		keyOverviewRequests: make(map[string]time.Time),
+	}
 }
 
 func (h *authHandler) setCPAAPIKeyProvider(provider service.CPAAPIKeyProvider) {
@@ -218,26 +234,27 @@ func (h *authHandler) login(c *gin.Context) {
 		writeInternalError(c, "session manager is not configured", nil)
 		return
 	}
+	clientKey := loginClientKey(c)
+	if !h.allowLoginAttempt(c, clientKey) {
+		return
+	}
 
 	var request loginRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
+		if isRequestEntityTooLarge(err) {
+			writeRequestEntityTooLarge(c)
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	clientKey := loginClientKey(c)
 	passwordMatches := subtle.ConstantTimeCompare([]byte(request.Password), []byte(h.config.LoginPassword)) == 1
-	if h.tooManyFailedAttempts(clientKey) && !passwordMatches {
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many failed login attempts"})
-		return
-	}
-
 	if !passwordMatches {
-		h.recordFailedAttempt(clientKey)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid password"})
 		return
 	}
-	h.clearFailedAttempts(clientKey)
+	h.loginAttempts.Reset(clientKey)
 
 	resolved := resolveSessionToken(c)
 	token, expiresAt, err := h.sessions.CreateWithSource(resolved.Source)
@@ -260,27 +277,24 @@ func (h *authHandler) apiKeyLogin(c *gin.Context) {
 		return
 	}
 	clientKey := loginClientKey(c)
+	if !h.allowLoginAttempt(c, clientKey) {
+		return
+	}
 	var request apiKeyLoginRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		if h.tooManyFailedAttempts(clientKey) {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many failed login attempts"})
+		if isRequestEntityTooLarge(err) {
+			writeRequestEntityTooLarge(c)
 			return
 		}
-		h.recordFailedAttempt(clientKey)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 	row, err := h.cpaAPIKeyProvider.FindActiveCPAAPIKeyByValue(c.Request.Context(), request.APIKey)
 	if err != nil {
-		if h.tooManyFailedAttempts(clientKey) {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many failed login attempts"})
-			return
-		}
-		h.recordFailedAttempt(clientKey)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
-	h.clearFailedAttempts(clientKey)
+	h.loginAttempts.Reset(clientKey)
 	resolved := resolveSessionToken(c)
 	token, expiresAt, err := h.sessions.CreateAPIKeyViewerWithSource(row.ID, resolved.Source)
 	if err != nil {
@@ -322,22 +336,18 @@ func (h *authHandler) logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (h *authHandler) tooManyFailedAttempts(key string) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.failedAttempts[key] >= maxFailedLoginAttempts
-}
-
-func (h *authHandler) recordFailedAttempt(key string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.failedAttempts[key]++
-}
-
-func (h *authHandler) clearFailedAttempts(key string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	delete(h.failedAttempts, key)
+func (h *authHandler) allowLoginAttempt(c *gin.Context, key string) bool {
+	allowed, retryAfter := h.loginAttempts.Allow(key)
+	if allowed {
+		return true
+	}
+	seconds := int64((retryAfter + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	c.Header("Retry-After", strconv.FormatInt(seconds, 10))
+	c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts"})
+	return false
 }
 
 func (h *authHandler) allowKeyOverviewRequest(token string, scopes ...string) bool {
@@ -394,10 +404,6 @@ func (h *authHandler) clearSessionState(token string) {
 }
 
 func loginClientKey(c *gin.Context) string {
-	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-	if err == nil && host != "" {
-		return host
-	}
 	return c.ClientIP()
 }
 

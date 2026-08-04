@@ -100,7 +100,7 @@ Docker Compose 是推荐部署方式：首次部署可同时运行 CPA + Keeper�
 | Linux 不使用容器 | [Linux 二进制](#linux-二进制) | `amd64`、`arm64` |
 | Windows | [Windows Binary](#windows-binary) | `amd64`、`arm64` |
 
-公网部署建议启用 `AUTH_ENABLED=true`，并配置 `LOGIN_PASSWORD` 保护数据。
+登录保护默认启用。启动 Keeper 前请配置 `LOGIN_PASSWORD`；只有部署环境已可靠隔离访问时，才显式设置 `AUTH_ENABLED=false`。
 
 ## 项目结构
 
@@ -209,7 +209,7 @@ services:
       CPA_MANAGEMENT_KEY: replace-with-your-management-key
       REDIS_QUEUE_ADDR: cli-proxy-api:8317
       AUTH_ENABLED: true
-      LOGIN_PASSWORD: replace-with-your-login-password
+      LOGIN_PASSWORD: ${KEEPER_LOGIN_PASSWORD:?set KEEPER_LOGIN_PASSWORD}
     volumes:
       - ./keeper:/data
     networks:
@@ -219,6 +219,8 @@ networks:
   cpa-network:
     driver: bridge
 ```
+
+启动前请在 shell 或 Compose `.env` 文件中设置 `KEEPER_LOGIN_PASSWORD`。
 
 运行 `docker compose up -d` 启动，使用 `docker compose down` 停止。
 
@@ -240,8 +242,10 @@ CPA 运行在 Docker 宿主机上时，可从以下配置开始：
 CPA_BASE_URL=http://host.docker.internal:8317
 CPA_MANAGEMENT_KEY=replace-with-your-management-key
 AUTH_ENABLED=true
-LOGIN_PASSWORD=replace-with-your-login-password
+LOGIN_PASSWORD=
 ```
+
+启动容器前请设置私有的 `LOGIN_PASSWORD`。
 
 其它网络环境请将 `CPA_BASE_URL` 改为容器可访问的 CPA 地址。CPA 使用非默认 Redis/RESP 地址时，再设置 `REDIS_QUEUE_ADDR`。
 
@@ -272,7 +276,7 @@ brew tap Willxup/cpa-usage-keeper
 brew install cpa-usage-keeper
 ```
 
-至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`，然后启动服务：
+设置 `CPA_BASE_URL`、`CPA_MANAGEMENT_KEY` 和私有的 `LOGIN_PASSWORD`，然后启动服务：
 
 ```bash
 vim "$(brew --prefix)/etc/cpa-usage-keeper.env"
@@ -339,7 +343,7 @@ notepad .env
 .\cpa-usage-keeper.exe
 ```
 
-启动前至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。公网部署还应设置 `AUTH_ENABLED=true` 和 `LOGIN_PASSWORD`。
+启动前请设置 `CPA_BASE_URL`、`CPA_MANAGEMENT_KEY` 和私有的 `LOGIN_PASSWORD`。认证默认启用；只有隔离部署才显式设置 `AUTH_ENABLED=false`。
 
 ## 配置
 
@@ -367,12 +371,14 @@ cp .env.example .env
 | `APP_BASE_PATH` | 否 | 根路径 | Keeper 子路径部署前缀，例如 `/keeper`；留空表示部署在 `/` |
 | `CPA_PUBLIC_URL` | 否 | 当前浏览器同源根路径 | 浏览器访问 CPA 的公开地址，用于“返回 CPA”跳转和 CPAMC frame 信任来源 |
 | `FRAME_ANCESTOR_ORIGINS` | 否 | 空 | 额外信任的 `frame-ancestors` 来源，逗号分隔，每项必须是带 host 的 `http://` 或 `https://` URL |
+| `TRUSTED_PROXY_CIDRS` | 否 | 仅本机 loopback | 允许提供 `X-Forwarded-For` 的额外反向代理 CIDR，多个值用逗号分隔 |
 
 - 启动参数 `--host` 的优先级高于 `APP_HOST`。两者都未设置时，Keeper 保持现有行为，监听所有可用网络接口。
 - Docker/Compose 请保持 `APP_HOST` 为空；如需仅允许 Docker 宿主机访问，请将端口发布为 `127.0.0.1:8080:8080`。
 - `APP_BASE_PATH` 必须为空或以 `/` 开头；`/cpa/` 会规范为 `/cpa`。
 - `CPA_BASE_URL` 是服务端访问 CPA 的地址，可以使用内网地址或 Docker 服务名。
 - `CPA_PUBLIC_URL` 控制浏览器跳转和跨域 CPAMC frame 信任。同源且 CPA 位于 `/management.html` 时可留空；域名、端口或路径不同时应设置公开 CPA 地址。
+- Keeper 只信任本机 loopback 和 `TRUSTED_PROXY_CIDRS` 提供的 `X-Forwarded-For`；直连客户端不能通过该请求头切换登录限流来源。只配置实际代理地址或网段，全网 CIDR 会被拒绝。
 
 `CPA_PUBLIC_URL` 可填写域名、带协议的完整地址或相对路径，例如 `https://cpa.example.com`、`https://cpa.example.com/cpa/` 或 `/cpa/`。前端会自动追加 `management.html`，并兼容末尾已有 `/` 或已经填写到 `management.html` 的情况。未配置时，“返回 CPA”默认跳转到当前浏览器同源根路径下的 `/management.html`；如果 CPA 和 Keeper 的外部域名、端口或路径不一致，请显式设置 `CPA_PUBLIC_URL`。
 
@@ -386,7 +392,7 @@ cp .env.example .env
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `AUTH_ENABLED` | 否 | `false` | 是否启用登录保护 |
+| `AUTH_ENABLED` | 否 | `true` | 是否启用登录保护 |
 | `LOGIN_PASSWORD` | 鉴权启用时必填 | - | 登录密码 |
 | `AUTH_SESSION_TTL` | 否 | `168h` | 登录 session 有效时长 |
 
@@ -425,10 +431,11 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 | `LOG_LEVEL` | 否 | `info` | 日志级别 |
 | `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
 | `LOG_RETENTION_DAYS` | 否 | `7` | 综合日志保留历史天数，并额外保留当天；`0` 表示不自动清理。仅错误日志固定保留历史 30 天及当天 |
-| `CLEANUP_USAGE_EVENTS_ENABLED` | 否 | `false` | 是否在每日维护中删除过期 `usage_events` 原始事件；启用后会删除早于 90 个本地自然日前 00:00 的数据 |
 | `BACKUP_ENABLED` | 否 | `true` | 是否启用 SQLite 数据库备份 |
 | `BACKUP_INTERVAL` | 否 | `24h` | 数据库备份间隔 |
 | `BACKUP_RETENTION_DAYS` | 否 | `7` | 备份保留天数 |
+
+Keeper 会在每天 04:30 的维护窗口中，把早于 90 个本地自然日的原始 `usage_events` 自动移动到永久保留的 `usage_events_archive` 冷表。该冷表用于未来 schema migration 重建增量数据，正常仪表盘 API 不查询 archive。
 
 启用文件日志后，`cpa-usage-keeper-YYYY-MM-DD.log` 会记录所有已输出级别；error、fatal 和 panic 级别还会同时写入 `cpa-usage-keeper-error-YYYY-MM-DD.log`，该文件固定保留历史 30 个本地自然日及当天。
 
@@ -446,7 +453,7 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 
 - SQLite 数据库备份会保存应用数据库中的原始数据，备份文件不做加密。
 - 面向浏览器的 API 会对 key-like source/lookup 字段做脱敏或稳定公开标识映射，但不会修改数据库原始值。
-- 公开部署建议开启 `AUTH_ENABLED=true`，并在反向代理层配置 HTTPS。
+- 认证默认启用。若显式关闭，请在部署边界限制 Keeper 访问；公网访问应在反向代理层启用 HTTPS。
 - 登录 session hash 存在 SQLite 中，服务重启后仍会保持有效，直到用户退出登录或超过 `AUTH_SESSION_TTL`。
 - CPAMC 嵌入模式使用独立的 embed session。Keeper 会先尝试 `HttpOnly` 的 `cpa_usage_keeper_embed_session` cookie；如果浏览器无法保存嵌入 cookie，则回退到仅 embed 模式使用的请求头。普通 Dashboard session 仍保持 `SameSite=Lax`，不会被嵌入视图复用。
 - 同源 CPAMC 嵌入使用默认的 `frame-ancestors 'self'` 即可。跨源 CPAMC 嵌入时，请将 `CPA_PUBLIC_URL` 设置为公开的 CPA/CPAMC origin，或通过 `FRAME_ANCESTOR_ORIGINS` 追加多个信任来源；Keeper 不会使用 `CPA_BASE_URL` 作为 `frame-ancestors` 来源。
@@ -465,6 +472,8 @@ location /cpa/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
+
+上面的本机 Nginx 配置无需额外设置 Keeper。若反向代理通过容器或其它主机访问 Keeper，请加入准确的代理网段，例如 `TRUSTED_PROXY_CIDRS=172.18.0.0/16`。
 
 CPA 与 Keeper 浏览器同源时，可以不设置 `CPA_PUBLIC_URL`，“返回 CPA”默认使用 `/management.html`。CPA 位于其它域名、端口或路径时，设置公开地址：
 

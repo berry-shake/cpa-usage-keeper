@@ -44,6 +44,16 @@ describe('Ranking table context styles', () => {
     expect(thirdPlace).not.toContain('var(--warning-bg)');
   });
 
+  it('gives editable local avatars a button reset and visible keyboard focus', () => {
+    const trigger = rule('.localProfileAvatarButton');
+    expect(trigger).toContain('appearance: none;');
+    expect(trigger).toContain('padding: 0;');
+    expect(trigger).toContain('border-radius: 50%;');
+    expect(trigger).toContain('cursor: pointer;');
+    expect(trigger).toContain('&:focus-visible');
+    expect(trigger).toContain('outline: 2px solid var(--primary-color);');
+  });
+
   it('uses distinct green success and red error feedback treatments', () => {
     const success = rule('\n.successBox {');
     const groupedError = styles.indexOf('\n.errorBox {');
@@ -57,44 +67,29 @@ describe('Ranking table context styles', () => {
     expect(error).toContain('var(--warning-bg)');
   });
 
-  it('uses compact in-card filters that do not copy the connected primary-tab treatment', () => {
+  it('keeps the metric select visually identical to the title and renders period as a compact select', () => {
     expect(rule('.toolbar')).toContain('justify-content: center;');
-    expect(rule('.periods')).toContain('display: grid;');
-    expect(rule('.periods')).toContain('grid-template-columns: repeat(4, max-content);');
-    expect(rule('.periods')).toContain('width: max-content;');
-    expect(rule('.periods')).toContain('border: 0;');
-    expect(rule('.periods')).toContain('background: transparent;');
-    expect(rule('.periods')).not.toContain('border-bottom:');
-    expect(rule('.periodButton')).toContain('border: 1px solid transparent;');
-    expect(rule('.periodButton')).toContain('border-radius: 999px;');
-    expect(rule('.periodButton')).toContain('padding: 6px 8px;');
-    expect(rule('.periodButton')).toContain('width: 100%;');
-    expect(rule('.periodButton')).toContain('font-size: 12px;');
-    expect(rule('.periodButton')).not.toContain('font-size: 14px;');
-    expect(rule('.periodButton')).toContain('text-align: center;');
-    expect(rule('.periodButton')).not.toContain('border-bottom:');
-    expect(rule('.periodButtonActive')).toContain('border-color: color-mix(');
-    expect(rule('.periodButtonActive')).not.toContain('border-bottom-color:');
-    expect(rule('.metricControl')).toContain('width: max-content;');
-    expect(rule('.metricControl')).toContain('min-height: 40px;');
-    const metricSelect = rule('.metricSelect');
-    const metricWidthSizer = rule('.metricWidthSizer');
-    expect(metricSelect).toContain('height: 40px;');
-    expect(metricSelect).toContain('border-radius: 999px;');
-    expect(metricSelect).not.toContain('justify-content: center;');
-    expect(metricSelect).not.toContain('position: absolute;');
-    expect(metricSelect).toMatch(/> span:first-child[\s\S]*?flex:\s*1 1 auto;[\s\S]*?min-width:\s*0;[\s\S]*?text-align:\s*center;/);
-    expect(metricSelect).not.toContain('font-size: 14px;');
-    expect(metricWidthSizer).toContain('visibility: hidden;');
-    expect(metricWidthSizer).toContain('padding: 0 42px 0 12px;');
+    const titleMetric = rule('.titleMetricSelect');
+    expect(titleMetric).toContain('height: var(--keeper-card-title-track-height);');
+    expect(titleMetric).toContain('border: 0;');
+    expect(titleMetric).toContain('background: transparent;');
+    expect(titleMetric).toContain('font-size: var(--keeper-card-title-size);');
+    expect(titleMetric).toContain('font-weight: var(--keeper-card-title-weight);');
+    expect(rule('.periodControl')).toContain('min-height: 32px;');
+    const periodSelect = rule('.periodSelect');
+    expect(periodSelect).toContain('width: max-content;');
+    expect(periodSelect).toMatch(/:global\(button\)[\s\S]*?width:\s*max-content;/);
+    expect(periodSelect).not.toContain('width: 140px;');
+    expect(periodSelect).toContain('height: 32px;');
+    expect(periodSelect).toContain('border-radius: 999px;');
+    expect(styles).not.toContain('.periodButton');
+    expect(source).toContain('<RankingMetricSelect');
   });
 
-  it('softens the active period glow specifically in dark mode', () => {
-    const darkActiveStart = styles.indexOf(":global([data-theme='dark']) .periodButtonActive");
-    expect(darkActiveStart).toBeGreaterThanOrEqual(0);
-    const darkActive = styles.slice(darkActiveStart, styles.indexOf('\n}', darkActiveStart));
-    expect(darkActive).toContain('box-shadow: 0 2px 6px');
-    expect(darkActive).not.toContain('0 4px 12px');
+  it('keeps an accessible focus ring on the otherwise frameless title select', () => {
+    const titleMetric = rule('.titleMetricSelect');
+    expect(titleMetric).toContain("&[aria-expanded='true']");
+    expect(titleMetric).toContain('box-shadow: 0 0 0 3px');
   });
 
   it('uses a visible hover and keyboard tooltip without a help cursor', () => {
@@ -122,58 +117,47 @@ describe('Ranking table context styles', () => {
     expect(source).toContain('data-ranking-score-explanation');
     expect(titleTrack).toContain('position: relative;');
     expect(scoreHint).not.toContain('position: relative;');
+    const scoreSlot = rule('.scoreExplanationSlot');
+    expect(scoreSlot).toContain('width: 18px;');
+    expect(scoreSlot).toContain('flex: 0 0 18px;');
   });
 
-  it('aligns the title with the top filters and keeps the profile entry directly below them', () => {
+  it('keeps the period in the title track and reserves only the right column for community profile', () => {
     const header = rule('.leaderboardHeader');
     expect(header).toContain('display: grid;');
-    expect(header).toContain("'title toolbar .'");
-    expect(header).toContain("'title . profile'");
-    expect(header).toContain('align-items: center;');
+    expect(header).toContain("grid-template-areas: 'title profile';");
+    expect(header).toContain('align-items: start;');
     expect(header).toContain('align-content: start;');
-    expect(rule('.leaderboardHeaderToolbar')).toContain('grid-area: toolbar;');
-    expect(rule('.leaderboardHeaderToolbar')).toContain('justify-self: center;');
+    expect(rule('.leaderboardTitle :global(.keeper-card-title-track)')).toContain('flex-wrap: wrap;');
+    expect(rule('.leaderboardHeaderToolbar')).not.toContain('grid-area: toolbar;');
+    expect(rule('.leaderboardHeaderToolbar')).toContain('display: inline-flex;');
     expect(rule('.leaderboardTitle')).toContain('grid-area: title;');
     expect(rule('.leaderboardTitle')).toContain('align-self: start;');
     expect(rule('.leaderboardHeaderActions')).toContain('grid-area: profile;');
     expect(rule('.leaderboardHeaderActions')).toContain(
       'margin-right: calc(var(--keeper-card-header-padding-x) - var(--keeper-card-padding));',
     );
-    expect(rule('.toolbar')).toContain('column-gap: 16px;');
-    expect(rule('.toolbar')).toContain('row-gap: 10px;');
+    expect(rule('.toolbar')).toContain('justify-content: center;');
   });
 
-  it('keeps long titles on one line and reflows narrow-card filters into one scrollable row', () => {
+  it('keeps long title controls clipped and lets the title track wrap only when necessary', () => {
     const card = rule('.leaderboardCard:global(.card)');
-    const title = rule('.leaderboardTitle :global(.keeper-card-title)');
+    const title = rule('.metricTitleHeading');
     const stackedStart = styles.indexOf('@mixin ranking-header-stacked');
     const stackedEnd = styles.indexOf('\n}', stackedStart);
     const stacked = styles.slice(stackedStart, stackedEnd);
-    const containerStart = styles.indexOf('@container ranking-card (max-width: 1120px)');
+    const containerStart = styles.indexOf('@container ranking-card (max-width: 760px)');
     const containerEnd = styles.indexOf('\n}', containerStart);
     const container = styles.slice(containerStart, containerEnd);
 
     expect(card).toContain('container-name: ranking-card;');
     expect(card).toContain('container-type: inline-size;');
-    expect(title).toContain('white-space: nowrap;');
     expect(title).toContain('overflow: hidden;');
-    expect(title).toContain('text-overflow: ellipsis;');
-    expect(stacked).toMatch(
-      /\.leaderboardHeader\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto;[\s\S]*?'title title'[\s\S]*?'toolbar profile';/,
-    );
-    expect(stacked).toMatch(/\.leaderboardHeaderToolbar\s*\{[\s\S]*?justify-self:\s*stretch;/);
+    expect(stacked).toMatch(/\.leaderboardHeader\s*\{[\s\S]*?grid-template-areas:\s*'title profile';/);
     expect(stacked).toMatch(
       /\.leaderboardHeaderActions\s*\{[\s\S]*?justify-content:\s*flex-end;[\s\S]*?justify-self:\s*end;[\s\S]*?margin-right:\s*0;/,
     );
-    expect(stacked).toMatch(
-      /\.toolbar\s*\{[\s\S]*?display:\s*flex;[\s\S]*?padding:\s*4px;[\s\S]*?overflow-x:\s*auto;[\s\S]*?scrollbar-width:\s*none;/,
-    );
-    expect(stacked).toMatch(
-      /\.periods\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, max-content\);[\s\S]*?width:\s*max-content;/,
-    );
-    expect(stacked).toMatch(
-      /\.metricControl\s*\{[\s\S]*?flex:\s*0 0 168px;[\s\S]*?width:\s*168px;/,
-    );
+    expect(stacked).not.toContain("'toolbar toolbar'");
     expect(container).toContain('@include ranking-header-stacked;');
   });
 
@@ -195,13 +179,14 @@ describe('Ranking table context styles', () => {
     expect(rule('.profileActionAvatar')).toContain('flex: 0 0 22px;');
   });
 
-  it('keeps only the active avatar visible on mobile while reusing the narrow-card header layout', () => {
+  it('keeps only the active profile avatar visible on mobile while preserving the accessible name', () => {
     const mobileStart = styles.indexOf('@include mobile');
     const mobileEnd = styles.indexOf('@media (prefers-reduced-motion', mobileStart);
     const mobile = styles.slice(mobileStart, mobileEnd);
 
     expect(mobile).toContain('@include ranking-header-stacked;');
-    expect(mobile).toMatch(/\.profileActionShellActive\s*\{[\s\S]*?flex:\s*0 0 42px;[\s\S]*?width:\s*42px;/);
+    expect(mobile).toMatch(/\.profileActionShellActive\s*\{[\s\S]*?flex:\s*0 0 42px;[\s\S]*?width:\s*42px;[\s\S]*?height:\s*42px;[\s\S]*?border-radius:\s*50%;/);
+    expect(mobile).toMatch(/\.profileActionShellActive :global\(\.main-action-button\)\s*\{[\s\S]*?width:\s*32px;[\s\S]*?height:\s*32px;[\s\S]*?min-height:\s*32px;[\s\S]*?padding:\s*5px;[\s\S]*?border-radius:\s*50%;/);
     expect(mobile).toMatch(/\.profileActionName\s*\{[\s\S]*?display:\s*none;/);
   });
 

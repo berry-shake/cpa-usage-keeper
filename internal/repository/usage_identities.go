@@ -290,10 +290,10 @@ func applyUsageIdentityTypesFilter(query *gorm.DB, types []string) *gorm.DB {
 func applyUsageIdentityPageSort(query *gorm.DB, sort string, authType *entities.UsageIdentityAuthType) *gorm.DB {
 	switch sort {
 	case UsageIdentityPageSortPriority:
-		// Auth Files 的 priority 同分需要稳定按名称排列；AI Provider 只保留同步顺序兜底。
+		// Auth Files 的 priority 同分按 CPA 文件名排列；AI Provider 只保留同步顺序兜底。
 		query = query.Order("priority IS NULL ASC").Order("priority DESC")
 		if authType != nil && *authType == entities.UsageIdentityAuthTypeAuthFile {
-			query = query.Order("LOWER(name) ASC")
+			query = query.Order("LOWER(file_name) ASC")
 		}
 		return query.Order("id ASC")
 	case UsageIdentityPageSortTotalTokens:

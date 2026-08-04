@@ -18,6 +18,7 @@ import (
 
 const (
 	DefaultTimeZone                    = "Asia/Shanghai"
+	publicLoginPasswordPlaceholder     = "replace-with-your-login-password"
 	RedisQueueBatchSizeDefault         = 10000
 	MetadataSyncIntervalDefault        = 30 * time.Second
 	QuotaRefreshWorkerLimitDefault     = 10
@@ -46,6 +47,8 @@ type Config struct {
 	CPAPublicURL string
 	// FrameAncestorOrigins 是额外信任的 frame-ancestors 来源，已归一化为 scheme://host。
 	FrameAncestorOrigins []string
+	// TrustedProxyCIDRs 是除本机 loopback 外允许提供客户端转发地址的代理网段。
+	TrustedProxyCIDRs []string
 	// TLSEnabled 控制是否以 HTTPS 模式启动 HTTP 服务。
 	TLSEnabled bool
 	// TLSCertFile 是 HTTPS 证书文件路径。
@@ -86,8 +89,6 @@ type Config struct {
 	BackupInterval time.Duration
 	// BackupRetentionDays 是备份文件保留天数。
 	BackupRetentionDays int
-	// CleanupUsageEventsEnabled 控制每日维护是否删除过期 usage_events 原始事件。
-	CleanupUsageEventsEnabled bool
 	// RequestTimeout 是访问 CPA HTTP 和 Redis TCP 的超时时间。
 	RequestTimeout time.Duration
 	// TLSSkipVerify 控制是否跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证。
@@ -211,11 +212,6 @@ func Load(options LoadOptions) (*Config, error) {
 	if backupRetentionDays < 0 {
 		return nil, fmt.Errorf("BACKUP_RETENTION_DAYS must be non-negative")
 	}
-	cleanupUsageEventsEnabled, err := getBool("CLEANUP_USAGE_EVENTS_ENABLED", false)
-	if err != nil {
-		return nil, err
-	}
-
 	logFileEnabled, err := getBool("LOG_FILE_ENABLED", true)
 	if err != nil {
 		return nil, err
@@ -236,7 +232,12 @@ func Load(options LoadOptions) (*Config, error) {
 		return nil, fmt.Errorf("AUTH_SESSION_TTL must be positive")
 	}
 
-	authEnabled, err := getBool("AUTH_ENABLED", false)
+	authEnabledValue := strings.TrimSpace(os.Getenv("AUTH_ENABLED"))
+	authEnabled, err := getBool("AUTH_ENABLED", true)
+	if err != nil {
+		return nil, err
+	}
+	trustedProxyCIDRs, err := getCIDRs("TRUSTED_PROXY_CIDRS")
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +278,7 @@ func Load(options LoadOptions) (*Config, error) {
 		AppBasePath:                 appBasePath,
 		CPAPublicURL:                strings.TrimSpace(os.Getenv("CPA_PUBLIC_URL")),
 		FrameAncestorOrigins:        frameAncestorOrigins,
+		TrustedProxyCIDRs:           trustedProxyCIDRs,
 		TLSEnabled:                  tlsEnabled,
 		TLSCertFile:                 strings.TrimSpace(os.Getenv("TLS_CERT_FILE")),
 		TLSKeyFile:                  strings.TrimSpace(os.Getenv("TLS_KEY_FILE")),
@@ -297,7 +299,6 @@ func Load(options LoadOptions) (*Config, error) {
 		BackupDir:                   filepath.Join(workDir, workDirBackupsName),
 		BackupInterval:              backupInterval,
 		BackupRetentionDays:         backupRetentionDays,
-		CleanupUsageEventsEnabled:   cleanupUsageEventsEnabled,
 		RequestTimeout:              requestTimeout,
 		TLSSkipVerify:               tlsSkipVerify,
 		LogLevel:                    getString("LOG_LEVEL", "info"),
@@ -317,8 +318,16 @@ func Load(options LoadOptions) (*Config, error) {
 	if cfg.CPAManagementKey == "" {
 		return nil, fmt.Errorf("CPA_MANAGEMENT_KEY is required")
 	}
-	if cfg.AuthEnabled && cfg.LoginPassword == "" {
-		return nil, fmt.Errorf("LOGIN_PASSWORD is required when AUTH_ENABLED is true")
+	if cfg.AuthEnabled {
+		if cfg.LoginPassword == "" && authEnabledValue == "" {
+			return nil, fmt.Errorf("AUTH_ENABLED is not set, so authentication defaults to true; LOGIN_PASSWORD is required")
+		}
+		if cfg.LoginPassword == "" {
+			return nil, fmt.Errorf("LOGIN_PASSWORD is required when AUTH_ENABLED is true")
+		}
+		if cfg.LoginPassword == publicLoginPasswordPlaceholder {
+			return nil, fmt.Errorf("LOGIN_PASSWORD must not use the public example value %q", publicLoginPasswordPlaceholder)
+		}
 	}
 	if cfg.TLSEnabled {
 		if cfg.TLSCertFile == "" {
@@ -471,6 +480,32 @@ func getString(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func getCIDRs(key string) ([]string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		candidate := strings.TrimSpace(part)
+		if candidate == "" {
+			return nil, fmt.Errorf("%s must contain non-empty CIDR values", key)
+		}
+		_, network, err := net.ParseCIDR(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("%s contains invalid CIDR %q: %w", key, candidate, err)
+		}
+		ones, _ := network.Mask.Size()
+		if ones == 0 {
+			return nil, fmt.Errorf("%s must not trust every address via %q", key, candidate)
+		}
+		result = append(result, network.String())
+	}
+	return result, nil
 }
 
 func getDuration(key string, fallback time.Duration) (time.Duration, error) {

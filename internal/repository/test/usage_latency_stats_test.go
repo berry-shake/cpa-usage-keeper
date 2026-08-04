@@ -56,7 +56,7 @@ func TestAggregateUsageLatencyStatsKeepsHoursForThreeDaysAndDaysForThreeHundredS
 }
 
 func TestCleanupStorageRemovesExpiredLatencyHourAndDayRows(t *testing.T) {
-	// 每日维护复用现有 cleanup/VACUUM，只删除三天前小时行和365天窗口外的自然日行。
+	// 每日维护保留原有 Latency retention，并由统一条件式 VACUUM 评估空闲页。
 	db := openTestDatabase(t)
 	now := time.Date(2026, 7, 26, 12, 30, 0, 0, time.Local)
 	templates := buildLatencyRowsForTest(t, []entities.UsageEvent{validLatencyEvent(1, "template", now, 100, 900)})

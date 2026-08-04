@@ -100,7 +100,7 @@ Docker Compose is the recommended deployment method. Use the full stack when dep
 | Linux without containers | [Linux binary](#linux-binary) | `amd64`, `arm64` |
 | Windows | [Windows binary](#windows-binary) | `amd64`, `arm64` |
 
-For public deployments, enable `AUTH_ENABLED=true` and configure `LOGIN_PASSWORD` to protect your data.
+Login protection is enabled by default. Configure `LOGIN_PASSWORD` before starting Keeper, or explicitly set `AUTH_ENABLED=false` only when access is reliably isolated by the deployment environment.
 
 ## Project Structure
 
@@ -209,7 +209,7 @@ services:
       CPA_MANAGEMENT_KEY: replace-with-your-management-key
       REDIS_QUEUE_ADDR: cli-proxy-api:8317
       AUTH_ENABLED: true
-      LOGIN_PASSWORD: replace-with-your-login-password
+      LOGIN_PASSWORD: ${KEEPER_LOGIN_PASSWORD:?set KEEPER_LOGIN_PASSWORD}
     volumes:
       - ./keeper:/data
     networks:
@@ -219,6 +219,8 @@ networks:
   cpa-network:
     driver: bridge
 ```
+
+Set `KEEPER_LOGIN_PASSWORD` in the shell or the Compose `.env` file before starting.
 
 Run `docker compose up -d` to start the stack and `docker compose down` to stop it.
 
@@ -240,8 +242,10 @@ For CPA running on the Docker host, start with:
 CPA_BASE_URL=http://host.docker.internal:8317
 CPA_MANAGEMENT_KEY=replace-with-your-management-key
 AUTH_ENABLED=true
-LOGIN_PASSWORD=replace-with-your-login-password
+LOGIN_PASSWORD=
 ```
+
+Set a private `LOGIN_PASSWORD` before starting the container.
 
 Set `CPA_BASE_URL` to the reachable CPA address for other network layouts. If CPA uses a non-default Redis/RESP address, also set `REDIS_QUEUE_ADDR`.
 
@@ -272,7 +276,7 @@ brew tap Willxup/cpa-usage-keeper
 brew install cpa-usage-keeper
 ```
 
-Set at least `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`, then start the service:
+Set `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY`, and a private `LOGIN_PASSWORD`, then start the service:
 
 ```bash
 vim "$(brew --prefix)/etc/cpa-usage-keeper.env"
@@ -339,7 +343,7 @@ notepad .env
 .\cpa-usage-keeper.exe
 ```
 
-Set at least `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY` before starting. For public deployments, also set `AUTH_ENABLED=true` and `LOGIN_PASSWORD`.
+Set `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY`, and a private `LOGIN_PASSWORD` before starting. Authentication is enabled by default; set `AUTH_ENABLED=false` explicitly only for an isolated deployment.
 
 ## Configuration
 
@@ -367,12 +371,14 @@ For first-time deployments, start with "Minimum required" and "Web access and re
 | `APP_BASE_PATH` | No | root path | Keeper subpath prefix, such as `/keeper`; empty means `/` |
 | `CPA_PUBLIC_URL` | No | current browser origin root | Public CPA URL for the "Back to CPA" link and CPAMC frame trust |
 | `FRAME_ANCESTOR_ORIGINS` | No | empty | Extra trusted `frame-ancestors` origins, comma-separated; each entry must be an `http://` or `https://` URL with a host |
+| `TRUSTED_PROXY_CIDRS` | No | local loopback only | Additional reverse-proxy CIDRs allowed to provide `X-Forwarded-For`, separated by commas |
 
 - The `--host` startup flag overrides `APP_HOST`. When neither is set, Keeper preserves its existing behavior and listens on all available network interfaces.
 - For Docker/Compose, keep `APP_HOST` empty. To restrict access to the Docker host, publish the port as `127.0.0.1:8080:8080`.
 - `APP_BASE_PATH` must be empty or start with `/`; `/cpa/` is normalized to `/cpa`.
 - `CPA_BASE_URL` is the server-side CPA address and may use a private host or Docker service name.
 - `CPA_PUBLIC_URL` controls browser navigation and cross-origin CPAMC frame trust. Leave it empty for same-origin `/management.html`, or set an explicit public CPA URL when domains, ports, or paths differ.
+- Keeper trusts `X-Forwarded-For` only from local loopback and `TRUSTED_PROXY_CIDRS`. Direct clients cannot change their login-rate-limit source with this header. Configure only the exact proxy address or network; universal CIDRs are rejected.
 
 `CPA_PUBLIC_URL` may be a domain, a full URL with scheme, or a relative path, such as `https://cpa.example.com`, `https://cpa.example.com/cpa/`, or `/cpa/`. The frontend appends `management.html` automatically and handles trailing `/` or values that already end in `management.html`. When unset, the "Back to CPA" link points to `/management.html` on the current browser origin. If CPA and Keeper use different public domains, ports, or paths, set `CPA_PUBLIC_URL` explicitly.
 
@@ -386,7 +392,7 @@ To trust additional embedding origins beyond `CPA_PUBLIC_URL` (for example a sep
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `AUTH_ENABLED` | No | `false` | Enable login protection |
+| `AUTH_ENABLED` | No | `true` | Enable login protection |
 | `LOGIN_PASSWORD` | When auth is enabled | - | Login password |
 | `AUTH_SESSION_TTL` | No | `168h` | Login session lifetime |
 
@@ -425,10 +431,11 @@ Scheduled Auth Files quota refresh is configured from the gear button in the Aut
 | `LOG_LEVEL` | No | `info` | Log level |
 | `LOG_FILE_ENABLED` | No | `true` | Write persistent log files |
 | `LOG_RETENTION_DAYS` | No | `7` | Combined-log history days, plus the current day; `0` disables cleanup. Error-only logs keep 30 history days plus the current day |
-| `CLEANUP_USAGE_EVENTS_ENABLED` | No | `false` | Delete expired raw `usage_events` during daily maintenance; when enabled, rows earlier than local midnight 90 calendar days ago are deleted |
 | `BACKUP_ENABLED` | No | `true` | Enable SQLite database backups |
 | `BACKUP_INTERVAL` | No | `24h` | Database backup interval |
 | `BACKUP_RETENTION_DAYS` | No | `7` | Backup retention days |
+
+Keeper automatically moves raw `usage_events` older than 90 local calendar days into the permanently retained `usage_events_archive` cold table during the daily 04:30 maintenance window. The archive is reserved for future schema-migration rebuilds and is not queried by normal dashboard APIs.
 
 When file logging is enabled, `cpa-usage-keeper-YYYY-MM-DD.log` contains all emitted levels. Error, fatal, and panic entries are also copied to `cpa-usage-keeper-error-YYYY-MM-DD.log`, which keeps the previous 30 local calendar dates plus the current date.
 
@@ -446,7 +453,7 @@ Security and data notes:
 
 - SQLite database backups store original data from the application database, and backup files are not encrypted.
 - Browser-facing APIs redact key-like source/lookup fields or map them to stable public identifiers, but raw database values are unchanged.
-- For public deployments, enable `AUTH_ENABLED=true` and terminate HTTPS at your reverse proxy.
+- Authentication is enabled by default. If it is explicitly disabled, restrict Keeper access at the deployment boundary; terminate public HTTPS at a reverse proxy.
 - Login session hashes are stored in SQLite and remain valid across service restarts until logout or `AUTH_SESSION_TTL` expiry.
 - CPAMC embedded mode uses a separate embed session. Keeper first tries the `HttpOnly` `cpa_usage_keeper_embed_session` cookie, then falls back to an embed-only request header when the browser cannot persist the embedded cookie. The normal dashboard session keeps `SameSite=Lax` and is not reused by the embedded view.
 - Same-origin CPAMC embedding works with the default `frame-ancestors 'self'`. For cross-origin CPAMC embedding, set `CPA_PUBLIC_URL` to the public CPA/CPAMC origin, or add more trusted origins via `FRAME_ANCESTOR_ORIGINS`; Keeper never uses `CPA_BASE_URL` as a `frame-ancestors` source.
@@ -465,6 +472,8 @@ location /cpa/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
+
+The loopback Nginx configuration above works without additional Keeper settings. If the reverse proxy reaches Keeper from a container or another host, add that exact proxy network, for example `TRUSTED_PROXY_CIDRS=172.18.0.0/16`.
 
 When CPA and Keeper share a browser origin, `CPA_PUBLIC_URL` can be omitted and "Back to CPA" uses `/management.html`. For another domain, port, or path, set the public CPA URL:
 

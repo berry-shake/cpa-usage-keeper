@@ -7,10 +7,12 @@ import { MainActionButton } from '@/components/ui/MainActionButton';
 import { Modal } from '@/components/ui/Modal';
 import { RankingApiError } from './api';
 import { RankingAvatar } from './components/RankingAvatar';
-import { RankingToolbar } from './components/RankingToolbar';
+import { RankingMetricSelect, RankingToolbar } from './components/RankingToolbar';
 import { formatLeaderboardValue, formatOverallMetricValue } from './format';
 import { normalizeRankingDisplayName, RANKING_DISPLAY_NAME_MAX_LENGTH, type RankingProfileError } from './profile';
 import type {
+  LocalRankingProfileRequest,
+  LocalRankingProfileResponse,
   RankingDetailMetric,
   RankingLeaderboardEntry,
   RankingLeaderboardResponse,
@@ -18,6 +20,7 @@ import type {
   RankingMetric,
   RankingPeriod,
   RankingProfileRequest,
+  RankingScope,
   RankingStatusResponse,
 } from './types';
 import styles from './RankingPage.module.scss';
@@ -46,6 +49,7 @@ const PROFILE_ACTION_SUCCESS_KEYS: Record<ProfileAction, string> = {
 };
 
 export interface RankingPageProps {
+  scope: RankingScope;
   period: RankingPeriod;
   metric: RankingMetric;
   status: RankingStatusResponse | null;
@@ -68,6 +72,7 @@ export interface RankingPageProps {
   onRetryStatus: AsyncAction;
   onRetryMetadata: AsyncAction;
   onRetryLeaderboard: AsyncAction;
+  onUpdateLocalProfile: (participantID: string, profile: LocalRankingProfileRequest) => Promise<LocalRankingProfileResponse>;
   onPeriodChange: (period: RankingPeriod) => void;
   onMetricChange: (metric: RankingMetric) => void;
 }
@@ -91,6 +96,9 @@ const formatError = (error: unknown, t: Translate): string => {
     ranking_sync_in_progress: 'ranking.error_sync_in_progress',
     ranking_participation_state_conflict: 'ranking.error_participation_state',
     ranking_center_incompatible: 'ranking.error_center_incompatible',
+    invalid_local_ranking_profile: 'ranking.local_profile_save_failed',
+    local_ranking_key_not_found: 'ranking.local_profile_save_failed',
+    local_ranking_profile_update_failed: 'ranking.local_profile_save_failed',
   };
   return t(knownCodes[error.code] ?? 'ranking.error_generic');
 };
@@ -123,10 +131,17 @@ export function RankingPage(props: RankingPageProps) {
   const [profileModalStep, setProfileModalStep] = useState<ProfileModalStep | null>(null);
   const [profileActionSuccess, setProfileActionSuccess] = useState<ProfileAction | null>(null);
   const [privacyTooltipOpen, setPrivacyTooltipOpen] = useState(false);
+  const [localProfileEntry, setLocalProfileEntry] = useState<RankingLeaderboardEntry | null>(null);
+  const [localProfileAlias, setLocalProfileAlias] = useState('');
+  const [localProfileAvatarID, setLocalProfileAvatarID] = useState(1);
+  const [localProfileSaving, setLocalProfileSaving] = useState(false);
+  const [localProfileError, setLocalProfileError] = useState<unknown>(null);
   const privacyTooltipID = useId();
   const currentBoard = props.leaderboard?.period === props.period && props.leaderboard.metric === props.metric
     ? props.leaderboard
     : null;
+  // 榜单内容只接受当前选择；同指标的上一周期响应可暂时维持综合分说明，稳定标题栏布局。
+  const scoreExplanationBoard = props.leaderboard?.metric === props.metric ? props.leaderboard : null;
   const periodMetadata = props.metadata?.periods.find((item) => item.period === props.period);
 
   const handleRequestJoin = () => {
@@ -180,6 +195,37 @@ export function RankingPage(props: RankingPageProps) {
     props.onClearActionError();
     setPrivacyTooltipOpen(false);
     setProfileModalStep(null);
+  };
+
+  const openLocalProfileModal = (entry: RankingLeaderboardEntry) => {
+    if (props.scope !== 'local') return;
+    setLocalProfileEntry(entry);
+    setLocalProfileAlias(entry.key_alias ?? '');
+    setLocalProfileAvatarID(entry.avatar_id);
+    setLocalProfileError(null);
+  };
+
+  const closeLocalProfileModal = () => {
+    if (localProfileSaving) return;
+    setLocalProfileEntry(null);
+    setLocalProfileError(null);
+  };
+
+  const saveLocalProfile = async () => {
+    if (!localProfileEntry || localProfileSaving) return;
+    setLocalProfileSaving(true);
+    setLocalProfileError(null);
+    try {
+      await props.onUpdateLocalProfile(localProfileEntry.participant_id, {
+        key_alias: localProfileAlias.trim(),
+        avatar_id: localProfileAvatarID,
+      });
+      setLocalProfileEntry(null);
+    } catch (error) {
+      setLocalProfileError(error);
+    } finally {
+      setLocalProfileSaving(false);
+    }
   };
 
   const modalTitle = profileModalStep === 'confirm-join'
@@ -311,6 +357,7 @@ export function RankingPage(props: RankingPageProps) {
         metadataError={props.metadataError}
         periodOnline={periodMetadata?.online}
         board={currentBoard}
+        scoreExplanationBoard={scoreExplanationBoard}
         loading={props.leaderboardLoading}
         error={props.leaderboardError}
         onRetryMetadata={props.onRetryMetadata}
@@ -318,8 +365,10 @@ export function RankingPage(props: RankingPageProps) {
         status={props.status}
         statusLoading={props.statusLoading}
         onOpenProfile={openProfileModal}
+        onEditLocalProfile={openLocalProfileModal}
         onPeriodChange={props.onPeriodChange}
         onMetricChange={props.onMetricChange}
+        scope={props.scope}
         t={t}
         language={i18n.language}
       />
@@ -392,6 +441,61 @@ export function RankingPage(props: RankingPageProps) {
           <p className={styles.confirmText}>{t('ranking.exit_confirm_body')}</p>
         ) : null}
       </Modal>
+
+      <Modal
+        open={localProfileEntry !== null}
+        title={t('ranking.local_profile_edit')}
+        onClose={closeLocalProfileModal}
+        closeDisabled={localProfileSaving}
+        width={600}
+        className={styles.profileModal}
+        footer={(
+          <>
+            <Button variant="secondary" appearance="action" onClick={closeLocalProfileModal} disabled={localProfileSaving}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              appearance="action"
+              onClick={() => void saveLocalProfile()}
+              loading={localProfileSaving}
+              data-ranking-local-profile-save
+            >
+              {t('ranking.local_profile_save')}
+            </Button>
+          </>
+        )}
+      >
+        {localProfileEntry ? (
+          <div className={styles.profileModalContent}>
+            <div className={styles.joinForm}>
+              <Input
+                name="local-ranking-key-alias"
+                value={localProfileAlias}
+                onChange={(event) => setLocalProfileAlias(event.target.value)}
+                label={t('ranking.local_profile_alias')}
+                hint={t('ranking.local_profile_alias_hint')}
+                placeholder={localProfileEntry.key_alias ? undefined : localProfileEntry.display_name}
+                autoComplete="off"
+                disabled={localProfileSaving}
+              />
+              <div className={styles.avatarField}>
+                <span className={styles.fieldLabel}>{t('ranking.avatar')}</span>
+                <AvatarPicker
+                  value={localProfileAvatarID}
+                  onChange={setLocalProfileAvatarID}
+                  t={t}
+                  disabled={localProfileSaving}
+                />
+              </div>
+            </div>
+            {localProfileError ? (
+              <div className={styles.errorBox} role="alert" data-ranking-local-profile-error>
+                {formatError(localProfileError, t)}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
     </section>
   );
 }
@@ -421,35 +525,6 @@ function ParticipationContent({
   t,
   language,
 }: ParticipationContentProps) {
-  const handleAvatarKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentID: number) => {
-    const currentIndex = AVATAR_IDS.indexOf(currentID);
-    let nextIndex = currentIndex;
-    switch (event.key) {
-      case 'ArrowRight':
-      case 'ArrowDown':
-        nextIndex = (currentIndex + 1) % AVATAR_IDS.length;
-        break;
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        nextIndex = (currentIndex - 1 + AVATAR_IDS.length) % AVATAR_IDS.length;
-        break;
-      case 'Home':
-        nextIndex = 0;
-        break;
-      case 'End':
-        nextIndex = AVATAR_IDS.length - 1;
-        break;
-      default:
-        return;
-    }
-    event.preventDefault();
-    const nextID = AVATAR_IDS[nextIndex];
-    setAvatarID(nextID);
-    event.currentTarget.parentElement
-      ?.querySelector<HTMLButtonElement>(`[data-ranking-avatar-option="${nextID}"]`)
-      ?.focus();
-  };
-
   if (statusLoading && !status) {
     return <LoadingState text={t('ranking.status_loading')} />;
   }
@@ -511,25 +586,66 @@ function ParticipationContent({
       />
       <div className={styles.avatarField}>
         <span className={styles.fieldLabel}>{t('ranking.avatar')}</span>
-        <div className={styles.avatarGrid} role="radiogroup" aria-label={t('ranking.avatar')}>
-          {AVATAR_IDS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              role="radio"
-              aria-checked={avatarID === id}
-              aria-label={t('ranking.avatar_option', { id })}
-              tabIndex={avatarID === id ? 0 : -1}
-              className={`${styles.avatarOption} ${avatarID === id ? styles.avatarOptionActive : ''}`.trim()}
-              onClick={() => setAvatarID(id)}
-              onKeyDown={(event) => handleAvatarKeyDown(event, id)}
-              data-ranking-avatar-option={id}
-            >
-              <RankingAvatar avatarID={id} name={t('ranking.avatar_option', { id })} decorative />
-            </button>
-          ))}
-        </div>
+        <AvatarPicker value={avatarID} onChange={setAvatarID} t={t} />
       </div>
+    </div>
+  );
+}
+
+function AvatarPicker({ value, onChange, t, disabled = false }: {
+  value: number;
+  onChange: (value: number) => void;
+  t: Translate;
+  disabled?: boolean;
+}) {
+  const handleAvatarKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentID: number) => {
+    const currentIndex = AVATAR_IDS.indexOf(currentID);
+    let nextIndex = currentIndex;
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = (currentIndex + 1) % AVATAR_IDS.length;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = (currentIndex - 1 + AVATAR_IDS.length) % AVATAR_IDS.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = AVATAR_IDS.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const nextID = AVATAR_IDS[nextIndex];
+    onChange(nextID);
+    event.currentTarget.parentElement
+      ?.querySelector<HTMLButtonElement>(`[data-ranking-avatar-option="${nextID}"]`)
+      ?.focus();
+  };
+
+  return (
+    <div className={styles.avatarGrid} role="radiogroup" aria-label={t('ranking.avatar')}>
+      {AVATAR_IDS.map((id) => (
+        <button
+          key={id}
+          type="button"
+          role="radio"
+          aria-checked={value === id}
+          aria-label={t('ranking.avatar_option', { id })}
+          tabIndex={value === id ? 0 : -1}
+          className={`${styles.avatarOption} ${value === id ? styles.avatarOptionActive : ''}`.trim()}
+          onClick={() => onChange(id)}
+          onKeyDown={(event) => handleAvatarKeyDown(event, id)}
+          data-ranking-avatar-option={id}
+          disabled={disabled}
+        >
+          <RankingAvatar avatarID={id} name={t('ranking.avatar_option', { id })} decorative />
+        </button>
+      ))}
     </div>
   );
 }
@@ -548,6 +664,7 @@ function ProfileIdentity({ status }: { status: RankingStatusResponse }) {
 }
 
 interface LeaderboardCardProps {
+  scope: RankingScope;
   period: RankingPeriod;
   metric: RankingMetric;
   metadata: RankingMetadataResponse | null;
@@ -555,6 +672,7 @@ interface LeaderboardCardProps {
   metadataError: unknown;
   periodOnline?: boolean;
   board: RankingLeaderboardResponse | null;
+  scoreExplanationBoard: RankingLeaderboardResponse | null;
   loading: boolean;
   error: unknown;
   onRetryMetadata: AsyncAction;
@@ -562,6 +680,7 @@ interface LeaderboardCardProps {
   status: RankingStatusResponse | null;
   statusLoading: boolean;
   onOpenProfile: () => void;
+  onEditLocalProfile: (entry: RankingLeaderboardEntry) => void;
   onPeriodChange: (period: RankingPeriod) => void;
   onMetricChange: (metric: RankingMetric) => void;
   t: Translate;
@@ -569,6 +688,7 @@ interface LeaderboardCardProps {
 }
 
 function LeaderboardCard({
+  scope,
   period,
   metric,
   metadata,
@@ -576,6 +696,7 @@ function LeaderboardCard({
   metadataError,
   periodOnline,
   board,
+  scoreExplanationBoard,
   loading,
   error,
   onRetryMetadata,
@@ -583,6 +704,7 @@ function LeaderboardCard({
   status,
   statusLoading,
   onOpenProfile,
+  onEditLocalProfile,
   onPeriodChange,
   onMetricChange,
   t,
@@ -593,7 +715,7 @@ function LeaderboardCard({
   const rows = useMemo(() => board?.entries.slice(0, 100) ?? [], [board]);
   const podium = rows.slice(0, 3);
   const tableRows = rows;
-  const scoreExplanation = resolveScoreExplanation(board, metric, language);
+  const scoreExplanation = resolveScoreExplanation(scoreExplanationBoard, metric, language);
   const hasRankingProfile = status?.status === 'active' || status?.status === 'paused';
   const profileActionAriaLabel = hasRankingProfile && status.display_name
     ? `${status.display_name} · ${t('ranking.profile_action')}`
@@ -605,30 +727,45 @@ function LeaderboardCard({
       <header className={styles.leaderboardHeader}>
         <div className={styles.leaderboardTitle} data-ranking-header-title>
           <div className="keeper-card-title-track">
-            <h2 className="keeper-card-title">{t(`ranking.metric_${metric}`)}</h2>
+            <div
+              className={`${styles.metricTitleHeading} keeper-card-title`}
+              role="heading"
+              aria-level={2}
+              data-ranking-metric-title
+            >
+              <RankingMetricSelect metric={metric} onMetricChange={onMetricChange} />
+            </div>
             {scoreExplanation ? (
-              <button
-                type="button"
-                className={`${styles.profilePrivacyHint} ${styles.scoreExplanationHint} ${scoreExplanationOpen ? styles.profilePrivacyHintOpen : ''}`.trim()}
-                aria-label={t('ranking.score_explanation_label')}
-                aria-describedby={scoreExplanationID}
-                aria-controls={scoreExplanationID}
-                aria-expanded={scoreExplanationOpen}
-                onClick={() => setScoreExplanationOpen((open) => !open)}
-                onBlur={() => setScoreExplanationOpen(false)}
-                data-ranking-score-explanation
-              >
-                ?
-                <span
-                  id={scoreExplanationID}
-                  className={styles.profilePrivacyTooltip}
-                  role="tooltip"
-                  data-ranking-score-explanation-tooltip
+              <span className={styles.scoreExplanationSlot} data-ranking-score-explanation-slot>
+                <button
+                  type="button"
+                  className={`${styles.profilePrivacyHint} ${styles.scoreExplanationHint} ${scoreExplanationOpen ? styles.profilePrivacyHintOpen : ''}`.trim()}
+                  aria-label={t('ranking.score_explanation_label')}
+                  aria-describedby={scoreExplanationID}
+                  aria-controls={scoreExplanationID}
+                  aria-expanded={scoreExplanationOpen}
+                  onClick={() => setScoreExplanationOpen((open) => !open)}
+                  onBlur={() => setScoreExplanationOpen(false)}
+                  data-ranking-score-explanation
                 >
-                  {scoreExplanation}
-                </span>
-              </button>
+                  ?
+                  <span
+                    id={scoreExplanationID}
+                    className={styles.profilePrivacyTooltip}
+                    role="tooltip"
+                    data-ranking-score-explanation-tooltip
+                  >
+                    {scoreExplanation}
+                  </span>
+                </button>
+              </span>
             ) : null}
+            <div className={styles.leaderboardHeaderToolbar} data-ranking-header-toolbar>
+              <RankingToolbar
+                period={period}
+                onPeriodChange={onPeriodChange}
+              />
+            </div>
           </div>
           {board && (
             <div className={styles.boardMeta}>
@@ -637,39 +774,33 @@ function LeaderboardCard({
             </div>
           )}
         </div>
-        <div className={styles.leaderboardHeaderToolbar} data-ranking-header-toolbar>
-          <RankingToolbar
-            period={period}
-            metric={metric}
-            onPeriodChange={onPeriodChange}
-            onMetricChange={onMetricChange}
-          />
-        </div>
-        <div
-          className={styles.leaderboardHeaderActions}
-          data-ranking-profile-action-shell
-        >
-          <MainActionButton
-            shellClassName={`${styles.profileActionShell} ${hasRankingProfile ? styles.profileActionShellActive : ''}`.trim()}
-            onClick={onOpenProfile}
-            disabled={statusLoading && !status}
-            aria-label={profileActionAriaLabel}
-            data-ranking-profile-action
+        {scope === 'community' ? (
+          <div
+            className={styles.leaderboardHeaderActions}
+            data-ranking-profile-action-shell
           >
-            {hasRankingProfile ? (
-              <>
-                <RankingAvatar avatarID={status.avatar_id ?? 1} name={status.display_name ?? ''} className={styles.profileActionAvatar} decorative />
-                <span className={styles.profileActionName} data-ranking-profile-name>{status.display_name || t('ranking.profile_action')}</span>
-              </>
-            ) : status?.status === 'joining'
-              ? t('ranking.join_retry')
-              : status?.status === 'deleted'
-                ? t('ranking.status_deleted')
-                : status?.status === 'disabled'
-                  ? t('ranking.join')
-                  : t('ranking.profile_action')}
-          </MainActionButton>
-        </div>
+            <MainActionButton
+              shellClassName={`${styles.profileActionShell} ${hasRankingProfile ? styles.profileActionShellActive : ''}`.trim()}
+              onClick={onOpenProfile}
+              disabled={statusLoading && !status}
+              aria-label={profileActionAriaLabel}
+              data-ranking-profile-action
+            >
+              {hasRankingProfile ? (
+                <>
+                  <RankingAvatar avatarID={status.avatar_id ?? 1} name={status.display_name ?? ''} className={styles.profileActionAvatar} decorative />
+                  <span className={styles.profileActionName} data-ranking-profile-name>{status.display_name || t('ranking.profile_action')}</span>
+                </>
+              ) : status?.status === 'joining'
+                ? t('ranking.join_retry')
+                : status?.status === 'deleted'
+                  ? t('ranking.status_deleted')
+                  : status?.status === 'disabled'
+                    ? t('ranking.join')
+                    : t('ranking.profile_action')}
+            </MainActionButton>
+          </div>
+        ) : null}
       </header>
       {metadataError && board ? (
         <div className={styles.metadataWarning} role="alert" data-ranking-metadata-warning>
@@ -690,12 +821,23 @@ function LeaderboardCard({
       ) : error && !board ? (
         <ErrorState error={error} onRetry={onRetry} t={t} />
       ) : rows.length === 0 ? (
-        <EmptyState title={t('ranking.empty_title')} description={t('ranking.empty_description')} />
+        <EmptyState
+          title={t(scope === 'local' ? 'ranking.local_empty_title' : 'ranking.empty_title')}
+          description={t(scope === 'local' ? 'ranking.local_empty_description' : 'ranking.empty_description')}
+        />
       ) : (
         <div className={styles.leaderboardResults}>
           <div className={styles.podiumGrid} aria-label={`${t('ranking.rank')} 1–3`} data-ranking-podium>
             {podium.map((entry, index) => (
-              <PodiumCard key={entry.participant_id} entry={entry} position={index + 1} metric={metric} t={t} />
+              <PodiumCard
+                key={entry.participant_id}
+                entry={entry}
+                position={index + 1}
+                metric={metric}
+                scope={scope}
+                onEditLocalProfile={onEditLocalProfile}
+                t={t}
+              />
             ))}
           </div>
           {tableRows.length > 0 ? (
@@ -704,7 +846,9 @@ function LeaderboardCard({
                 <thead>
                   <tr>
                     <th className={styles.rankColumn} data-ranking-rank-column>{t('ranking.rank')}</th>
-                    <th className={styles.participantColumn} data-ranking-participant-column>{t('ranking.participant')}</th>
+                    <th className={styles.participantColumn} data-ranking-participant-column>
+                      {t(scope === 'local' ? 'ranking.api_key' : 'ranking.participant')}
+                    </th>
                     {metric === 'overall' ? (
                       <>
                         <th className={styles.numberCell}>{t('ranking.score')}</th>
@@ -721,18 +865,24 @@ function LeaderboardCard({
                       </td>
                       <td className={styles.participantColumn} data-ranking-participant-column>
                         <div className={styles.participantCell}>
-                          <RankingAvatar avatarID={entry.avatar_id} name={entry.display_name} className={styles.tableAvatar} decorative />
+                          <LeaderboardEntryAvatar
+                            entry={entry}
+                            scope={scope}
+                            className={styles.tableAvatar}
+                            onEditLocalProfile={onEditLocalProfile}
+                            t={t}
+                          />
                           <strong>{entry.display_name}</strong>
                         </div>
                       </td>
                       {metric === 'overall' ? (
                         <>
-                          <td className={`${styles.numberCell} ${styles.scoreCell}`.trim()}>{formatLeaderboardValue(metric, entry)}</td>
+                          <td className={`${styles.numberCell} ${styles.scoreCell}`.trim()}>{formatLeaderboardValue(metric, entry, scope)}</td>
                           {OVERALL_METRICS.map((item) => (
                             <td key={item} className={styles.numberCell}>{formatOverallMetricValue(item, entry)}</td>
                           ))}
                         </>
-                      ) : <td className={`${styles.numberCell} ${styles.scoreCell}`.trim()}>{formatLeaderboardValue(metric, entry)}</td>}
+                      ) : <td className={`${styles.numberCell} ${styles.scoreCell}`.trim()}>{formatLeaderboardValue(metric, entry, scope)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -745,13 +895,15 @@ function LeaderboardCard({
   );
 }
 
-function PodiumCard({ entry, position, metric, t }: {
+function PodiumCard({ entry, position, metric, scope, onEditLocalProfile, t }: {
   entry: RankingLeaderboardEntry;
   position: number;
   metric: RankingMetric;
+  scope: RankingScope;
+  onEditLocalProfile: (entry: RankingLeaderboardEntry) => void;
   t: Translate;
 }) {
-  const value = formatLeaderboardValue(metric, entry);
+  const value = formatLeaderboardValue(metric, entry, scope);
   const valueSizeClass = value.length >= 11
     ? styles.podiumValueCompact
     : value.length >= 8
@@ -767,10 +919,39 @@ function PodiumCard({ entry, position, metric, t }: {
         <span>{t('ranking.rank')}</span>
         <strong>{String(position).padStart(2, '0')}</strong>
       </div>
-      <RankingAvatar avatarID={entry.avatar_id} name={entry.display_name} className={styles.podiumAvatar} decorative />
+      <LeaderboardEntryAvatar
+        entry={entry}
+        scope={scope}
+        className={styles.podiumAvatar}
+        onEditLocalProfile={onEditLocalProfile}
+        t={t}
+      />
       <strong className={styles.podiumName}>{entry.display_name}</strong>
       <span className={`${styles.podiumValue} ${valueSizeClass}`.trim()}>{value}</span>
     </article>
+  );
+}
+
+function LeaderboardEntryAvatar({ entry, scope, className, onEditLocalProfile, t }: {
+  entry: RankingLeaderboardEntry;
+  scope: RankingScope;
+  className: string;
+  onEditLocalProfile: (entry: RankingLeaderboardEntry) => void;
+  t: Translate;
+}) {
+  if (scope !== 'local') {
+    return <RankingAvatar avatarID={entry.avatar_id} name={entry.display_name} className={className} decorative />;
+  }
+  return (
+    <button
+      type="button"
+      className={`${styles.localProfileAvatarButton} ${className}`.trim()}
+      aria-label={t('ranking.local_profile_edit_label', { name: entry.display_name })}
+      onClick={() => onEditLocalProfile(entry)}
+      data-ranking-local-profile-edit={entry.participant_id}
+    >
+      <RankingAvatar avatarID={entry.avatar_id} name={entry.display_name} decorative />
+    </button>
   );
 }
 

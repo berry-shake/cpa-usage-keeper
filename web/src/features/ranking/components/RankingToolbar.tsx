@@ -4,16 +4,16 @@ import { Select } from '@/components/ui/Select';
 import type { RankingMetric, RankingPeriod } from '../types';
 import styles from '../RankingPage.module.scss';
 
-const PERIODS: ReadonlyArray<{ value: RankingPeriod; labelKey: string }> = [
-  { value: 'today', labelKey: 'ranking.period_today' },
-  { value: 'yesterday', labelKey: 'ranking.period_yesterday' },
-  { value: 'current_month', labelKey: 'ranking.period_current_month' },
-  { value: 'previous_month', labelKey: 'ranking.period_previous_month' },
+const PERIODS: ReadonlyArray<{ value: RankingPeriod; labelKey: string; triggerLabelKey: string }> = [
+  { value: 'today', labelKey: 'ranking.period_today', triggerLabelKey: 'ranking.period_trigger_today' },
+  { value: 'yesterday', labelKey: 'ranking.period_yesterday', triggerLabelKey: 'ranking.period_trigger_yesterday' },
+  { value: 'current_month', labelKey: 'ranking.period_current_month', triggerLabelKey: 'ranking.period_trigger_current_month' },
+  { value: 'previous_month', labelKey: 'ranking.period_previous_month', triggerLabelKey: 'ranking.period_trigger_previous_month' },
 ];
 
 // 触发器保持短名称，展开菜单保留完整指标语义。
 const METRICS: ReadonlyArray<{ value: RankingMetric; labelKey: string; triggerLabelKey: string }> = [
-  { value: 'overall', labelKey: 'ranking.metric_overall', triggerLabelKey: 'ranking.metric_overall' },
+  { value: 'overall', labelKey: 'ranking.metric_overall', triggerLabelKey: 'ranking.metric_short_overall' },
   { value: 'total_tokens', labelKey: 'ranking.metric_total_tokens', triggerLabelKey: 'ranking.metric_short_total_tokens' },
   { value: 'request_count', labelKey: 'ranking.metric_request_count', triggerLabelKey: 'ranking.metric_short_request_count' },
   { value: 'cache_read_rate', labelKey: 'ranking.metric_cache_read_rate', triggerLabelKey: 'ranking.metric_short_cache_read_rate' },
@@ -25,17 +25,47 @@ const METRICS: ReadonlyArray<{ value: RankingMetric; labelKey: string; triggerLa
 
 export interface RankingToolbarProps {
   period: RankingPeriod;
-  metric: RankingMetric;
   onPeriodChange: (period: RankingPeriod) => void;
-  onMetricChange: (metric: RankingMetric) => void;
 }
 
 export function RankingToolbar({
   period,
-  metric,
   onPeriodChange,
-  onMetricChange,
 }: RankingToolbarProps) {
+  const { t } = useTranslation();
+  const periodOptions = useMemo(
+    () => PERIODS.map((option) => ({
+      value: option.value,
+      label: t(option.labelKey),
+      triggerLabel: t(option.triggerLabelKey),
+    })),
+    [t],
+  );
+  const currentPeriodLabel = periodOptions.find((option) => option.value === period)?.triggerLabel ?? period;
+
+  return (
+    <div className={styles.toolbar} data-ranking-toolbar>
+      <div className={styles.periodControl} data-ranking-period>
+        <Select
+          value={period}
+          options={periodOptions}
+          onChange={(value) => onPeriodChange(value as RankingPeriod)}
+          className={styles.periodSelect}
+          ariaLabel={currentPeriodLabel}
+          dropdownMinWidth={180}
+          fullWidth={false}
+        />
+      </div>
+    </div>
+  );
+}
+
+export interface RankingMetricSelectProps {
+  metric: RankingMetric;
+  onMetricChange: (metric: RankingMetric) => void;
+}
+
+export function RankingMetricSelect({ metric, onMetricChange }: RankingMetricSelectProps) {
   const { t } = useTranslation();
   const metricOptions = useMemo(
     () => METRICS.map((option) => ({
@@ -45,42 +75,18 @@ export function RankingToolbar({
     })),
     [t],
   );
+  const currentMetricLabel = metricOptions.find((option) => option.value === metric)?.triggerLabel ?? metric;
 
   return (
-    <div className={styles.toolbar} data-ranking-toolbar>
-      <div
-        className={styles.periods}
-        role="tablist"
-        aria-label={t('ranking.period_label')}
-        data-ranking-periods
-      >
-        {PERIODS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="tab"
-            aria-selected={period === option.value}
-            className={`${styles.periodButton} ${period === option.value ? styles.periodButtonActive : ''}`.trim()}
-            onClick={() => onPeriodChange(option.value)}
-          >
-            {t(option.labelKey)}
-          </button>
-        ))}
-      </div>
-      <div className={styles.metricControl} data-ranking-metric>
-        <span className={styles.metricWidthSizer} aria-hidden="true" data-ranking-metric-sizer>
-          {metricOptions.map((option) => <span key={option.value}>{option.triggerLabel}</span>)}
-        </span>
-        <Select
-          value={metric}
-          options={metricOptions}
-          onChange={(value) => onMetricChange(value as RankingMetric)}
-          className={styles.metricSelect}
-          ariaLabel={t('ranking.metric_label')}
-          dropdownMinWidth={260}
-          fullWidth
-        />
-      </div>
-    </div>
+    <Select
+      value={metric}
+      options={metricOptions}
+      onChange={(value) => onMetricChange(value as RankingMetric)}
+      className={styles.titleMetricSelect}
+      ariaLabel={`${t('ranking.metric_label')}: ${currentMetricLabel}`}
+      dropdownMinWidth={260}
+      fullWidth={false}
+      id="ranking-metric-title"
+    />
   );
 }

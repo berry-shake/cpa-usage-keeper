@@ -215,6 +215,7 @@ describe('useRankingData', () => {
 
     await act(async () => latest?.setPeriod('yesterday'));
     expect(latest?.leaderboardLoading).toBe(true);
+    expect(latest?.leaderboard).toMatchObject({ period: 'today', metric: 'overall' });
     await act(async () => latest?.refreshRanking());
 
     expect(latest?.leaderboardLoading).toBe(false);
