@@ -44,6 +44,13 @@ type QuotaWindow struct {
 	Seconds  *int64   `json:"seconds,omitempty"`
 }
 
+type SubscriptionInfo struct {
+	Provider string `json:"provider"`
+	Plan     string `json:"plan"`
+	TierID   string `json:"tierId,omitempty"`
+	TierName string `json:"tierName,omitempty"`
+}
+
 type QuotaRow struct {
 	Key               string       `json:"key"`
 	Label             string       `json:"label,omitempty"`
@@ -52,7 +59,6 @@ type QuotaRow struct {
 	GroupKey          string       `json:"groupKey,omitempty"`
 	GroupLabel        string       `json:"groupLabel,omitempty"`
 	GroupDescription  string       `json:"groupDescription,omitempty"`
-	PlanType          string       `json:"planType,omitempty"`
 	Used              *float64     `json:"used,omitempty"`
 	Limit             *float64     `json:"limit,omitempty"`
 	Remaining         *float64     `json:"remaining,omitempty"`
@@ -157,6 +163,11 @@ type GeminiCLICodeAssistPayload struct {
 	PaidTier    *GeminiCliUserTier `json:"paidTier,omitempty"`
 }
 
+type AntigravitySubscriptionPayload struct {
+	CurrentTier *GeminiCliUserTier `json:"currentTier,omitempty"`
+	PaidTier    *GeminiCliUserTier `json:"paidTier,omitempty"`
+}
+
 type ClaudeUsageWindow struct {
 	Utilization float64 `json:"utilization,omitempty"`
 	ResetsAt    string  `json:"resetsAt,omitempty"`
@@ -198,8 +209,8 @@ type ClaudeProfileAccount struct {
 	FullName     string `json:"fullName,omitempty"`
 	DisplayName  string `json:"displayName,omitempty"`
 	Email        string `json:"email,omitempty"`
-	HasClaudeMax bool   `json:"hasClaudeMax,omitempty"`
-	HasClaudePro bool   `json:"hasClaudePro,omitempty"`
+	HasClaudeMax *bool  `json:"hasClaudeMax,omitempty"`
+	HasClaudePro *bool  `json:"hasClaudePro,omitempty"`
 }
 
 type ClaudeProfileOrganization struct {
@@ -299,7 +310,8 @@ type XAIBillingPayload struct {
 }
 
 type AntigravityResult struct {
-	Quota *AntigravityQuotaPayload `json:"quota"`
+	Quota        *AntigravityQuotaPayload        `json:"quota"`
+	Subscription *AntigravitySubscriptionPayload `json:"subscription,omitempty"`
 }
 
 type CodexResult struct {

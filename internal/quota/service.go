@@ -77,9 +77,10 @@ type CheckRequest struct {
 }
 
 type CheckResponse struct {
-	ID                                  string     `json:"id"`
-	Quota                               []QuotaRow `json:"quota"`
-	RateLimitResetCreditsAvailableCount *int       `json:"rateLimitResetCreditsAvailableCount,omitempty"`
+	ID                                  string            `json:"id"`
+	Quota                               []QuotaRow        `json:"quota"`
+	Subscription                        *SubscriptionInfo `json:"subscription,omitempty"`
+	RateLimitResetCreditsAvailableCount *int              `json:"rateLimitResetCreditsAvailableCount,omitempty"`
 }
 
 func NewService(db *gorm.DB, caller ManagementAPICaller, pricingCatalog *pricing.Catalog) *Service {
@@ -233,8 +234,13 @@ func (s *Service) Check(ctx context.Context, request CheckRequest) (CheckRespons
 		return CheckResponse{}, err
 	}
 	response := CheckResponse{
-		ID:    authIndex,
-		Quota: NormalizeQuotaRows(providerOutput),
+		ID:           authIndex,
+		Quota:        NormalizeQuotaRows(providerOutput),
+		Subscription: NormalizeSubscription(providerOutput),
+	}
+	// 实时结果没有套餐时仅允许回退当前 Identity metadata；现在只有 Codex 具备该来源。
+	if response.Subscription == nil {
+		response.Subscription = ResolveIdentitySubscription(identity)
 	}
 	// reset 次数跟随官方刷新结果写入同一份限额缓存，前端只展示缓存里的官方值。
 	if count, ok := rateLimitResetCreditsAvailableCount(providerOutput); ok {

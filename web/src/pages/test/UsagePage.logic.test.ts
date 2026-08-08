@@ -521,6 +521,12 @@ describe('UsagePage request event filters', () => {
 });
 
 describe('UsagePage request event preferences', () => {
+  it('defaults to 50 rows when no request event preference is stored', () => {
+    const storage = createMemoryStorage();
+
+    expect(loadRequestEventsPreferences(storage).pageSize).toBe(50);
+  });
+
   it('normalizes persisted filters, page size, and visible columns', () => {
     const preferences = normalizeRequestEventsPreferences({
       version: 1,
@@ -558,7 +564,7 @@ describe('UsagePage request event preferences', () => {
       visibleColumnIds: ['not-a-column'],
     });
 
-    expect(preferences.pageSize).toBe(100);
+    expect(preferences.pageSize).toBe(50);
     expect(preferences.filters).toEqual({
       model: '__all__',
       source: '__all__',
@@ -665,7 +671,7 @@ describe('UsagePage request event preferences', () => {
       [REQUEST_EVENTS_PREFERENCES_STORAGE_KEY]: '{bad json',
     });
 
-    expect(loadRequestEventsPreferences(storage).pageSize).toBe(100);
+    expect(loadRequestEventsPreferences(storage).pageSize).toBe(50);
 
     saveRequestEventsPreferences({
       version: 4,

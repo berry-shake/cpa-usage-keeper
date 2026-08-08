@@ -383,8 +383,9 @@ func (s *Service) applyUsageHeaderSnapshotWithIdentity(ctx context.Context, snap
 	}
 	// 将 provider 输出标准化成前端缓存使用的 CheckResponse。
 	response := CheckResponse{
-		ID:    authIndex,
-		Quota: NormalizeQuotaRows(output),
+		ID:           authIndex,
+		Quota:        NormalizeQuotaRows(output),
+		Subscription: NormalizeSubscription(output),
 	}
 	// 没有可展示 quota row 时不写空 cache，避免覆盖已有有效结果。
 	if len(response.Quota) == 0 {
@@ -500,6 +501,10 @@ func mergeUsageHeaderQuotaResponse(existing CheckResponse, header CheckResponse)
 	if merged.RateLimitResetCreditsAvailableCount == nil {
 		merged.RateLimitResetCreditsAvailableCount = existing.RateLimitResetCreditsAvailableCount
 	}
+	// Header 未携带套餐只代表这次快照没有该字段，保留此前完整刷新或 Header 已确认的订阅。
+	if merged.Subscription == nil {
+		merged.Subscription = existing.Subscription
+	}
 	// quota rows 按 key 合并，header row 覆盖进度，旧 cache 保留非 header 字段。
 	merged.Quota = mergeUsageHeaderQuotaRows(existing.Quota, header.Quota)
 	// 返回最终合并后的缓存响应。
@@ -574,10 +579,6 @@ func mergeUsageHeaderQuotaRow(existing QuotaRow, header QuotaRow) QuotaRow {
 	// header metric 非空时更新指标类型。
 	if strings.TrimSpace(header.Metric) != "" {
 		merged.Metric = header.Metric
-	}
-	// header planType 非空时更新计划类型。
-	if strings.TrimSpace(header.PlanType) != "" {
-		merged.PlanType = header.PlanType
 	}
 	// header 带 absolute used 时覆盖旧 used。
 	if header.Used != nil {

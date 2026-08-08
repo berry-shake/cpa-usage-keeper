@@ -62,6 +62,20 @@ func parseAntigravityQuotaPayload(response *apicall.Response) (*AntigravityQuota
 	return payload, nil
 }
 
+func parseAntigravitySubscriptionPayload(response *apicall.Response) (*AntigravitySubscriptionPayload, error) {
+	object, err := parseResponseObject(response)
+	if err != nil {
+		return nil, err
+	}
+	if nested := objectField(object, "body"); nested != nil {
+		object = nested
+	}
+	return &AntigravitySubscriptionPayload{
+		CurrentTier: parseGeminiCliUserTier(objectField(object, "currentTier", "current_tier")),
+		PaidTier:    parseGeminiCliUserTier(objectField(object, "paidTier", "paid_tier")),
+	}, nil
+}
+
 func parseCodexUsagePayload(response *apicall.Response) (*CodexUsagePayload, error) {
 	object, err := parseResponseObject(response)
 	if err != nil {
@@ -276,8 +290,8 @@ func parseClaudeProfileAccount(object map[string]json.RawMessage) *ClaudeProfile
 		FullName:     stringField(object, "full_name", "fullName"),
 		DisplayName:  stringField(object, "display_name", "displayName"),
 		Email:        stringField(object, "email"),
-		HasClaudeMax: boolField(object, "has_claude_max", "hasClaudeMax"),
-		HasClaudePro: boolField(object, "has_claude_pro", "hasClaudePro"),
+		HasClaudeMax: boolPtrField(object, "has_claude_max", "hasClaudeMax"),
+		HasClaudePro: boolPtrField(object, "has_claude_pro", "hasClaudePro"),
 	}
 }
 
@@ -697,6 +711,9 @@ func boolField(object map[string]json.RawMessage, keys ...string) bool {
 func boolPtrField(object map[string]json.RawMessage, keys ...string) *bool {
 	for _, key := range keys {
 		if raw, ok := object[key]; ok {
+			if rawJSONNull(raw) {
+				continue
+			}
 			var value bool
 			if err := json.Unmarshal(raw, &value); err == nil {
 				return &value

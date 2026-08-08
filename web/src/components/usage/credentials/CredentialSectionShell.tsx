@@ -15,6 +15,7 @@ interface CredentialSectionShellProps {
 }
 
 interface CredentialRowShellProps {
+  icon?: ReactNode
   title: ReactNode
   subtitle?: ReactNode
   badges: ReactNode
@@ -52,16 +53,21 @@ export function CredentialSectionShell({ title, subtitle, countLabel, titleExtra
   )
 }
 
-export function CredentialRowShell({ title, subtitle, badges, metrics, side, rowClassName }: CredentialRowShellProps) {
+export function CredentialRowShell({ icon, title, subtitle, badges, metrics, side, rowClassName }: CredentialRowShellProps) {
   // 统一三段式行结构：左侧身份信息、中间指标、右侧 quota/状态区域。
   return (
     <article className={`${styles.credentialRow} ${rowClassName ?? ''}`.trim()}>
       <div className={styles.credentialIdentityBlock}>
-        <div className={styles.credentialNameRow}>
-          <span className={styles.credentialDisplayName}>{title}</span>
-          {badges && <div className={styles.credentialBadges}>{badges}</div>}
+        {icon}
+        <div className={styles.credentialIdentityContent}>
+          <div className={styles.credentialNameRow}>
+            <div className={styles.credentialNameMain}>
+              <span className={styles.credentialDisplayName}>{title}</span>
+            </div>
+            {badges && <div className={styles.credentialBadges}>{badges}</div>}
+          </div>
+          {subtitle && <span className={styles.credentialIdentityText}>{subtitle}</span>}
         </div>
-        {subtitle && <span className={styles.credentialIdentityText}>{subtitle}</span>}
       </div>
       <div className={styles.credentialMetricGroup}>{metrics}</div>
       <div className={styles.credentialSidePanel}>{side}</div>

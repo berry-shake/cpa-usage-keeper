@@ -109,7 +109,7 @@ describe('UsagePage toolbar styles', () => {
   it('routes Analysis and Activity cards through the global surface and heading contract', () => {
     const analysisChartSurface = styleRuleBlock(analysisPanelStyles, '\n.analysisChartSurface {')
 
-    expect(analysisPanelSource.match(/keeper-card-surface/g)).toHaveLength(6)
+    expect(analysisPanelSource.match(/keeper-card-surface/g)).toHaveLength(7)
     expect(analysisPanelSource).toContain('keeper-card-title-track')
     expect(analysisPanelSource).toContain('keeper-card-title')
     expect(analysisPanelSource).toContain('keeper-card-subtitle')

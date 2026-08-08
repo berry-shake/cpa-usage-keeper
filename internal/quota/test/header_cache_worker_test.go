@@ -59,6 +59,9 @@ func TestApplyUsageHeaderSnapshotWritesCompletedCacheWithWindowUsageStats(t *tes
 	if task.Status != RefreshTaskStatusCompleted || task.Quota == nil || len(task.Quota.Quota) != 1 {
 		t.Fatalf("unexpected task: %+v", task)
 	}
+	if task.Quota.Subscription == nil || task.Quota.Subscription.Provider != "codex" || task.Quota.Subscription.Plan != "pro-20x" {
+		t.Fatalf("expected header subscription, got %+v", task.Quota.Subscription)
+	}
 	row := task.Quota.Quota[0]
 	if row.WindowUsageTokens == nil || *row.WindowUsageTokens != 123 || row.WindowUsageCost == nil {
 		t.Fatalf("expected local token/cost fallback, got %#v", row)
@@ -471,12 +474,11 @@ func TestApplyUsageHeaderSnapshotMergesProgressWithManualAuthoritativeFields(t *
 		Status:      RefreshTaskStatusCompleted,
 		Source:      RefreshSourceManual,
 		RefreshedAt: time.Date(2026, 6, 22, 10, 0, 0, 0, time.Local),
-		Quota: &CheckResponse{ID: "codex-auth", Quota: []QuotaRow{{
+		Quota: &CheckResponse{ID: "codex-auth", Subscription: &SubscriptionInfo{Provider: "codex", Plan: "plus"}, Quota: []QuotaRow{{
 			Key:               "rate_limit.primary_window",
 			Label:             "Manual 5h",
 			Scope:             "window",
 			Metric:            "manual",
-			PlanType:          "pro",
 			Used:              &oldUsed,
 			Limit:             &oldLimit,
 			Remaining:         &oldRemaining,
@@ -497,6 +499,9 @@ func TestApplyUsageHeaderSnapshotMergesProgressWithManualAuthoritativeFields(t *
 		t.Fatalf("unexpected merged task: %+v", task)
 	}
 	row := task.Quota.Quota[0]
+	if task.Quota.Subscription == nil || task.Quota.Subscription.Plan != "plus" {
+		t.Fatalf("expected header without plan to preserve cached subscription, got %+v", task.Quota.Subscription)
+	}
 	if row.Used == nil || *row.Used != oldUsed || row.Limit == nil || *row.Limit != oldLimit || row.Remaining == nil || *row.Remaining != oldRemaining || row.RemainingFraction == nil || *row.RemainingFraction != oldRemainingFraction {
 		t.Fatalf("expected manual absolute fields to be preserved, got %#v", row)
 	}
@@ -505,6 +510,41 @@ func TestApplyUsageHeaderSnapshotMergesProgressWithManualAuthoritativeFields(t *
 	}
 	if row.WindowUsageTokens == nil || *row.WindowUsageTokens != 123 || row.WindowUsageCost == nil {
 		t.Fatalf("expected window token/cost fallback to follow header progress, got %#v", row)
+	}
+}
+
+func TestApplyUsageHeaderSnapshotOverridesCachedSubscriptionWhenHeaderHasPlan(t *testing.T) {
+	db := openQuotaTestDatabase(t)
+	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "codex-auth", Provider: "codex", Type: "codex", AuthType: entities.UsageIdentityAuthTypeAuthFile})
+	service := NewServiceWithRegistry(db, NewProviderRegistry(nil), emptyPricingCatalogForTest())
+	defer service.StopRefreshTasks()
+	refreshTasks(service)["codex-auth"] = &RefreshTaskRecord{
+		AuthIndex:   "codex-auth",
+		Status:      RefreshTaskStatusCompleted,
+		Source:      RefreshSourceManual,
+		RefreshedAt: time.Date(2026, 6, 22, 10, 0, 0, 0, time.Local),
+		Quota: &CheckResponse{
+			ID:           "codex-auth",
+			Subscription: &SubscriptionInfo{Provider: "codex", Plan: "plus"},
+			Quota:        []QuotaRow{{Key: "rate_limit.primary_window", Label: "5h", UsedPercent: floatPtr(80)}},
+		},
+	}
+
+	header := codexUsageHeader("4")
+	header.Set("X-Codex-Plan-Type", "pro")
+	applied := applyUsageHeaderSnapshot(service, context.Background(), UsageHeaderSnapshot{
+		AuthType:   "oauth",
+		AuthIndex:  "codex-auth",
+		Provider:   "codex",
+		ObservedAt: time.Date(2026, 6, 22, 11, 0, 0, 0, time.Local),
+		Headers:    header,
+	})
+	if !applied {
+		t.Fatal("expected newer header snapshot to apply")
+	}
+	task := refreshTasks(service)["codex-auth"]
+	if task.Quota == nil || task.Quota.Subscription == nil || task.Quota.Subscription.Plan != "pro-20x" {
+		t.Fatalf("expected header subscription to override cache, got %+v", task.Quota)
 	}
 }
 

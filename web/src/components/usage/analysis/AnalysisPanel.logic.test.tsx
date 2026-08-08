@@ -25,9 +25,12 @@ const chartCapture = vi.hoisted(() => ({
 
 vi.mock('react-chartjs-2', () => ({
   Bar: (props: { data: ChartData<'bar', Array<number | null>, string>; options: ChartOptions<'bar'>; plugins?: Plugin<'bar'>[] }) => {
-    chartCapture.barData = props.data;
-    chartCapture.barOptions = props.options;
-    chartCapture.barPlugins = props.plugins;
+    // 既有断言只观察首个 Token Usage 图，后续 Analysis 柱图不能覆盖该捕获值。
+    if (chartCapture.barData === null) {
+      chartCapture.barData = props.data;
+      chartCapture.barOptions = props.options;
+      chartCapture.barPlugins = props.plugins;
+    }
     return React.createElement('div');
   },
   Doughnut: (props: { data: ChartData<'doughnut', number[], string>; options: ChartOptions<'doughnut'>; plugins?: Plugin<'doughnut'>[] }) => {

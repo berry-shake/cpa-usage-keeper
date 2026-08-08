@@ -82,7 +82,7 @@ const USAGE_TAB_LABEL_KEYS: Record<UsageTab, string> = {
 const DEFAULT_USAGE_TAB: UsageTab = 'overview';
 const USAGE_TAB_STORAGE_KEY = 'cli-proxy-usage-tab-v1';
 const REQUEST_EVENTS_PAGE_SIZES = [20, 50, 100, 500, 1000] as const;
-const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 100;
+const REQUEST_EVENTS_DEFAULT_PAGE_SIZE = 50;
 // v7 是完整列顺序格式；v8 加入客户端请求元数据列，并保留历史自定义顺序。
 const REQUEST_EVENTS_PREFERENCES_VERSION = 8;
 const ALL_REQUEST_EVENTS_FILTER = '__all__';

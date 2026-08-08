@@ -19,6 +19,7 @@ type analysisResponse struct {
 	RangeStart            *time.Time                `json:"range_start,omitempty"`
 	RangeEnd              *time.Time                `json:"range_end,omitempty"`
 	TokenUsage            []analysisTokenUsage      `json:"token_usage"`
+	ModelUsage            analysisModelUsage        `json:"model_usage"`
 	APIKeyComposition     []analysisCompositionItem `json:"api_key_composition"`
 	ModelComposition      []analysisCompositionItem `json:"model_composition"`
 	AuthFilesComposition  []analysisCompositionItem `json:"auth_files_composition"`
@@ -39,6 +40,17 @@ type analysisTokenUsage struct {
 	Requests            int64     `json:"requests"`
 	CostUSD             float64   `json:"cost_usd"`
 	CostAvailable       bool      `json:"cost_available"`
+}
+
+type analysisModelUsage struct {
+	Buckets []time.Time                `json:"buckets"`
+	Series  []analysisModelUsageSeries `json:"series"`
+}
+
+type analysisModelUsageSeries struct {
+	Model       string  `json:"model"`
+	TotalTokens []int64 `json:"total_tokens"`
+	Requests    []int64 `json:"requests"`
 }
 
 type analysisCompositionItem struct {
@@ -191,6 +203,7 @@ func emptyAnalysisResponse() analysisResponse {
 		Granularity:           string(servicedto.AnalysisGranularityHourly),
 		Timezone:              time.Local.String(),
 		TokenUsage:            []analysisTokenUsage{},
+		ModelUsage:            analysisModelUsage{Buckets: []time.Time{}, Series: []analysisModelUsageSeries{}},
 		APIKeyComposition:     []analysisCompositionItem{},
 		ModelComposition:      []analysisCompositionItem{},
 		AuthFilesComposition:  []analysisCompositionItem{},
@@ -253,6 +266,7 @@ func buildAnalysisPayload(snapshot *servicedto.AnalysisSnapshot, apiKeyInfos map
 		RangeStart:            snapshot.RangeStart,
 		RangeEnd:              snapshot.RangeEnd,
 		TokenUsage:            tokenUsage,
+		ModelUsage:            buildAnalysisModelUsagePayload(snapshot.TokenUsage, snapshot.ModelUsage),
 		APIKeyComposition:     apiComposition,
 		ModelComposition:      modelComposition,
 		AuthFilesComposition:  authFilesComposition,
@@ -268,6 +282,48 @@ func buildAnalysisPayload(snapshot *servicedto.AnalysisSnapshot, apiKeyInfos map
 		},
 		ModelEfficiency: buildAnalysisModelEfficiencyPayload(snapshot.ModelEfficiency),
 	}
+}
+
+func buildAnalysisModelUsagePayload(tokenUsage []servicedto.AnalysisTokenUsageBucket, rows []servicedto.AnalysisModelUsage) analysisModelUsage {
+	buckets := make([]time.Time, 0, len(tokenUsage))
+	bucketIndexes := make(map[int64]int, len(tokenUsage))
+	for index, bucket := range tokenUsage {
+		buckets = append(buckets, bucket.Bucket)
+		bucketIndexes[bucket.Bucket.UnixNano()] = index
+	}
+
+	seriesByModel := make(map[string]*analysisModelUsageSeries)
+	totalsByModel := make(map[string]int64)
+	for _, row := range rows {
+		bucketIndex, ok := bucketIndexes[row.Bucket.UnixNano()]
+		if !ok {
+			continue
+		}
+		series := seriesByModel[row.Model]
+		if series == nil {
+			series = &analysisModelUsageSeries{
+				Model:       row.Model,
+				TotalTokens: make([]int64, len(buckets)),
+				Requests:    make([]int64, len(buckets)),
+			}
+			seriesByModel[row.Model] = series
+		}
+		series.TotalTokens[bucketIndex] += row.TotalTokens
+		series.Requests[bucketIndex] += row.Requests
+		totalsByModel[row.Model] += row.TotalTokens
+	}
+
+	series := make([]analysisModelUsageSeries, 0, len(seriesByModel))
+	for _, item := range seriesByModel {
+		series = append(series, *item)
+	}
+	sort.Slice(series, func(i, j int) bool {
+		if totalsByModel[series[i].Model] == totalsByModel[series[j].Model] {
+			return series[i].Model < series[j].Model
+		}
+		return totalsByModel[series[i].Model] > totalsByModel[series[j].Model]
+	})
+	return analysisModelUsage{Buckets: buckets, Series: series}
 }
 
 func buildAnalysisLatencyDiagnosticsPayload(diagnostics servicedto.AnalysisLatencyDiagnostics) analysisLatencyDiagnostics {

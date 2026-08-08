@@ -140,6 +140,12 @@ describe('RankingPage', () => {
 
   const openProfileModal = async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-ranking-profile-action]')?.click());
+    // Modal 会在下一任务设置初始焦点，等待完成后再让用例操作弹窗内焦点。
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 0);
+      });
+    });
   };
 
   it('keeps metric, help, and period together while the community profile stays right aligned', async () => {
