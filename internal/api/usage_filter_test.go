@@ -252,7 +252,7 @@ func TestParseUsageFilterQueryRejectsInvalidCustomRange(t *testing.T) {
 	}
 }
 
-func TestParseUsageFilterQueryAllowsLongCustomDayRange(t *testing.T) {
+func TestParseUsageFilterQueryRejectsCustomDayRangeBeyondNinetyDays(t *testing.T) {
 	previousLocal := time.Local
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -263,15 +263,12 @@ func TestParseUsageFilterQueryAllowsLongCustomDayRange(t *testing.T) {
 	anchor := time.Date(2026, 6, 16, 9, 0, 0, 0, location)
 
 	today := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, location)
-	start := today.AddDate(0, 0, -120)
+	start := today.AddDate(0, 0, -90)
 	req := httptest.NewRequest("GET", "/api/v1/usage/events?range=custom&unit=day&start="+start.Format(time.DateOnly)+"&end="+today.Format(time.DateOnly), nil)
 
-	filter, err := parseUsageFilterQuery(req, anchor)
-	if err != nil {
-		t.Fatalf("expected long custom Events range to be accepted: %v", err)
-	}
-	if filter.StartTime == nil || !filter.StartTime.Equal(start) {
-		t.Fatalf("expected long custom start %s, got %+v", start, filter)
+	_, err = parseUsageFilterQuery(req, anchor)
+	if err == nil {
+		t.Fatal("expected 91-day custom Events range to be rejected")
 	}
 }
 

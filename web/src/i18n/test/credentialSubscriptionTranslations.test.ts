@@ -27,7 +27,6 @@ const CLAUDE_LABELS = {
 } as const
 
 const ANTIGRAVITY_LABELS = {
-  'usage_stats.credentials_subscription_antigravity_unknown': 'Unknown',
   'usage_stats.credentials_subscription_antigravity_free': 'Free',
   'usage_stats.credentials_subscription_antigravity_pro': 'Pro',
   'usage_stats.credentials_subscription_antigravity_ultra_lite': 'Ultra Lite',
@@ -59,5 +58,12 @@ describe('credential subscription translations', () => {
         expect(i18n.getResource(language, 'translation', key), `${language}:${key}`).toBe(label)
       }
     }
+  })
+
+  it('localizes the unknown Antigravity fallback label', () => {
+    const key = 'usage_stats.credentials_subscription_antigravity_unknown'
+    expect(i18n.getResource('en', 'translation', key)).toBe('Unknown')
+    expect(i18n.getResource('zh', 'translation', key)).toBe('未知')
+    expect(i18n.getResource('zh-TW', 'translation', key)).toBe('未知')
   })
 })

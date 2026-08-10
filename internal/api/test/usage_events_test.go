@@ -225,10 +225,10 @@ func (s usageIdentitiesStub) UpdateUsageIdentityAlias(context.Context, int64, st
 	return s.items[0], s.err
 }
 
-func TestUsageEventsEndpointsAcceptCustomDayRangeOlderThanThirtyDays(t *testing.T) {
+func TestUsageEventsEndpointsAcceptNinetyDayCustomRange(t *testing.T) {
 	now := time.Now().In(time.Local)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	startDay := today.AddDate(0, 0, -120)
+	startDay := today.AddDate(0, 0, -89)
 	query := url.Values{
 		"range": {"custom"},
 		"unit":  {"day"},
@@ -253,7 +253,7 @@ func TestUsageEventsEndpointsAcceptCustomDayRangeOlderThanThirtyDays(t *testing.
 			router.ServeHTTP(response, request)
 
 			if response.Code != http.StatusOK {
-				t.Fatalf("expected long custom Events %s to return 200, got %d body=%s", tc.name, response.Code, response.Body.String())
+				t.Fatalf("expected 90-day custom Events %s to return 200, got %d body=%s", tc.name, response.Code, response.Body.String())
 			}
 			if tc.export {
 				if provider.exportCalls != 1 || provider.filterCalls != 0 {
@@ -269,8 +269,43 @@ func TestUsageEventsEndpointsAcceptCustomDayRangeOlderThanThirtyDays(t *testing.
 			if provider.lastFilter.EndTime == nil || !provider.lastFilter.EndTime.Equal(expectedEnd) || !provider.lastFilter.EndExclusive {
 				t.Fatalf("expected exclusive custom day end %s, got %+v", expectedEnd, provider.lastFilter)
 			}
-			if provider.lastFilter.CustomUnit != "day" || provider.lastFilter.RangeCount != 121 {
-				t.Fatalf("expected 121 complete custom day buckets, got %+v", provider.lastFilter)
+			if provider.lastFilter.CustomUnit != "day" || provider.lastFilter.RangeCount != 90 {
+				t.Fatalf("expected 90 complete custom day buckets, got %+v", provider.lastFilter)
+			}
+		})
+	}
+}
+
+func TestUsageEventsEndpointsRejectCustomRangeBeyondNinetyDays(t *testing.T) {
+	now := time.Now().In(time.Local)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	query := url.Values{
+		"range": {"custom"},
+		"unit":  {"day"},
+		"start": {today.AddDate(0, 0, -90).Format(time.DateOnly)},
+		"end":   {today.Format(time.DateOnly)},
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "list", path: "/api/v1/usage/events?" + query.Encode()},
+		{name: "export", path: "/api/v1/usage/events/export?format=csv&" + query.Encode()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &usageEventsStub{}
+			router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("expected 91-day custom Events %s to return 400, got %d body=%s", tc.name, response.Code, response.Body.String())
+			}
+			if provider.filterCalls != 0 || provider.exportCalls != 0 {
+				t.Fatalf("expected rejected range not to reach provider, list=%d export=%d", provider.filterCalls, provider.exportCalls)
 			}
 		})
 	}

@@ -536,6 +536,15 @@ describe('Credential section styles', () => {
     expect(credentialStyles).not.toContain('will-change:')
   })
 
+  it('keeps screen blending by default and disables it only for Safari WebKit', () => {
+    const coronaRule = scssRule(credentialStyles, '.credentialPlanBadgeCorona')
+    const safariWebKitRule = scssRule(credentialStyles, '@supports (-webkit-nbsp-mode: space)')
+
+    expect(coronaRule).toContain('mix-blend-mode: screen;')
+    expect(scssRule(safariWebKitRule, '.credentialPlanBadgeCorona')).toContain('mix-blend-mode: normal;')
+    expect(safariWebKitRule).not.toContain('.credentialPlanBadgeFlow')
+  })
+
   it('disables badge motion for reduced-motion and slow-update devices', () => {
     expect(credentialStyles).toMatch(/prefers-reduced-motion:\s*reduce\),\s*\(update:\s*slow\)[\s\S]*?\.credentialPlanBadgeFlow[\s\S]*?\.credentialPlanBadgeCorona[\s\S]*?animation:\s*none/)
     expect(credentialStyles).toMatch(/prefers-reduced-motion:\s*reduce\),\s*\(update:\s*slow\)[\s\S]*?\.credentialPlanBadgeEnterprise::before[\s\S]*?animation:\s*none/)

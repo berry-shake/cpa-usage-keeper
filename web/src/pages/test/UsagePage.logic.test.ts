@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getBackToCPALinkURL, getCredentialSectionVisibility, getOverviewDisplayLoading, getUsageTabOptions, isUsagePageVisible, loadAnalysisSections, loadRequestEventsPreferences, loadUsagePageVersionInfo, normalizeRequestEventsPreferences, normalizeUsageTabValue, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, runUsageEventRequestLogDownload, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration } from '../UsagePage';
+import { getBackToCPALinkURL, getCredentialSectionVisibility, getOverviewDisplayLoading, getUsageCustomRangeForTab, getUsageTabOptions, isUsagePageVisible, loadAnalysisSections, loadRequestEventsPreferences, loadUsagePageVersionInfo, normalizeRequestEventsPreferences, normalizeUsageTabValue, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, runUsageEventRequestLogDownload, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration } from '../UsagePage';
 import { REQUEST_EVENT_COLUMN_IDS } from '@/components/usage/RequestEventsDetailsCard';
 import { ApiError } from '@/lib/api';
 import type { UsageFilterWindow, VersionResponse } from '@/lib/types';
@@ -38,6 +38,24 @@ const createMemoryStorage = (seed: Record<string, string> = {}) => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('UsagePage Request Events custom range', () => {
+  const longRange = { unit: 'day' as const, start: '2025-07-18', end: '2026-07-17' };
+  const options = { nowMs: Date.parse('2026-07-17T07:36:42.000Z'), timeZone: 'Asia/Shanghai' };
+
+  it('clamps Request Events to the most recent 90 calendar days', () => {
+    expect(getUsageCustomRangeForTab('events', longRange, options)).toEqual({
+      unit: 'day',
+      start: '2026-04-19',
+      end: '2026-07-17',
+    });
+  });
+
+  it('keeps the 365-day range available to other usage tabs', () => {
+    expect(getUsageCustomRangeForTab('overview', longRange, options)).toBe(longRange);
+  });
+
 });
 
 describe('UsagePage Overview loading display', () => {

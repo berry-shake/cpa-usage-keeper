@@ -21,6 +21,8 @@ var allowedUsageEventsPageSizes = map[int]struct{}{
 	1000: {},
 }
 
+const usageEventsCustomDayRangeMaxDays = 90
+
 func writeUsageFilterParseError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	if timeutil.IsUsageQueryRangeBoundsConflict(err) {
@@ -48,9 +50,9 @@ func parseKeyUsageOverviewTimeFilterQuery(req *http.Request, anchor time.Time) (
 	return parseUsageTimeFilterQueryWithOptions(req, anchor, false, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
 }
 
-// Events 直接查询仍在保留期内的原始事件，因此只放宽至统一的一年上限。
+// Events 直接查询热表原始事件，Custom 日范围与 90 天保留窗口保持一致。
 func parseUsageEventsTimeFilterQuery(req *http.Request, anchor time.Time) (servicedto.UsageFilter, error) {
-	return parseUsageTimeFilterQueryWithOptions(req, anchor, true, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: timeutil.LongCustomDayRangeMaxDays})
+	return parseUsageTimeFilterQueryWithOptions(req, anchor, true, timeutil.UsageQueryRangeOptions{MaxCustomDayRangeDays: usageEventsCustomDayRangeMaxDays})
 }
 
 // Analysis 主数据来自 hourly/daily 汇总，因此和 Overview 一样放宽至统一的一年上限。

@@ -232,10 +232,12 @@ describe('UsagePage toolbar styles', () => {
     expect(timeRangeControlSource).toContain('data-time-range-trigger="mobile"')
   })
 
-  it('threads one applied custom range through Usage and Key Overview queries', () => {
+  it('threads the tab-effective custom range through Usage and Key Overview queries', () => {
     expect(usagePageSource).toContain('const [timeRangeState, setTimeRangeState]')
+    expect(usagePageSource).toContain('const activeCustomRange = useMemo(() => getUsageCustomRangeForTab(')
     expect(usagePageSource).toContain('const usageRangeQuery = useMemo(() => buildUsageRangeQuery({')
-    expect(usagePageSource).toContain('customRange={customRange}')
+    expect(usagePageSource).toContain('customRange={activeCustomRange}')
+    expect(usagePageSource).toContain("maxCustomDayRangeDays={activeTab === 'events' ? REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS : undefined}")
     expect(usagePageSource).toContain('onChange={handleTimeRangeChange}')
     expect(usagePageSource).toContain('fetchAnalysis(usageRangeQuery, controller.signal, selectedApiKeyId)')
     expect(usagePageSource).toContain('fetchAnalysisLatency(usageRangeQuery, controller.signal, selectedApiKeyId)')

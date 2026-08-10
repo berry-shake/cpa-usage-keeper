@@ -42,6 +42,88 @@ describe('i18n resources', () => {
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_auth_files_display_mode_health')).toBe('健康');
   });
 
+  it('localizes the Auth Files inspection title in every language', () => {
+    expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_inspection_title')).toBe('Auth Files Inspection');
+    expect(i18n.getResource('zh', 'translation', 'usage_stats.credentials_inspection_title')).toBe('认证文件巡检');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.credentials_inspection_title')).toBe('認證檔案巡檢');
+  });
+
+  it('localizes session management copy in Chinese', () => {
+    const expected = {
+      zh: {
+        session_settings_title: '会话管理',
+        session_settings_subtitle: '查看当前有效的仪表盘会话，并退出不再需要的访问。',
+        session_settings_empty: '暂无有效会话。',
+        session_settings_admin_label: '管理员会话',
+        session_settings_type_admin: '管理员',
+        session_settings_logout_one: '退出此会话',
+        session_settings_admin_logout_title: '退出管理员会话？',
+        session_settings_admin_logout_body: '只会退出此管理员会话，其他管理员会话仍保持有效。',
+        session_settings_api_key_logout_title: '退出 API Key 会话？',
+        session_settings_api_key_logout_body: '只会退出 {{label}} 的此 API Key 会话，其他会话仍保持有效。',
+        session_settings_logout_success: '会话已退出。',
+        session_settings_logout_failed: '无法退出会话。',
+        logout_confirm_body: '这会退出当前设备上的当前会话。',
+      },
+      'zh-TW': {
+        session_settings_title: '工作階段管理',
+        session_settings_subtitle: '查看目前有效的儀表板工作階段，並登出不再需要的存取。',
+        session_settings_empty: '尚無有效工作階段。',
+        session_settings_admin_label: '管理員工作階段',
+        session_settings_type_admin: '管理員',
+        session_settings_logout_one: '登出此工作階段',
+        session_settings_admin_logout_title: '登出管理員工作階段？',
+        session_settings_admin_logout_body: '僅會登出此管理員工作階段，其他管理員工作階段仍保持有效。',
+        session_settings_api_key_logout_title: '登出 API Key 工作階段？',
+        session_settings_api_key_logout_body: '僅會登出 {{label}} 的此 API Key 工作階段，其他工作階段仍保持有效。',
+        session_settings_logout_success: '工作階段已登出。',
+        session_settings_logout_failed: '無法登出工作階段。',
+        logout_confirm_body: '這會登出目前裝置上的目前工作階段。',
+      },
+    } as const;
+
+    for (const [language, values] of Object.entries(expected)) {
+      for (const [key, value] of Object.entries(values)) {
+        expect(i18n.getResource(language, 'translation', `usage_stats.${key}`)).toBe(value);
+      }
+    }
+  });
+
+  it('localizes generic realtime and Analysis terms in Chinese', () => {
+    const expected = {
+      zh: {
+        overview_realtime_latency_distribution: '延迟分布',
+        overview_realtime_latency_average: '平均延迟',
+        overview_realtime_latency_empty: '暂无延迟样本',
+        overview_realtime_tpm: 'Token/分钟',
+        overview_realtime_rpm: '请求/分钟',
+        overview_realtime_tokens_label: 'Token 数',
+        avg_tokens: '平均 Token 数',
+        analysis_model_efficiency_subtitle: '按模型比较每 1M 总 Token 的成本。',
+        analysis_top_models_subtitle: '在所选时间范围内，比较各模型的总 Token 用量。',
+        analysis_top_models_chart_aria: '各模型总 Token 用量随时间变化的堆叠图',
+      },
+      'zh-TW': {
+        overview_realtime_latency_distribution: '延遲分布',
+        overview_realtime_latency_average: '平均延遲',
+        overview_realtime_latency_empty: '暫無延遲樣本',
+        overview_realtime_tpm: 'Token/分鐘',
+        overview_realtime_rpm: '請求/分鐘',
+        overview_realtime_tokens_label: 'Token 數',
+        avg_tokens: '平均 Token 數',
+        analysis_model_efficiency_subtitle: '按模型比較每 1M 總 Token 的成本。',
+        analysis_top_models_subtitle: '在所選時間範圍內，比較各模型的總 Token 用量。',
+        analysis_top_models_chart_aria: '各模型總 Token 用量隨時間變化的堆疊圖',
+      },
+    } as const;
+
+    for (const [language, values] of Object.entries(expected)) {
+      for (const [key, value] of Object.entries(values)) {
+        expect(i18n.getResource(language, 'translation', `usage_stats.${key}`)).toBe(value);
+      }
+    }
+  });
+
   it('keeps credential table column headers available in every language', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_column_name')).toBe('Name');
     expect(i18n.getResource('en', 'translation', 'usage_stats.credentials_column_quota')).toBe('Quota');
@@ -220,7 +302,7 @@ describe('i18n resources', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.overview_realtime_rolling_metric_hint')).toBe('Latest, average and trend use rolling aggregation for the selected window.');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.overview_realtime_ttft_empty')).toBe('暂无 TTFT 样本');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.overview_realtime_cache_empty')).toBe('暂无可计算的缓存率');
-    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.overview_realtime_latency_empty')).toBe('暫無 Latency 樣本');
+    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.overview_realtime_latency_empty')).toBe('暫無延遲樣本');
   });
 
   it('uses a token share label for the realtime current-usage card', () => {
