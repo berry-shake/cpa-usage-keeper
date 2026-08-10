@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"cpa-usage-keeper/internal/benchmark/capacity"
-	_ "github.com/mattn/go-sqlite3"
+	"cpa-usage-keeper/internal/repository"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 func TestResumeCellMatchesTerminalExactProvenance(t *testing.T) {
@@ -220,7 +221,7 @@ func TestResetDatasetCloneReplacesPreviousProbeState(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "source.db")
 	destination := filepath.Join(root, "work", "app.db")
-	sourceDB, err := sql.Open("sqlite3", source)
+	sourceDB, err := sql.Open("sqlite", source)
 	if err != nil {
 		t.Fatalf("open source database: %v", err)
 	}
@@ -242,7 +243,7 @@ func TestResetDatasetCloneReplacesPreviousProbeState(t *testing.T) {
 	if err := capacity.ResetDatasetClone(t.Context(), source, destination); err != nil {
 		t.Fatalf("ResetDatasetClone returned error: %v", err)
 	}
-	destinationDB, err := sql.Open("sqlite3", destination+"?mode=ro")
+	destinationDB, err := sql.Open("sqlite", repository.BuildSQLiteFileURI(destination)+"?mode=ro")
 	if err != nil {
 		t.Fatalf("open restored clone: %v", err)
 	}

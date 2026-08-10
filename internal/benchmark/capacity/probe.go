@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"cpa-usage-keeper/internal/repository"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 type UsagePayloadMetadata struct {
@@ -352,8 +352,8 @@ func openProbeDatabase(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve probe database path: %w", err)
 	}
-	dsn := repository.BuildSQLiteFileURI(absolute) + "?mode=ro&_query_only=on&_busy_timeout=5000"
-	database, err := sql.Open("sqlite3", dsn)
+	dsn := repository.BuildSQLiteFileURI(absolute) + "?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)"
+	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open probe database: %w", err)
 	}
