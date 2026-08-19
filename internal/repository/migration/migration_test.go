@@ -78,6 +78,7 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260730_create_usage_event_archive",
 		"20260731_local_ranking_stats",
 		"20260803_add_cpa_api_key_local_ranking_avatar",
+		"20260813_add_auth_session_client_metadata",
 	}
 	assertStringSlicesEqual(t, want, got)
 }
@@ -114,6 +115,11 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 	}
 	if !db.Migrator().HasColumn(&entities.AuthSession{}, "source") {
 		t.Fatal("expected auth_sessions.source column to exist")
+	}
+	for _, column := range []string{"login_ip", "last_seen_ip", "user_agent", "last_seen_at"} {
+		if !db.Migrator().HasColumn(&entities.AuthSession{}, column) {
+			t.Fatalf("expected auth_sessions.%s column to exist", column)
+		}
 	}
 	if !db.Migrator().HasTable(&entities.AppSetting{}) {
 		t.Fatal("expected app_settings table to exist")
