@@ -17,12 +17,13 @@ interface AiProviderCredentialsSectionProps {
   loading: boolean
   aliasSavingId?: string
   onSaveAlias?: (id: string, alias: string) => Promise<void>
+  onOpenDetails?: (row: AiProviderCredentialRow) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
   onSortChange: (sort: UsageIdentityPageSort) => void
 }
 
-export function AiProviderCredentialsSection({ rows, total, page, totalPages, pageSize, sort, loading, aliasSavingId, onSaveAlias, onPageChange, onPageSizeChange, onSortChange }: AiProviderCredentialsSectionProps) {
+export function AiProviderCredentialsSection({ rows, total, page, totalPages, pageSize, sort, loading, aliasSavingId, onSaveAlias, onOpenDetails, onPageChange, onPageSizeChange, onSortChange }: AiProviderCredentialsSectionProps) {
   const { t } = useTranslation()
 
   return (
@@ -55,8 +56,19 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
               alias={row.identity.alias}
               saving={aliasSavingId === row.identity.id}
               disabled={isCredentialAliasEditorDisabled(row.identity.id, row.identity.is_deleted, aliasSavingId)}
+              onOpenDetails={onOpenDetails ? () => onOpenDetails(row) : undefined}
               onSaveAlias={onSaveAlias}
             />
+          ) : onOpenDetails ? (
+            <button
+              type="button"
+              className={styles.credentialDetailNameButton}
+            data-credential-detail-trigger="true"
+            onClick={() => onOpenDetails(row)}
+          >
+              <span className={styles.credentialDetailNameText}>{row.displayName}</span>
+              <span className={styles.credentialDetailNameArrow} aria-hidden="true">›</span>
+            </button>
           ) : row.displayName}
           subtitle={row.priorityLabel ? (
             <span className={styles.credentialIdentityBadges}>

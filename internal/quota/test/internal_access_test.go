@@ -8,6 +8,9 @@ import (
 	"unsafe"
 
 	"cpa-usage-keeper/internal/quota"
+	repositorydto "cpa-usage-keeper/internal/repository/dto"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -131,6 +134,32 @@ func usageHeaderFlushInterval(service *quota.Service) time.Duration {
 
 func setUsageHeaderTimerFactory(service *quota.Service, factory func(time.Duration) (<-chan time.Time, func())) {
 	quotaServiceField(service, "usageHeaderNewTimer").Set(reflect.ValueOf(factory))
+}
+
+func setCodexQuotaHistoryTimerFactory(service *quota.Service, factory func(time.Duration) (<-chan time.Time, func())) {
+	// history runner 的手动 timer 只用于锁定十秒批次边界，不依赖真实墙钟调度。
+	quotaServiceField(service, "codexQuotaHistoryNewTimer").Set(reflect.ValueOf(factory))
+}
+
+func setCodexQuotaHistoryWriter(service *quota.Service, writer func(context.Context, *gorm.DB, []repositorydto.CodexMainQuotaObservation) error) {
+	// 生产字段使用包内命名函数类型；MakeFunc 只在测试中适配同签名回调，便于观察完整写入结果。
+	field := quotaServiceField(service, "codexQuotaHistoryWrite")
+	field.Set(reflect.MakeFunc(field.Type(), func(arguments []reflect.Value) []reflect.Value {
+		err := writer(
+			arguments[0].Interface().(context.Context),
+			arguments[1].Interface().(*gorm.DB),
+			arguments[2].Interface().([]repositorydto.CodexMainQuotaObservation),
+		)
+		if err == nil {
+			return []reflect.Value{reflect.Zero(field.Type().Out(0))}
+		}
+		return []reflect.Value{reflect.ValueOf(err)}
+	}))
+}
+
+func codexQuotaHistoryQueueLength(service *quota.Service) int {
+	// 队列长度只在测试同步点读取，用来证明 timer 到期前数据尚未被 runner 提前取走。
+	return quotaServiceField(service, "codexQuotaHistoryQueue").Len()
 }
 
 func floatPtr(value float64) *float64 {

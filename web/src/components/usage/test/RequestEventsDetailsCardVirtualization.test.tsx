@@ -244,7 +244,15 @@ describe('RequestEventsDetailsCard event table virtualization', () => {
     const loadMoreButton = container.querySelector<HTMLButtonElement>(
       '[class*="requestEventsPaginationFooter"] button',
     );
+    const loadedSummary = container.querySelector<HTMLElement>(
+      '[class*="requestEventsPaginationPage"]',
+    );
     expect(loadMoreButton).not.toBeNull();
+    expect(loadedSummary?.getAttribute('role')).toBe('status');
+    expect(loadedSummary?.getAttribute('aria-label')).toBe('Loaded 100 / 500');
+    expect(loadMoreButton?.className).toContain('btn-secondary');
+    expect(loadMoreButton?.className).toContain('btn-action');
+    expect(loadMoreButton?.className).toContain('btn-sm');
     await act(async () => {
       loadMoreButton?.click();
     });

@@ -3311,31 +3311,36 @@
   font-size: 12px;
 }
 
-.requestEventsPagerButton {
-  border: 1px solid var(--border-color);
-  border-radius: $radius-full;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  font: inherit;
-  font-weight: 800;
-  padding: 6px 10px;
-  cursor: pointer;
-
-  &:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
-    transform: translateY(-1px);
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
+.requestEventsPaginationPage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  white-space: nowrap;
+  line-height: 1;
 }
 
-.requestEventsPaginationPage {
-  min-width: 44px;
-  text-align: center;
+.requestEventsPaginationLabel {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.requestEventsPaginationLoaded,
+.requestEventsPaginationTotal {
+  font-variant-numeric: tabular-nums;
+}
+
+.requestEventsPaginationLoaded {
+  color: var(--text-primary);
+  font-size: 12px;
   font-weight: 800;
+}
+
+.requestEventsPaginationTotal {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .requestEventsPageSizeControl {
@@ -4379,12 +4384,12 @@
 }
 
 :global([data-theme='dark']) .tokenActivityCard {
-  --activity-heatmap-idle: #1f2937;
-  --token-activity-level-1: #172554;
-  --token-activity-level-2: #1e3a8a;
-  --token-activity-level-3: #1d4ed8;
-  --token-activity-level-4: #3b82f6;
-  --token-activity-level-5: #60a5fa;
+  // 两种主题都用浅→深表示 Token 量增加；暗色背景下收窄亮度范围以保留辨识度。
+  --token-activity-level-1: #60a5fa;
+  --token-activity-level-2: #3b82f6;
+  --token-activity-level-3: #2563eb;
+  --token-activity-level-4: #1d4ed8;
+  --token-activity-level-5: #1e40af;
 }
 
 .activityCardHeader {

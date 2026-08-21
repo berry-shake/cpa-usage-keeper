@@ -10,6 +10,7 @@ const usagePageSource = readSource(new URL('../UsagePage.tsx', import.meta.url))
 const keyOverviewPageStyles = readSource(new URL('../KeyOverviewPage.module.scss', import.meta.url))
 const keyOverviewPageSource = readSource(new URL('../KeyOverviewPage.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
+const requestEventLogSource = readSource(new URL('../../components/usage/RequestEventLogModal.tsx', import.meta.url))
 const requestEventsColumnSettingsSource = readSource(new URL('../../components/usage/RequestEventsColumnSettingsModal.tsx', import.meta.url))
 const priceSettingsSource = readSource(new URL('../../components/usage/PriceSettingsCard.tsx', import.meta.url))
 const priceRulesSource = readSource(new URL('../../components/usage/pricing/PriceRulesModal.tsx', import.meta.url))
@@ -66,6 +67,20 @@ const styleRuleBlock = (source: string, selector: string) => {
   const close = source.indexOf('\n}', open)
   expect(close).toBeGreaterThan(open)
   return source.slice(open + 1, close)
+}
+
+const cssHexVariable = (rule: string, name: string) => {
+  const match = rule.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6});`))
+  if (!match) throw new Error(`Missing CSS variable: ${name}`)
+  return match[1]
+}
+
+const relativeLuminance = (hex: string) => {
+  const channels = hex.slice(1).match(/.{2}/g)?.map((value) => Number.parseInt(value, 16) / 255) ?? []
+  const [red, green, blue] = channels.map((value) => (
+    value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  ))
+  return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
 }
 
 describe('UsagePage toolbar styles', () => {
@@ -594,6 +609,8 @@ describe('UsagePage toolbar styles', () => {
   it('renders Recent Activity between the stat cards and realtime metrics', () => {
     const realtimeCard = styleRuleBlock(usagePageStyles, '.overviewRealtimeCard')
     const realtimeCompactCard = styleRuleBlock(usagePageStyles, '.overviewRealtimeCardCompact')
+    const lightTokenActivityCard = styleRuleBlock(usagePageStyles, '.tokenActivityCard')
+    const darkTokenActivityCard = styleRuleBlock(usagePageStyles, ":global([data-theme='dark']) .tokenActivityCard")
 
     expect(usagePageSource).toContain('<OverviewRealtimePanel')
     expect(keyOverviewPageSource).toContain('<OverviewRealtimePanel')
@@ -616,7 +633,11 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toContain('--token-activity-level-3: #60a5fa;')
     expect(usagePageStyles).toContain('--token-activity-level-4: #3b82f6;')
     expect(usagePageStyles).toContain('--token-activity-level-5: #1d4ed8;')
-    expect(usagePageStyles).toMatch(/:global\(\[data-theme='dark'\]\) \.tokenActivityCard\s*\{[\s\S]*?--token-activity-level-1:\s*#172554;/)
+    expect(darkTokenActivityCard).not.toContain('--activity-heatmap-idle:')
+    const lightLevelLuminance = [1, 2, 3, 4, 5].map((level) => relativeLuminance(cssHexVariable(lightTokenActivityCard, `--token-activity-level-${level}`)))
+    const darkLevelLuminance = [1, 2, 3, 4, 5].map((level) => relativeLuminance(cssHexVariable(darkTokenActivityCard, `--token-activity-level-${level}`)))
+    lightLevelLuminance.slice(0, -1).forEach((luminance, index) => expect(luminance).toBeGreaterThan(lightLevelLuminance[index + 1]))
+    darkLevelLuminance.slice(0, -1).forEach((luminance, index) => expect(luminance).toBeGreaterThan(darkLevelLuminance[index + 1]))
     expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/)
     expect(usagePageStyles).toMatch(/\.overviewRealtimeGrid\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
     expect(usagePageStyles).toMatch(/\.overviewRealtimeCardFull\s*\{[\s\S]*?grid-column:\s*1 \/ -1;/)
@@ -982,12 +1003,12 @@ describe('UsagePage toolbar styles', () => {
 
   it('contains wheel scrolling at overflowing card boundaries without trapping short lists', () => {
     expect(requestEventsSource).toContain('useScrollBoundaryContainment(requestEventsTableWrapperRef, rows.length > 0);')
-    expect(requestEventsSource).toContain('useScrollBoundaryContainment(scrollerRef);')
+    expect(requestEventLogSource).toContain('useScrollBoundaryContainment(scrollerRef)')
     expect(apiKeySettingsSource).toContain('useScrollBoundaryContainment(apiKeySettingsBodyRef);')
     expect(sessionSettingsSource).toContain('useScrollBoundaryContainment(sessionSettingsBodyRef);')
     expect(priceSettingsSource).toContain('useScrollBoundaryContainment(pricesGridRef, sortedModelPrices.length > 0);')
     expect(requestEventsSource).toContain('ref={requestEventsTableWrapperRef} className={styles.requestEventsTableWrapper}')
-    expect(requestEventsSource).toContain('className={styles.requestEventsLogSectionPanelInner} ref={scrollerRef}')
+    expect(requestEventLogSource).toContain('className={styles.requestEventsLogSectionPanelInner} ref={scrollerRef}')
     expect(apiKeySettingsSource).toContain('ref={apiKeySettingsBodyRef} className={styles.apiKeySettingsBody}')
     expect(sessionSettingsSource).toContain('ref={sessionSettingsBodyRef} className={styles.sessionSettingsBody}')
     expect(priceSettingsSource).toContain('ref={pricesGridRef} className={styles.pricesGrid}')
@@ -1244,6 +1265,24 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?box-sizing:\s*border-box;/)
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?align-items:\s*center;/)
     expect(usagePageStyles).toMatch(/\.requestEventsPaginationFooter\s*\{[\s\S]*?padding:\s*0 22px;/)
+  })
+
+  it('styles the Request Event loaded count as an inline summary without a second pill', () => {
+    const progressSummary = styleRuleBlock(usagePageStyles, '.requestEventsPaginationPage')
+    const loadedNumberStart = usagePageStyles.indexOf('.requestEventsPaginationLoaded {')
+    const loadedNumber = usagePageStyles.slice(
+      loadedNumberStart,
+      usagePageStyles.indexOf('.requestEventsPaginationTotal {', loadedNumberStart),
+    )
+
+    expect(requestEventsSource).toContain('styles.requestEventsPaginationLabel')
+    expect(requestEventsSource).toContain('styles.requestEventsPaginationLoaded')
+    expect(requestEventsSource).toContain('styles.requestEventsPaginationTotal')
+    expect(progressSummary).toMatch(/display:\s*inline-flex;/)
+    expect(progressSummary).toMatch(/min-height:\s*32px;/)
+    expect(progressSummary).not.toMatch(/(?:^|\n)\s*(?:padding|border|border-radius|background):/)
+    expect(loadedNumber).toMatch(/color:\s*var\(--text-primary\);/)
+    expect(loadedNumber).not.toMatch(/color:\s*var\(--primary-color\);/)
   })
 
   it('keeps Request Event Log headers visible while the table scrolls', () => {

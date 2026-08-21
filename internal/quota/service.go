@@ -13,13 +13,18 @@ import (
 	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/repository"
 
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
 type ServiceOptions struct {
 	RefreshWorkerLimit               int
 	UsageHeaderSnapshotFlushInterval time.Duration
-	PricingCatalog                   *pricing.Catalog
+	// CodexQuotaHistoryFlushInterval 覆盖独立历史 runner 固定批次边界前的十秒等待，主要供定向测试缩短等待。
+	CodexQuotaHistoryFlushInterval time.Duration
+	// CodexQuotaHistoryQueueSize 覆盖 Header/主动查询共享的有界队列容量，非正值使用生产默认值。
+	CodexQuotaHistoryQueueSize int
+	PricingCatalog             *pricing.Catalog
 }
 
 type Service struct {
@@ -61,7 +66,8 @@ type Service struct {
 	// refreshWG 跟踪 service 派生的 dispatcher/worker/scheduler goroutine，App 关闭 DB 前会等待它们退出。
 	refreshWG sync.WaitGroup
 
-	usageHeaderPending       map[string]UsageHeaderSnapshot
+	// usageHeaderPending 按 auth_index 只保存一分钟窗口内最新的不可变快照指针。
+	usageHeaderPending       map[string]*UsageHeaderSnapshot
 	usageHeaderWake          chan struct{}
 	usageHeaderStopCh        chan struct{}
 	usageHeaderDoneCh        chan struct{}
@@ -70,6 +76,31 @@ type Service struct {
 	usageHeaderMu            sync.Mutex
 	usageHeaderClosing       bool
 	usageHeaderCloseOnce     sync.Once
+
+	// codexQuotaHistoryQueue 有界保存 Header 快照指针或主动查询 observation 所有权，生产者永不等待。
+	codexQuotaHistoryQueue chan codexQuotaHistoryInput
+	// codexQuotaHistoryWake 只通知 runner“队列已有数据”；容量为一即可合并重复唤醒，不复制队列内容。
+	codexQuotaHistoryWake chan struct{}
+	// codexQuotaHistoryStopCh 只表达 runner 停止；队列不关闭以避免并发发送 panic。
+	codexQuotaHistoryStopCh chan struct{}
+	// codexQuotaHistoryDoneCh 在 shutdown best-effort flush 完成后关闭。
+	codexQuotaHistoryDoneCh chan struct{}
+	// codexQuotaHistoryFlushInterval 是首条数据入队后、runner 固定本批队列数量前的等待时长。
+	codexQuotaHistoryFlushInterval time.Duration
+	// codexQuotaHistoryNewTimer 创建一次性窗口 timer，测试可替换但生产默认使用 time.Timer。
+	codexQuotaHistoryNewTimer func(time.Duration) (<-chan time.Time, func())
+	// codexQuotaHistoryWrite 是独立 repository writer；不进入 usage/inbox 事务。
+	codexQuotaHistoryWrite codexQuotaHistoryWriter
+	// codexQuotaHistoryLoad 在缓存首次命中或写失败失效后从 writer 恢复当前周期尾段。
+	codexQuotaHistoryLoad codexQuotaHistoryLoader
+	// codexQuotaHistoryListIdentities 批量确认 Header 来源属于活跃 Codex Auth File。
+	codexQuotaHistoryListIdentities codexQuotaHistoryIdentityLister
+	// codexQuotaHistoryMu 同时保护 closing 检查和非阻塞发送，避免 stop/send 竞态。
+	codexQuotaHistoryMu sync.Mutex
+	// codexQuotaHistoryClosing 表示 runner 已停止接收任何新 history 候选。
+	codexQuotaHistoryClosing bool
+	// codexQuotaHistoryCloseOnce 保证重复 StopRefreshTasks 只关闭一次 stop channel。
+	codexQuotaHistoryCloseOnce sync.Once
 }
 
 type CheckRequest struct {
@@ -107,31 +138,52 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 	if usageHeaderFlushInterval <= 0 {
 		usageHeaderFlushInterval = usageHeaderSnapshotFlushInterval
 	}
+	// 独立 history runner 默认每 10 秒合并一次；非正测试覆盖不改变生产语义。
+	codexHistoryFlushInterval := options.CodexQuotaHistoryFlushInterval
+	if codexHistoryFlushInterval <= 0 {
+		codexHistoryFlushInterval = codexQuotaHistoryFlushInterval
+	}
+	// 队列容量只限制内存和丢弃边界，不改变 cache latest-map 的接收能力。
+	codexHistoryQueueSize := options.CodexQuotaHistoryQueueSize
+	if codexHistoryQueueSize <= 0 {
+		codexHistoryQueueSize = codexQuotaHistoryQueueSize
+	}
 	refreshContext, refreshCancel := context.WithCancel(context.Background())
 	pricingCatalog := options.PricingCatalog
 	if pricingCatalog == nil {
 		panic("pricing catalog is required")
 	}
 	service := &Service{
-		db:                         db,
-		registry:                   registry,
-		pricing:                    pricingCatalog,
-		refreshTasks:               make(map[string]*RefreshTaskRecord),
-		resetInFlight:              make(map[string]struct{}),
-		refreshWorkerTokens:        make(chan struct{}, workerLimit),
-		refreshTaskTTL:             RefreshTransientTaskTTL,
-		refreshCooldown:            time.Sleep,
-		refreshContext:             refreshContext,
-		refreshCancel:              refreshCancel,
-		autoRefreshSettingsChanged: make(chan struct{}, 1),
-		usageHeaderPending:         make(map[string]UsageHeaderSnapshot, usageHeaderPendingIdentityLimit),
-		usageHeaderWake:            make(chan struct{}, 1),
-		usageHeaderStopCh:          make(chan struct{}),
-		usageHeaderDoneCh:          make(chan struct{}),
-		usageHeaderFlushInterval:   usageHeaderFlushInterval,
-		usageHeaderNewTimer:        newUsageHeaderTimer,
+		db:                              db,
+		registry:                        registry,
+		pricing:                         pricingCatalog,
+		refreshTasks:                    make(map[string]*RefreshTaskRecord),
+		resetInFlight:                   make(map[string]struct{}),
+		refreshWorkerTokens:             make(chan struct{}, workerLimit),
+		refreshTaskTTL:                  RefreshTransientTaskTTL,
+		refreshCooldown:                 time.Sleep,
+		refreshContext:                  refreshContext,
+		refreshCancel:                   refreshCancel,
+		autoRefreshSettingsChanged:      make(chan struct{}, 1),
+		usageHeaderPending:              make(map[string]*UsageHeaderSnapshot, usageHeaderPendingIdentityLimit),
+		usageHeaderWake:                 make(chan struct{}, 1),
+		usageHeaderStopCh:               make(chan struct{}),
+		usageHeaderDoneCh:               make(chan struct{}),
+		usageHeaderFlushInterval:        usageHeaderFlushInterval,
+		usageHeaderNewTimer:             newUsageHeaderTimer,
+		codexQuotaHistoryQueue:          make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
+		codexQuotaHistoryWake:           make(chan struct{}, 1),
+		codexQuotaHistoryStopCh:         make(chan struct{}),
+		codexQuotaHistoryDoneCh:         make(chan struct{}),
+		codexQuotaHistoryFlushInterval:  codexHistoryFlushInterval,
+		codexQuotaHistoryNewTimer:       newCodexQuotaHistoryTimer,
+		codexQuotaHistoryWrite:          repository.WriteCodexMainQuotaObservations,
+		codexQuotaHistoryLoad:           repository.LoadLatestCodexQuotaHistoryState,
+		codexQuotaHistoryListIdentities: repository.ListActiveAuthFileUsageIdentitiesByAuthIndexes,
 	}
 	go service.runUsageHeaderSnapshotWorker()
+	// history 拥有独立队列、timer 和失败状态，不能复用一分钟 cache worker 的 pending map。
+	go service.runCodexQuotaHistoryRunner()
 	return service
 }
 
@@ -206,6 +258,8 @@ func (s *Service) StopRefreshTasks() {
 		cancel()
 	}
 	s.stopUsageHeaderSnapshotWorker()
+	// 停止新投递并等待最多两秒的 history best-effort flush 后，调用方才能关闭数据库。
+	s.stopCodexQuotaHistoryRunner()
 	s.refreshWG.Wait()
 }
 
@@ -232,6 +286,14 @@ func (s *Service) Check(ctx context.Context, request CheckRequest) (CheckRespons
 	providerOutput, err := handler.Check(ctx, ProviderInput{Identity: identity})
 	if err != nil {
 		return CheckResponse{}, err
+	}
+	// 主动查询只从原始 CodexResult 提取 Primary/Secondary；Review/Additional 从结构上不参与遍历。
+	if usageHeaderIdentityIsCodex(identity) {
+		observations := BuildCodexMainQuotaObservations(authIndex, providerOutput, time.Now())
+		if len(observations) > 0 && !s.tryAppendCodexQuotaHistoryObservations(observations) {
+			// history 是 best-effort 统计链路，队列满或 shutdown 不能改变手动/定时/巡检刷新结果。
+			logrus.WithField("auth_index", authIndex).Warn("codex quota history active observation append skipped")
+		}
 	}
 	response := CheckResponse{
 		ID:           authIndex,

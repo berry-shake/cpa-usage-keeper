@@ -5,6 +5,7 @@ func All() []any {
 	return []any{
 		&UsageEvent{},
 		&UsageEventArchive{},
+		&ErrorEvent{},
 		&RedisUsageInbox{},
 		&ModelPriceSetting{},
 		&ModelPriceRule{},
@@ -22,5 +23,9 @@ func All() []any {
 		&UsageLatencyStat{},
 		&AuthSession{},
 		&AppSetting{},
+		// CodexQuotaCycle 必须先于子表注册，确保全新数据库先创建外键目标。
+		&CodexQuotaCycle{},
+		// CodexQuotaPercentSegment 只保存额度百分比状态，不保存 Token 或 cost。
+		&CodexQuotaPercentSegment{},
 	}
 }

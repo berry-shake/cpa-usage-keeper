@@ -79,6 +79,10 @@ const (
 	migrationAddCPAAPIKeyLocalRankingAvatar = "20260803_add_cpa_api_key_local_ranking_avatar"
 	// migrationAddAuthSessionClientMetadata 保存会话客户端与最近活动信息，旧会话只回填活动时间。
 	migrationAddAuthSessionClientMetadata = "20260813_add_auth_session_client_metadata"
+	// migrationCreateErrorEvents 创建 CPA errors 订阅的独立最终事件表。
+	migrationCreateErrorEvents = "20260820_create_error_events"
+	// migrationCodexQuotaHistory 创建 Codex 主额度周期父表和整数百分比状态子表。
+	migrationCodexQuotaHistory = "20260820_codex_quota_history"
 )
 
 type schemaMigration struct {
@@ -196,6 +200,10 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationLocalRankingStats, run: localRankingStatsMigration},
 		{version: migrationAddCPAAPIKeyLocalRankingAvatar, run: addCPAAPIKeyLocalRankingAvatarMigration},
 		{version: migrationAddAuthSessionClientMetadata, run: addAuthSessionClientMetadataMigration},
+		// 已进入 main 的 Errors 最终表先按原顺序创建，不能因 quota 分支合并而改写已发布迁移序列。
+		{version: migrationCreateErrorEvents, run: createErrorEventsMigration},
+		// 新表 migration 使用默认单事务，schema 与版本标记必须一起提交或回滚。
+		{version: migrationCodexQuotaHistory, run: createCodexQuotaHistoryMigration},
 	}
 }
 

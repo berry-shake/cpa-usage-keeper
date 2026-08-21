@@ -10,7 +10,8 @@ interface CredentialAliasEditorProps {
   alias?: string | null
   saving: boolean
   disabled?: boolean
-  displayNameProps?: HTMLAttributes<HTMLSpanElement>
+  displayNameProps?: HTMLAttributes<HTMLElement>
+  onOpenDetails?: () => void
   onSaveAlias: (id: string, alias: string) => Promise<void>
 }
 
@@ -18,7 +19,7 @@ export function isCredentialAliasEditorDisabled(identityId: string, isDeleted?: 
   return Boolean(isDeleted || (aliasSavingId && aliasSavingId !== identityId))
 }
 
-export function CredentialAliasEditor({ identityId, displayName, alias, saving, disabled = false, displayNameProps, onSaveAlias }: CredentialAliasEditorProps) {
+export function CredentialAliasEditor({ identityId, displayName, alias, saving, disabled = false, displayNameProps, onOpenDetails, onSaveAlias }: CredentialAliasEditorProps) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [draftAlias, setDraftAlias] = useState(alias ?? '')
@@ -102,7 +103,20 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
   return (
     <span className={styles.credentialAliasEditor}>
       <span className={styles.credentialAliasDisplayLayout}>
-        <span {...displayNameProps} className={displayNameClassName}>{displayName}</span>
+        {onOpenDetails ? (
+          <button
+            {...displayNameProps}
+            type="button"
+            className={`${displayNameClassName} ${styles.credentialDetailNameButton}`.trim()}
+            data-credential-detail-trigger="true"
+            onClick={onOpenDetails}
+          >
+            <span className={styles.credentialDetailNameText}>{displayName}</span>
+            <span className={styles.credentialDetailNameArrow} aria-hidden="true">›</span>
+          </button>
+        ) : (
+          <span {...displayNameProps} className={displayNameClassName}>{displayName}</span>
+        )}
         <span className={styles.credentialAliasActionSlot}>
           {canEdit && (
             <button

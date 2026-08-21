@@ -91,6 +91,28 @@ describe('Credential section styles', () => {
     expect(authFileSectionSource).not.toContain('aiProviderCredentialRow')
   })
 
+  it('reveals a reserved detail arrow without underlining or repainting credential names', () => {
+    const detailNameButton = scssRule(credentialStyles, '.credentialDetailNameButton')
+    const detailNameText = scssRule(credentialStyles, '.credentialDetailNameText', 2)
+    const detailNameArrow = scssRule(credentialStyles, '.credentialDetailNameArrow', 2)
+    const reducedMotion = scssRule(credentialStyles, '@media (prefers-reduced-motion: reduce)')
+    expect(detailNameButton).toContain('&:hover')
+    expect(detailNameButton).toContain('color: var(--primary-color)')
+    expect(detailNameButton).toContain('.credentialDetailNameText')
+    expect(detailNameButton).toContain('transform: translateY(-1px)')
+    expect(detailNameButton).toContain('.credentialDetailNameArrow')
+    expect(detailNameButton).not.toContain('background: color-mix')
+    expect(detailNameButton).not.toContain('text-decoration: underline')
+    expect(detailNameText).toContain('display: inline-block')
+    expect(detailNameText).toContain('transform: translateY(0)')
+    expect(detailNameText).toContain('transition: transform 0.16s ease-out')
+    expect(detailNameArrow).toContain('flex: 0 0 10px')
+    expect(detailNameArrow).toContain('opacity: 0')
+    expect(detailNameArrow).toContain('transform: translateX(-2px)')
+    expect(detailNameArrow).toContain('transition: opacity 0.16s ease-out, transform 0.16s ease-out')
+    expect(reducedMotion).toContain('.credentialDetailNameText')
+  })
+
   it('passes explicit shared logo sizes and accessible row labels to every context', () => {
     const filterIconFrameStyles = cssBlock('.credentialProviderFilterIconFrame')
     const identityBlockStyles = cssBlock('.credentialIdentityBlock')

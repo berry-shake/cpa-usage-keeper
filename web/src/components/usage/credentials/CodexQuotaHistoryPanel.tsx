@@ -1,0 +1,526 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { ChartData, ChartOptions } from 'chart.js'
+import { Chart } from 'react-chartjs-2'
+import '@/lib/chartjs'
+import { ApiError, fetchCodexQuotaHistory, type FetchCodexQuotaHistoryOptions } from '@/lib/api'
+import type { CodexQuotaHistoryCycle, CodexQuotaHistoryResponse, CodexQuotaHistoryTransition, CodexQuotaHistoryWindow } from '@/lib/types'
+import { useThemeStore } from '@/stores'
+import { formatCompactNumber, formatUsd } from '@/utils/usage'
+import { buildUsageChartTooltipStyle, getUsageChartTheme, toUsageChartGradientFill, USAGE_CHART_REQUESTS_LINE_COLOR, type UsageChartGradientColor } from '@/utils/usage/chartConfig'
+import styles from './CodexQuotaHistoryPanel.module.scss'
+
+type QuotaEfficiencyChartType = 'bar' | 'line'
+type QuotaEfficiencyChartData = ChartData<QuotaEfficiencyChartType, Array<number | null>, string>
+type QuotaEfficiencyChartOptions = ChartOptions<QuotaEfficiencyChartType>
+
+interface QuotaEfficiencyPoint {
+  label: string
+  transition: CodexQuotaHistoryTransition
+}
+
+const QUOTA_EFFICIENCY_BAR_COLORS = {
+  direct: { base: '#2563eb', light: '#93c5fd' },
+  averaged: { base: '#d97706', light: '#fde68a' },
+} satisfies Record<'direct' | 'averaged', UsageChartGradientColor>
+
+interface CodexQuotaHistoryPanelProps {
+  authIndex: string
+  onAuthRequired?: () => void
+}
+
+export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuotaHistoryPanelProps) {
+  const { t, i18n } = useTranslation()
+  const resolvedTheme = useThemeStore((state) => state.resolvedTheme)
+  const [history, setHistory] = useState<CodexQuotaHistoryResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const controllerRef = useRef<AbortController | null>(null)
+  const lastRequestOptionsRef = useRef<FetchCodexQuotaHistoryOptions>({})
+
+  const loadHistory = useCallback(async (options: FetchCodexQuotaHistoryOptions = {}) => {
+    const normalizedAuthIndex = authIndex.trim()
+    if (!normalizedAuthIndex) return
+    // 失败重试必须复用用户刚选择的真实窗口，不能退回后端默认系列。
+    const requestOptions = { ...options }
+    lastRequestOptionsRef.current = requestOptions
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setLoading(true)
+    setError('')
+    try {
+      // 窗口切换重新查询选中系列，但响应仍带回全部窗口选项；Token/Cost 指标切换不重新请求。
+      const response = await fetchCodexQuotaHistory(normalizedAuthIndex, requestOptions, controller.signal)
+      if (controllerRef.current !== controller) return
+      setHistory(response)
+    } catch (loadError) {
+      if (controller.signal.aborted) return
+      if (loadError instanceof ApiError && loadError.status === 401) {
+        onAuthRequired?.()
+        return
+      }
+      setError(loadError instanceof Error ? loadError.message : t('usage_stats.credentials_quota_history_load_failed'))
+    } finally {
+      if (controllerRef.current === controller) {
+        controllerRef.current = null
+        setLoading(false)
+      }
+    }
+  }, [authIndex, onAuthRequired, t])
+
+  useEffect(() => {
+    lastRequestOptionsRef.current = {}
+    setHistory(null)
+    void loadHistory()
+    return () => {
+      controllerRef.current?.abort()
+      controllerRef.current = null
+    }
+  }, [loadHistory])
+
+  const locale = i18n?.resolvedLanguage || i18n?.language
+
+  return (
+    <div className={styles.panel} data-codex-quota-history-panel="true">
+      {history && history.windows.length > 1 ? (
+        <div className={styles.windowSwitcher} aria-label={t('usage_stats.credentials_quota_history_window_selector')}>
+          {history.windows.map((window) => {
+            const selected = sameQuotaWindow(window, history.selected_window)
+            return (
+              <button
+                key={`${window.window_role}:${window.window_seconds}`}
+                type="button"
+                className={styles.segmentButton}
+                aria-pressed={selected}
+                disabled={loading && selected}
+                onClick={() => void loadHistory({ windowRole: window.window_role, windowSeconds: window.window_seconds })}
+              >
+                {formatWindowLabel(window, t)}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className={styles.errorState} role="status">
+          <span>{error}</span>
+          <button type="button" onClick={() => void loadHistory(lastRequestOptionsRef.current)}>{t('common.retry')}</button>
+        </div>
+      ) : null}
+
+      {loading && !history ? (
+        <div className={styles.emptyState}>{t('common.loading')}</div>
+      ) : history ? (
+        <>
+          <CurrentCycleEfficiencyCard
+            cycle={history.current_cycle}
+            isDark={resolvedTheme === 'dark'}
+            locale={locale}
+          />
+          <CompletedCyclesList cycles={history.completed_cycles} locale={locale} />
+        </>
+      ) : !error ? (
+        <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_empty')}</div>
+      ) : null}
+    </div>
+  )
+}
+
+function CurrentCycleEfficiencyCard({
+  cycle,
+  isDark,
+  locale,
+}: {
+  cycle: CodexQuotaHistoryCycle | null
+  isDark: boolean
+  locale?: string
+}) {
+  const { t } = useTranslation()
+  const chart = useMemo(
+    () => buildEfficiencyChart(cycle?.transitions ?? [], isDark, t, locale),
+    [cycle?.transitions, isDark, locale, t],
+  )
+
+  return (
+    <section className={styles.card} data-codex-quota-current-cycle="true">
+      <header className={styles.cardHeader}>
+        <div>
+          <h3>{t('usage_stats.credentials_quota_history_current_title')}</h3>
+          <p>
+            {cycle
+              ? t('usage_stats.credentials_quota_history_observed_range', {
+                start: formatDateTime(cycle.first_observed_at, locale),
+                end: formatDateTime(cycle.last_observed_at, locale),
+              })
+              : t('usage_stats.credentials_quota_history_no_current')}
+            {cycle && chart.tokenMedian != null ? (
+              <span className={styles.medianSummary} data-codex-quota-median-summary="true">
+                {' · '}{t('usage_stats.credentials_quota_history_median')} · {formatCompactNumber(chart.tokenMedian)} Token/1%
+                {chart.costMedian != null ? ` · ${formatUsd(chart.costMedian)}/1%` : ''}
+              </span>
+            ) : null}
+          </p>
+        </div>
+        {cycle && chart.hasUnavailableCost ? (
+          <small className={styles.costHeaderHint} data-codex-quota-cost-warning="true">
+            {t('usage_stats.credentials_quota_history_cost_unavailable')}
+          </small>
+        ) : null}
+      </header>
+      {!cycle ? (
+        <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_current')}</div>
+      ) : cycle.transitions.length === 0 ? (
+        <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_transition')}</div>
+      ) : (
+        <>
+          <div className={styles.chartFrame} data-codex-quota-efficiency-chart="combined" aria-hidden="true">
+            <Chart type="bar" data={chart.data} options={chart.options} />
+          </div>
+          <CurrentCycleAccessibleSummary transitions={cycle.transitions} locale={locale} />
+          <div className={styles.chartLegend}>
+            <span><i className={styles.directDot} />{t('usage_stats.credentials_quota_history_direct')}</span>
+            <span><i className={styles.crossDot} />{t('usage_stats.credentials_quota_history_cross')}</span>
+            <span>
+              <i
+                className={styles.costLine}
+                data-codex-quota-cost-legend="true"
+                style={{ '--quota-cost-line-color': USAGE_CHART_REQUESTS_LINE_COLOR } as CSSProperties}
+              />
+              {t('usage_stats.credentials_quota_history_cost_per_point')}
+            </span>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+function CurrentCycleAccessibleSummary({
+  transitions,
+  locale,
+}: {
+  transitions: CodexQuotaHistoryTransition[]
+  locale?: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <ul
+      className={styles.screenReaderOnly}
+      data-codex-quota-current-cycle-summary="true"
+      aria-label={t('usage_stats.credentials_quota_history_current_title')}
+    >
+      {transitions.map((transition, index) => (
+        <li key={`${transition.interval_started_at}:${transition.to_remaining_percent}:${index}`}>
+          <span>{transition.from_remaining_percent}% → {transition.to_remaining_percent}%.</span>{' '}
+          <span>
+            {t('usage_stats.credentials_quota_history_interval')}: {formatDateTime(transition.interval_started_at, locale)} → {formatDateTime(transition.interval_ended_at, locale)}.
+          </span>{' '}
+          <span>
+            {transition.is_direct
+              ? t('usage_stats.credentials_quota_history_direct')
+              : t('usage_stats.credentials_quota_history_cross_points', { count: transition.percentage_points })}.
+          </span>{' '}
+          <span>{t('usage_stats.credentials_quota_history_tokens_per_point')}: {formatCompactNumber(transition.tokens_per_point)} Token/1%.</span>{' '}
+          <span>
+            {t('usage_stats.credentials_quota_history_cost_per_point')}: {transition.cost_per_point_available
+              ? `${formatUsd(transition.cost_per_point)}/1%`
+              : t('usage_stats.credentials_quota_history_cost_missing')}.
+          </span>{' '}
+          {!transition.is_direct ? (
+            <span>
+              {t('usage_stats.total_tokens')}: {formatCompactNumber(transition.usage.total_tokens)} Token.{' '}
+              {t('usage_stats.total_cost')}: {transition.usage.cost_available
+                ? formatUsd(transition.usage.total_cost_usd)
+                : t('usage_stats.credentials_quota_history_cost_missing')}.
+            </span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function CompletedCyclesList({ cycles, locale }: { cycles: CodexQuotaHistoryCycle[]; locale?: string }) {
+  const { t } = useTranslation()
+  return (
+    <section className={styles.historySection} data-codex-quota-completed-cycles="true">
+      <div className={styles.sectionHeading}>
+        <div>
+          <h3>{t('usage_stats.credentials_quota_history_completed_title')}</h3>
+          <p>{t('usage_stats.credentials_quota_history_completed_subtitle')}</p>
+        </div>
+        <span>{t('usage_stats.credentials_quota_history_cycle_count', { count: cycles.length })}</span>
+      </div>
+      {cycles.length === 0 ? (
+        <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_completed')}</div>
+      ) : (
+        <div className={styles.cycleList}>
+          {cycles.map((cycle) => <CompletedCycleCard key={cycle.id} cycle={cycle} locale={locale} />)}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CompletedCycleCard({ cycle, locale }: { cycle: CodexQuotaHistoryCycle; locale?: string }) {
+  const { t } = useTranslation()
+  return (
+    <article className={styles.cycleCard} data-codex-quota-cycle-id={cycle.id}>
+      <div className={`${styles.boundaryRow} ${styles.startBoundary}`.trim()}>
+        <span>{t('usage_stats.credentials_quota_history_cycle_start')}</span>
+        <strong>{formatDateTime(cycle.window_started_at, locale)}</strong>
+        <small>{t('usage_stats.credentials_quota_history_first_observed', { value: formatDateTime(cycle.first_observed_at, locale) })}</small>
+      </div>
+      <div className={styles.transitionHeader} aria-hidden="true">
+        <span>{t('usage_stats.credentials_quota_history_change')}</span>
+        <span>{t('usage_stats.credentials_quota_history_interval')}</span>
+        <span>{t('usage_stats.credentials_quota_history_usage')}</span>
+        <span>{t('usage_stats.credentials_quota_history_efficiency')}</span>
+      </div>
+      {cycle.transitions.length === 0 ? (
+        <div className={styles.noCycleTransitions}>{t('usage_stats.credentials_quota_history_no_transition')}</div>
+      ) : cycle.transitions.map((transition, index) => (
+        <TransitionRow key={`${transition.interval_started_at}:${transition.to_remaining_percent}:${index}`} transition={transition} locale={locale} />
+      ))}
+      <div className={`${styles.boundaryRow} ${styles.endBoundary}`.trim()}>
+        <span>{t('usage_stats.credentials_quota_history_cycle_end')}</span>
+        <strong>{formatDateTime(cycle.reset_at, locale)}</strong>
+        <small>
+          {t('usage_stats.credentials_quota_history_cycle_total', {
+            requests: formatCompactNumber(cycle.usage.requests),
+            tokens: formatCompactNumber(cycle.usage.total_tokens),
+            cost: cycle.usage.cost_available
+              ? formatUsd(cycle.usage.total_cost_usd)
+              : t('usage_stats.credentials_quota_history_cost_missing'),
+          })}
+        </small>
+      </div>
+    </article>
+  )
+}
+
+function TransitionRow({ transition, locale }: { transition: CodexQuotaHistoryTransition; locale?: string }) {
+  const { t } = useTranslation()
+  return (
+    <div className={styles.transitionRow} data-codex-quota-transition={transition.is_direct ? 'direct' : 'cross'}>
+      <div className={styles.changeCell}>
+        <strong>{transition.from_remaining_percent}% → {transition.to_remaining_percent}%</strong>
+        <span className={transition.is_direct ? styles.directBadge : styles.crossBadge}>
+          {transition.is_direct
+            ? t('usage_stats.credentials_quota_history_direct')
+            : t('usage_stats.credentials_quota_history_cross_points', { count: transition.percentage_points })}
+        </span>
+      </div>
+      <div className={styles.intervalCell}>
+        <span>{formatDateTime(transition.interval_started_at, locale)}</span>
+        <span>→ {formatDateTime(transition.interval_ended_at, locale)}</span>
+      </div>
+      <div className={styles.valueCell}>
+        <strong>{formatCompactNumber(transition.usage.total_tokens)} Token</strong>
+        <span>{transition.usage.cost_available ? formatUsd(transition.usage.total_cost_usd) : t('usage_stats.credentials_quota_history_cost_missing')}</span>
+      </div>
+      <div className={styles.valueCell}>
+        <strong>{formatCompactNumber(transition.tokens_per_point)} Token/1%</strong>
+        <span>{transition.cost_per_point_available ? `${formatUsd(transition.cost_per_point)}/1%` : t('usage_stats.credentials_quota_history_cost_missing')}</span>
+      </div>
+    </div>
+  )
+}
+
+function buildEfficiencyChart(
+  transitions: CodexQuotaHistoryTransition[],
+  isDark: boolean,
+  t: (key: string) => string,
+  locale?: string,
+): {
+  data: QuotaEfficiencyChartData
+  options: QuotaEfficiencyChartOptions
+  tokenMedian: number | null
+  costMedian: number | null
+  hasUnavailableCost: boolean
+} {
+  const points = expandEfficiencyPoints(transitions)
+  const tokenValues = points.map(({ transition }) => transition.tokens_per_point)
+  const costValues = points.map(({ transition }) => transition.cost_per_point_available ? transition.cost_per_point : null)
+  const availableCostValues = costValues.filter((value): value is number => value != null && Number.isFinite(value))
+  const hasUnavailableCost = transitions.some((transition) => !transition.cost_per_point_available)
+  const chartTheme = getUsageChartTheme(isDark)
+  const text = chartTheme.textPrimary
+  const muted = chartTheme.textSecondary
+  const grid = chartTheme.grid
+  return {
+    data: {
+      labels: points.map((point) => point.label),
+      datasets: [
+        {
+          type: 'bar',
+          label: t('usage_stats.credentials_quota_history_tokens_per_point'),
+          data: tokenValues,
+          yAxisID: 'tokens',
+          backgroundColor: (context) => {
+            const transition = points[context.dataIndex]?.transition
+            const color = transition?.is_direct ? QUOTA_EFFICIENCY_BAR_COLORS.direct : QUOTA_EFFICIENCY_BAR_COLORS.averaged
+            return toUsageChartGradientFill(context, color)
+          },
+          borderColor: points.map(({ transition }) => transition.is_direct
+            ? QUOTA_EFFICIENCY_BAR_COLORS.direct.base
+            : QUOTA_EFFICIENCY_BAR_COLORS.averaged.base),
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: t('usage_stats.credentials_quota_history_cost_per_point'),
+          data: costValues,
+          yAxisID: 'cost',
+          borderColor: USAGE_CHART_REQUESTS_LINE_COLOR,
+          backgroundColor: USAGE_CHART_REQUESTS_LINE_COLOR,
+          pointBackgroundColor: USAGE_CHART_REQUESTS_LINE_COLOR,
+          pointBorderColor: isDark ? '#111827' : '#ffffff',
+          pointBorderWidth: 2,
+          // 连续折线不画圆点；只有无法形成线段的单点才保留可见标记。
+          pointRadius: (context) => isIsolatedCostPoint(costValues, context.dataIndex) ? 3 : 0,
+          pointHoverRadius: 5,
+          borderWidth: 2,
+          borderDash: [6, 4],
+          tension: 0.24,
+          spanGaps: false,
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...buildUsageChartTooltipStyle(chartTheme),
+          displayColors: false,
+          callbacks: {
+            label: (context) => {
+              if (context.datasetIndex !== 0) return []
+              const point = points[context.dataIndex]
+              if (!point) return []
+              return [
+                `${t('usage_stats.credentials_quota_history_tokens_per_point')}: ${formatCompactNumber(point.transition.tokens_per_point)}`,
+                `${t('usage_stats.credentials_quota_history_cost_per_point')}: ${point.transition.cost_per_point_available
+                  ? formatUsd(point.transition.cost_per_point)
+                  : t('usage_stats.credentials_quota_history_cost_missing')}`,
+              ]
+            },
+            afterBody: (items) => {
+              const point = points[items[0]?.dataIndex]
+              if (!point) return []
+              const interval = `${t('usage_stats.credentials_quota_history_interval')}: ${formatDateTime(point.transition.interval_started_at, locale)} → ${formatDateTime(point.transition.interval_ended_at, locale)}`
+              // Direct 与跨百分点样本统一显示真实观察时间；跨百分点再补充整段变化和总用量。
+              if (point.transition.is_direct) return [interval]
+              return [
+                `${t('usage_stats.credentials_quota_history_change')}: ${point.transition.from_remaining_percent}% → ${point.transition.to_remaining_percent}%`,
+                interval,
+                `${t('usage_stats.total_tokens')}: ${formatCompactNumber(point.transition.usage.total_tokens)} Token`,
+                `${t('usage_stats.total_cost')}: ${point.transition.usage.cost_available
+                  ? formatUsd(point.transition.usage.total_cost_usd)
+                  : t('usage_stats.credentials_quota_history_cost_missing')}`,
+              ]
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: muted, font: { size: 10 }, autoSkip: true, maxTicksLimit: 8, maxRotation: 0, minRotation: 0 },
+          grid: { display: false },
+          border: { color: grid },
+        },
+        tokens: {
+          position: 'left',
+          beginAtZero: true,
+          ticks: { color: muted, font: { size: 10 }, maxTicksLimit: 5, callback: (value) => formatCompactNumber(Number(value)) },
+          grid: { color: grid },
+          border: { display: false },
+          title: { display: true, color: text, text: 'Token/1%' },
+        },
+        cost: {
+          position: 'right',
+          beginAtZero: true,
+          ticks: { color: muted, font: { size: 10 }, maxTicksLimit: 5, callback: (value) => formatUsd(Number(value)) },
+          grid: { drawOnChartArea: false },
+          border: { display: false },
+          title: { display: true, color: text, text: 'USD/1%' },
+        },
+      },
+    },
+    tokenMedian: calculateMedian(tokenValues),
+    costMedian: hasUnavailableCost ? null : calculateMedian(availableCostValues),
+    hasUnavailableCost,
+  }
+}
+
+function isIsolatedCostPoint(values: Array<number | null>, index: number): boolean {
+  if (values[index] == null) return false
+  const hasPrevious = index > 0 && values[index - 1] != null
+  const hasNext = index < values.length - 1 && values[index + 1] != null
+  return !hasPrevious && !hasNext
+}
+
+function expandEfficiencyPoints(transitions: CodexQuotaHistoryTransition[]): QuotaEfficiencyPoint[] {
+  // 跨百分点样本只有整个观察区间的用量，因此拆分后的每个 1% 共用同一份区间平均值。
+  return transitions.flatMap((transition) => Array.from({ length: transition.percentage_points }, (_, offset) => {
+    const from = transition.from_remaining_percent - offset
+    return {
+      label: `${from}% → ${from - 1}%`,
+      transition,
+    }
+  }))
+}
+
+function calculateMedian(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((left, right) => left - right)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+}
+
+function sameQuotaWindow(left: CodexQuotaHistoryWindow, right: CodexQuotaHistoryWindow | null): boolean {
+  return right != null && left.window_role === right.window_role && left.window_seconds === right.window_seconds
+}
+
+function formatWindowLabel(window: CodexQuotaHistoryWindow, t: (key: string) => string): string {
+  const role = t(`usage_stats.credentials_quota_history_role_${window.window_role}`)
+  const kind = window.window_kind ? t(`usage_stats.credentials_quota_history_window_${window.window_kind}`) : formatWindowDuration(window.window_seconds)
+  return `${role} · ${kind}`
+}
+
+function formatWindowDuration(seconds: number): string {
+  if (seconds % 86400 === 0) return `${seconds / 86400}d`
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`
+  return `${seconds}s`
+}
+
+function formatDateTime(value: string, locale?: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value || '—'
+  // API 时间已经使用项目 TZ；把原墙上时间映射到 UTC 仅供 Intl 本地化排版，避免浏览器再次换区。
+  const offsetTime = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i)
+  const displayDate = offsetTime
+    ? new Date(Date.UTC(
+      Number(offsetTime[1]),
+      Number(offsetTime[2]) - 1,
+      Number(offsetTime[3]),
+      Number(offsetTime[4]),
+      Number(offsetTime[5]),
+      Number(offsetTime[6]),
+    ))
+    : date
+  return new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(offsetTime ? { timeZone: 'UTC' } : {}),
+  }).format(displayDate)
+}

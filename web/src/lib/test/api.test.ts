@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -444,6 +444,27 @@ describe('fetchUsageEvents', () => {
     expect(parsed.searchParams.get('page')).toBeNull();
   });
 
+  it('loads latest credential events without a fixed range and includes the identity type', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ events: [], total_count: 0, page: 1, page_size: 50, total_pages: 0, has_more: false }),
+    } as Response);
+
+    await fetchUsageEvents(undefined, undefined, {
+      pageSize: 50,
+      cursorMode: true,
+      source: 'shared-auth',
+      authType: 2,
+    });
+
+    const parsed = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost');
+    expect(parsed.searchParams.get('range')).toBeNull();
+    expect(parsed.searchParams.get('source')).toBe('shared-auth');
+    expect(parsed.searchParams.get('auth_type')).toBe('2');
+    expect(parsed.searchParams.get('cursor_mode')).toBe('true');
+  });
+
   it('exports usage events with filters but without pagination params', async () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const blob = new Blob(['id,timestamp\n']);
@@ -786,6 +807,24 @@ describe('fetchUsageEvents', () => {
     expect(init).toMatchObject({ credentials: 'include', method: 'POST', signal });
     expect(headerValue(init, 'Content-Type')).toBe('application/json');
     expect(init?.body).toBe(JSON.stringify({ auth_indexes: ['auth-1'] }));
+  });
+
+  it('loads one encoded Codex quota history window series', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ generated_at: '2026-08-21T12:00:00Z', range_start: '2026-07-22T12:00:00Z', windows: [], selected_window: null, current_cycle: null, completed_cycles: [] }),
+    } as Response);
+    const signal = new AbortController().signal;
+
+    await fetchCodexQuotaHistory('codex/auth + user', { windowRole: 'primary', windowSeconds: 604800 }, signal);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+    expect(parsed.pathname).toBe('/api/v1/quota/history/codex%2Fauth%20%2B%20user');
+    expect(parsed.searchParams.get('window_role')).toBe('primary');
+    expect(parsed.searchParams.get('window_seconds')).toBe('604800');
+    expect(init).toMatchObject({ credentials: 'include', signal });
   });
 
   it('creates quota refresh tasks for current page auth indexes', async () => {

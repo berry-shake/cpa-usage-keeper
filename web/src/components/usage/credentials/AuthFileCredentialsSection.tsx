@@ -109,12 +109,13 @@ interface AuthFileCredentialsSectionProps {
   onResetQuotaForAuthIndex: (authIndex: string) => Promise<void>
   aliasSavingId?: string
   onSaveAlias?: (id: string, alias: string) => Promise<void>
+  onOpenDetails?: (row: AuthFileCredentialRow) => void
   onRefreshInspectionStatus: () => Promise<void>
   onStartInspection: () => Promise<void>
   onAfterInvalidAccountAction?: () => Promise<void>
 }
 
-export function AuthFileCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, quotaRefreshing, quotaRefreshError, quotaInspectionStatus, quotaInspectionLoading, quotaInspectionStarting, quotaInspectionError, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange, onRefreshQuota, onRefreshQuotaForAuthIndex, onResetQuotaForAuthIndex, aliasSavingId, onSaveAlias, onRefreshInspectionStatus, onStartInspection, onAfterInvalidAccountAction }: AuthFileCredentialsSectionProps) {
+export function AuthFileCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, quotaRefreshing, quotaRefreshError, quotaInspectionStatus, quotaInspectionLoading, quotaInspectionStarting, quotaInspectionError, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange, onRefreshQuota, onRefreshQuotaForAuthIndex, onResetQuotaForAuthIndex, aliasSavingId, onSaveAlias, onOpenDetails, onRefreshInspectionStatus, onStartInspection, onAfterInvalidAccountAction }: AuthFileCredentialsSectionProps) {
   const { t } = useTranslation()
   const [inspectionOpen, setInspectionOpen] = useState(false)
   const [quotaUsageMode, setQuotaUsageMode] = useState<QuotaUsageMode>('current')
@@ -273,16 +274,16 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
           tabIndex: fileName ? 0 : undefined,
           'aria-label': fileName ? `${row.displayName}; ${fileName}` : undefined,
           onMouseEnter: fileName
-            ? (event: React.MouseEvent<HTMLSpanElement>) => showFilenameTooltipOnMouseEnter([fileName], event.currentTarget)
+            ? (event: React.MouseEvent<HTMLElement>) => showFilenameTooltipOnMouseEnter([fileName], event.currentTarget)
             : undefined,
           onMouseLeave: fileName
-            ? (event: React.MouseEvent<HTMLSpanElement>) => hideFilenameTooltipOnMouseLeave(event.currentTarget)
+            ? (event: React.MouseEvent<HTMLElement>) => hideFilenameTooltipOnMouseLeave(event.currentTarget)
             : undefined,
           onFocus: fileName
-            ? (event: React.FocusEvent<HTMLSpanElement>) => showFilenameTooltipOnFocus([fileName], event.currentTarget)
+            ? (event: React.FocusEvent<HTMLElement>) => showFilenameTooltipOnFocus([fileName], event.currentTarget)
             : undefined,
           onBlur: fileName
-            ? (event: React.FocusEvent<HTMLSpanElement>) => hideFilenameTooltipOnBlur(event.currentTarget)
+            ? (event: React.FocusEvent<HTMLElement>) => hideFilenameTooltipOnBlur(event.currentTarget)
             : undefined,
         }
         return (
@@ -297,8 +298,20 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
                 saving={aliasSavingId === row.identity.id}
                 disabled={isCredentialAliasEditorDisabled(row.identity.id, row.identity.is_deleted, aliasSavingId)}
                 displayNameProps={filenameTooltipTargetProps}
+                onOpenDetails={onOpenDetails ? () => onOpenDetails(row) : undefined}
                 onSaveAlias={onSaveAlias}
               />
+            ) : onOpenDetails ? (
+              <button
+                {...filenameTooltipTargetProps}
+                type="button"
+                className={`${filenameTooltipTargetProps.className} ${styles.credentialDetailNameButton}`.trim()}
+                data-credential-detail-trigger="true"
+                onClick={() => onOpenDetails(row)}
+              >
+                <span className={styles.credentialDetailNameText}>{row.displayName}</span>
+                <span className={styles.credentialDetailNameArrow} aria-hidden="true">›</span>
+              </button>
             ) : <span {...filenameTooltipTargetProps}>{row.displayName}</span>}
             subtitle={row.subscriptionBadge || row.remainingDaysLabel || row.priorityLabel ? (
               <span className={styles.credentialIdentityBadges}>

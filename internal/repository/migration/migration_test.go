@@ -79,6 +79,10 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260731_local_ranking_stats",
 		"20260803_add_cpa_api_key_local_ranking_avatar",
 		"20260813_add_auth_session_client_metadata",
+		// Errors 表已经随 main 发布，合并后的完整序列必须先保留该版本。
+		"20260820_create_error_events",
+		// Codex 主额度历史是当前最新 schema，必须在既有迁移之后创建父子表。
+		"20260820_codex_quota_history",
 	}
 	assertStringSlicesEqual(t, want, got)
 }
