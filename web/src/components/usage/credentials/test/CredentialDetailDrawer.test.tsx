@@ -137,8 +137,7 @@ const quotaHistoryResponse = {
     has_current_cycle: true,
     last_observed_at: '2026-08-21T11:50:00Z',
   },
-  current_cycle: null,
-  completed_cycles: [],
+  cycles: [],
 }
 
 const response = (id: string, cursor?: string) => ({
@@ -278,6 +277,57 @@ describe('CredentialDetailDrawer', () => {
       await Promise.resolve()
     })
     expect(document.activeElement).toBe(requestsTab)
+  })
+
+  it('uses the credential list tones for Overview metrics', async () => {
+    await act(async () => {
+      root.render(
+        <CredentialDetailDrawer
+          open
+          selection={selection}
+          onClose={() => undefined}
+        />,
+      )
+      await Promise.resolve()
+    })
+
+    const overviewMetrics = [...document.body.querySelectorAll<HTMLElement>('[class*="summaryMetric"]')]
+    const tonedMetrics = overviewMetrics.filter((metric) => metric.hasAttribute('data-credential-detail-metric-tone'))
+    const tones = tonedMetrics.map((metric) => metric.dataset.credentialDetailMetricTone)
+
+    expect(overviewMetrics).toHaveLength(4)
+    expect(overviewMetrics.map((metric) => metric.querySelector('strong')?.className)).toEqual([
+      expect.stringContaining('credentialMetricValueNeutral'),
+      expect.stringContaining('credentialMetricValueWarning'),
+      expect.stringContaining('credentialMetricValueNeutral'),
+      expect.stringContaining('credentialMetricValueNeutral'),
+    ])
+    expect(tones).toEqual(['warning', 'neutral'])
+    expect(document.body.querySelector('small [class*="credentialMetricValueSuccess"]')?.textContent).toBe('usage_stats.success 9')
+    expect(document.body.querySelector('small [class*="credentialMetricValueDanger"]')?.textContent).toBe('usage_stats.failure 1')
+  })
+
+  it.each([
+    { label: 'success boundaries', successRate: 95, cacheReadRate: 50, expectedTones: ['success', 'success'] },
+    { label: 'warning boundaries', successRate: 80, cacheReadRate: 20, expectedTones: ['warning', 'warning'] },
+    { label: 'below warning boundaries', successRate: 79.99, cacheReadRate: 19.99, expectedTones: ['danger', 'neutral'] },
+    { label: 'missing rates', successRate: null, cacheReadRate: null, expectedTones: ['neutral', 'neutral'] },
+  ])('uses the shared list thresholds for $label', async ({ successRate, cacheReadRate, expectedTones }) => {
+    await act(async () => {
+      root.render(
+        <CredentialDetailDrawer
+          open
+          selection={{ kind: 'ai-provider', row: { ...row, successRate, cacheReadRate } }}
+          onClose={() => undefined}
+        />,
+      )
+      await Promise.resolve()
+    })
+
+    const tones = [...document.body.querySelectorAll<HTMLElement>('[data-credential-detail-metric-tone]')]
+      .map((metric) => metric.dataset.credentialDetailMetricTone)
+
+    expect(tones).toEqual(expectedTones)
   })
 
   it('loads the dedicated latest-event list lazily and appends the next cursor page on scroll', async () => {

@@ -41,7 +41,7 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
   const loadHistory = useCallback(async (options: FetchCodexQuotaHistoryOptions = {}) => {
     const normalizedAuthIndex = authIndex.trim()
     if (!normalizedAuthIndex) return
-    // 失败重试必须复用用户刚选择的真实窗口，不能退回后端默认系列。
+    // 失败重试必须复用用户刚选择的上游角色，不能退回后端默认窗口。
     const requestOptions = { ...options }
     lastRequestOptionsRef.current = requestOptions
     controllerRef.current?.abort()
@@ -50,7 +50,7 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
     setLoading(true)
     setError('')
     try {
-      // 窗口切换重新查询选中系列，但响应仍带回全部窗口选项；Token/Cost 指标切换不重新请求。
+      // 窗口切换重新查询选中角色，但响应仍带回全部窗口选项；Token/Cost 指标切换不重新请求。
       const response = await fetchCodexQuotaHistory(normalizedAuthIndex, requestOptions, controller.signal)
       if (controllerRef.current !== controller) return
       setHistory(response)
@@ -80,6 +80,8 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
   }, [loadHistory])
 
   const locale = i18n?.resolvedLanguage || i18n?.language
+  // 当前周期身份完全由后端 status 决定；前端不使用浏览器时间重算周期状态。
+  const currentCycle = history?.cycles.find((cycle) => cycle.status === 'current') ?? null
 
   return (
     <div className={styles.panel} data-codex-quota-history-panel="true">
@@ -89,12 +91,12 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
             const selected = sameQuotaWindow(window, history.selected_window)
             return (
               <button
-                key={`${window.window_role}:${window.window_seconds}`}
+                key={window.window_role}
                 type="button"
                 className={styles.segmentButton}
                 aria-pressed={selected}
                 disabled={loading && selected}
-                onClick={() => void loadHistory({ windowRole: window.window_role, windowSeconds: window.window_seconds })}
+                onClick={() => void loadHistory({ windowRole: window.window_role })}
               >
                 {formatWindowLabel(window, t)}
               </button>
@@ -115,11 +117,11 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
       ) : history ? (
         <>
           <CurrentCycleEfficiencyCard
-            cycle={history.current_cycle}
+            cycle={currentCycle}
             isDark={resolvedTheme === 'dark'}
             locale={locale}
           />
-          <CompletedCyclesList cycles={history.completed_cycles} locale={locale} />
+          <CyclesList cycles={history.cycles} locale={locale} />
         </>
       ) : !error ? (
         <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_empty')}</div>
@@ -242,36 +244,55 @@ function CurrentCycleAccessibleSummary({
   )
 }
 
-function CompletedCyclesList({ cycles, locale }: { cycles: CodexQuotaHistoryCycle[]; locale?: string }) {
+function CyclesList({ cycles, locale }: { cycles: CodexQuotaHistoryCycle[]; locale?: string }) {
   const { t } = useTranslation()
   return (
-    <section className={styles.historySection} data-codex-quota-completed-cycles="true">
+    <section className={styles.historySection} data-codex-quota-cycles="true">
       <div className={styles.sectionHeading}>
         <div>
-          <h3>{t('usage_stats.credentials_quota_history_completed_title')}</h3>
-          <p>{t('usage_stats.credentials_quota_history_completed_subtitle')}</p>
+          <h3>{t('usage_stats.credentials_quota_history_records_title')}</h3>
+          <p>{t('usage_stats.credentials_quota_history_records_subtitle')}</p>
         </div>
         <span>{t('usage_stats.credentials_quota_history_cycle_count', { count: cycles.length })}</span>
       </div>
       {cycles.length === 0 ? (
-        <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_completed')}</div>
+        <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_records')}</div>
       ) : (
         <div className={styles.cycleList}>
-          {cycles.map((cycle) => <CompletedCycleCard key={cycle.id} cycle={cycle} locale={locale} />)}
+          {cycles.map((cycle) => <CycleCard key={cycle.id} cycle={cycle} locale={locale} />)}
         </div>
       )}
     </section>
   )
 }
 
-function CompletedCycleCard({ cycle, locale }: { cycle: CodexQuotaHistoryCycle; locale?: string }) {
+function CycleCard({ cycle, locale }: { cycle: CodexQuotaHistoryCycle; locale?: string }) {
   const { t } = useTranslation()
+  const statusLabel = cycle.status === 'current'
+    ? t('usage_stats.credentials_quota_history_status_current')
+    : t('usage_stats.credentials_quota_history_status_completed')
   return (
-    <article className={styles.cycleCard} data-codex-quota-cycle-id={cycle.id}>
+    <article
+      className={styles.cycleCard}
+      data-codex-quota-cycle-id={cycle.id}
+      data-codex-quota-cycle-status={cycle.status}
+    >
       <div className={`${styles.boundaryRow} ${styles.startBoundary}`.trim()}>
         <span>{t('usage_stats.credentials_quota_history_cycle_start')}</span>
-        <strong>{formatDateTime(cycle.window_started_at, locale)}</strong>
-        <small>{t('usage_stats.credentials_quota_history_first_observed', { value: formatDateTime(cycle.first_observed_at, locale) })}</small>
+        <strong>
+          {formatDateTime(cycle.effective_started_at, locale)}
+          <i className={cycle.status === 'current' ? styles.currentStatus : styles.completedStatus}>{statusLabel}</i>
+        </strong>
+        <small>
+          {formatCycleWindowLabel(cycle.window_seconds, t)}
+          {' · '}
+          {t('usage_stats.credentials_quota_history_first_observed', { value: formatDateTime(cycle.first_observed_at, locale) })}
+          {' · '}
+          {t('usage_stats.credentials_quota_history_percent_summary', {
+            percent: cycle.last_remaining_percent ?? '—',
+            count: cycle.observation_count,
+          })}
+        </small>
       </div>
       <div className={styles.transitionHeader} aria-hidden="true">
         <span>{t('usage_stats.credentials_quota_history_change')}</span>
@@ -285,8 +306,10 @@ function CompletedCycleCard({ cycle, locale }: { cycle: CodexQuotaHistoryCycle; 
         <TransitionRow key={`${transition.interval_started_at}:${transition.to_remaining_percent}:${index}`} transition={transition} locale={locale} />
       ))}
       <div className={`${styles.boundaryRow} ${styles.endBoundary}`.trim()}>
-        <span>{t('usage_stats.credentials_quota_history_cycle_end')}</span>
-        <strong>{formatDateTime(cycle.reset_at, locale)}</strong>
+        <span>{t(cycle.status === 'current'
+          ? 'usage_stats.credentials_quota_history_cycle_expected_reset'
+          : 'usage_stats.credentials_quota_history_cycle_end')}</span>
+        <strong>{formatDateTime(cycle.status === 'current' ? cycle.reset_at : cycle.effective_ended_at, locale)}</strong>
         <small>
           {t('usage_stats.credentials_quota_history_cycle_total', {
             requests: formatCompactNumber(cycle.usage.requests),
@@ -486,13 +509,25 @@ function calculateMedian(values: number[]): number | null {
 }
 
 function sameQuotaWindow(left: CodexQuotaHistoryWindow, right: CodexQuotaHistoryWindow | null): boolean {
-  return right != null && left.window_role === right.window_role && left.window_seconds === right.window_seconds
+  return right != null && left.window_role === right.window_role
 }
 
 function formatWindowLabel(window: CodexQuotaHistoryWindow, t: (key: string) => string): string {
-  const role = t(`usage_stats.credentials_quota_history_role_${window.window_role}`)
-  const kind = window.window_kind ? t(`usage_stats.credentials_quota_history_window_${window.window_kind}`) : formatWindowDuration(window.window_seconds)
-  return `${role} · ${kind}`
+  return window.window_kind ? t(`usage_stats.credentials_quota_history_window_${window.window_kind}`) : formatWindowDuration(window.window_seconds)
+}
+
+function formatCycleWindowLabel(seconds: number, t: (key: string) => string): string {
+  switch (seconds) {
+    case 5 * 60 * 60:
+      return t('usage_stats.credentials_quota_history_window_five_hour')
+    case 7 * 24 * 60 * 60:
+      return t('usage_stats.credentials_quota_history_window_weekly')
+    case 30 * 24 * 60 * 60:
+    case 365 * 24 * 60 * 60 / 12:
+      return t('usage_stats.credentials_quota_history_window_monthly')
+    default:
+      return formatWindowDuration(seconds)
+  }
 }
 
 function formatWindowDuration(seconds: number): string {

@@ -16,14 +16,12 @@ import (
 
 const codexQuotaHistoryRange = 30 * 24 * time.Hour
 
-// CodexQuotaHistoryRequest 选择一个 Codex Auth File 及可选的真实主额度窗口系列。
+// CodexQuotaHistoryRequest 选择一个 Codex Auth File 及可选的上游主额度角色。
 type CodexQuotaHistoryRequest struct {
 	// AuthIndex 来自详情抽屉当前 Auth File，不接受 AI Provider 身份。
 	AuthIndex string `json:"-"`
-	// WindowRole 可选地选择 primary 或 secondary；nil 表示自动选择当前系列。
+	// WindowRole 可选地选择 primary 或 secondary；nil 表示自动选择当前角色。
 	WindowRole *string `json:"-"`
-	// WindowSeconds 可选地选择上游真实窗口秒数；必须是正整数。
-	WindowSeconds *int64 `json:"-"`
 	// Now 仅供测试固定本次响应截点；生产请求保持零值并使用 time.Now。
 	Now time.Time `json:"-"`
 }
@@ -34,23 +32,21 @@ type CodexQuotaHistoryResponse struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	// RangeStart 明确已结束周期只回溯最近三十天。
 	RangeStart time.Time `json:"range_start"`
-	// Windows 是当前账号可选的真实 Primary/Secondary 窗口系列。
+	// Windows 只列最近一次账号响应存在的角色，每个角色最多一项且标题取其最新周期。
 	Windows []CodexQuotaHistoryWindow `json:"windows"`
 	// SelectedWindow 是本响应实际展示的单个窗口；无历史时为 nil。
 	SelectedWindow *CodexQuotaHistoryWindow `json:"selected_window"`
-	// CurrentCycle 是当前周期效率图的数据源；没有当前周期时为 nil。
-	CurrentCycle *CodexQuotaHistoryCycle `json:"current_cycle"`
-	// CompletedCycles 是最近三十天已结束周期的分组列表数据源。
-	CompletedCycles []CodexQuotaHistoryCycle `json:"completed_cycles"`
+	// Cycles 包含当前及已结束周期；当前周期由后端标记并排在第一位。
+	Cycles []CodexQuotaHistoryCycle `json:"cycles"`
 }
 
-// CodexQuotaHistoryWindow 以角色与真实秒数表达窗口，不把周期变化限制在固定枚举。
+// CodexQuotaHistoryWindow 以角色稳定表达窗口，并携带该角色最新的周期标题。
 type CodexQuotaHistoryWindow struct {
 	// WindowRole 是 primary 或 secondary。
 	WindowRole string `json:"window_role"`
 	// WindowKind 是 five_hour/weekly/monthly 友好分类；未知窗口省略。
 	WindowKind *string `json:"window_kind,omitempty"`
-	// WindowSeconds 是上游提供并参与真实系列身份的窗口长度。
+	// WindowSeconds 是该角色最近观察到的窗口长度，只用于前端周期标题。
 	WindowSeconds int64 `json:"window_seconds"`
 	// HasCurrentCycle 告诉前端优先选择哪个系列。
 	HasCurrentCycle bool `json:"has_current_cycle"`
@@ -62,14 +58,27 @@ type CodexQuotaHistoryWindow struct {
 type CodexQuotaHistoryCycle struct {
 	// ID 是父周期稳定 ID，前端可用于 React 分组 key。
 	ID int64 `json:"id"`
+	// Status 由后端按同一个 GeneratedAt 判定，前端只负责展示。
+	Status string `json:"status"`
+	// WindowSeconds 是这条历史周期自身的真实长度，不跟随角色最新周期变化。
+	WindowSeconds int64 `json:"window_seconds"`
 	// WindowStartedAt 是真实周期开始，不等于 Keeper 首次观察时间。
 	WindowStartedAt time.Time `json:"window_started_at"`
 	// ResetAt 是真实周期结束半开边界。
 	ResetAt time.Time `json:"reset_at"`
+	// EffectiveStartedAt 是角色在本周期实际生效的统计起点。
+	EffectiveStartedAt time.Time `json:"effective_started_at"`
+	// EffectiveEndedAt 是角色在本周期实际结束的统计终点。
+	EffectiveEndedAt time.Time `json:"effective_ended_at"`
 	// FirstObservedAt 标记 Keeper 何时首次获取该周期数据。
 	FirstObservedAt time.Time `json:"first_observed_at"`
 	// LastObservedAt 标记 Keeper 最近一次获取该周期数据。
 	LastObservedAt time.Time `json:"last_observed_at"`
+	// FirstRemainingPercent 与 LastRemainingPercent 让单份基线也能出现在周期记录中。
+	FirstRemainingPercent *int `json:"first_remaining_percent"`
+	LastRemainingPercent  *int `json:"last_remaining_percent"`
+	// ObservationCount 是周期内所有百分比段的累计采样次数。
+	ObservationCount int64 `json:"observation_count"`
 	// Usage 包含稳定段在内的整个周期 UsageEvent 动态回溯总量。
 	Usage CodexQuotaHistoryUsage `json:"usage"`
 	// Transitions 只列真实相邻剩余百分比变化，不补造跨档中间点。
@@ -146,10 +155,6 @@ func (s *Service) GetCodexQuotaHistory(ctx context.Context, request CodexQuotaHi
 		}
 		request.WindowRole = &role
 	}
-	if request.WindowSeconds != nil && *request.WindowSeconds <= 0 {
-		return response, fmt.Errorf("%w: window_seconds must be positive", ErrValidation)
-	}
-
 	// 先确认当前仍是活跃 Auth File，删除身份和 AI Provider 都不能借 auth_index 查询历史。
 	identity, err := repository.GetActiveAuthFileUsageIdentityByAuthIndex(ctx, s.db, request.AuthIndex)
 	if err != nil {
@@ -168,11 +173,10 @@ func (s *Service) GetCodexQuotaHistory(ctx context.Context, request CodexQuotaHi
 		now = time.Now()
 	}
 	history, err := repository.BuildCodexQuotaEfficiencyHistory(ctx, s.db, repositorydto.CodexQuotaEfficiencyQuery{
-		AuthIndex:     request.AuthIndex,
-		Now:           now,
-		RangeStart:    now.Add(-codexQuotaHistoryRange),
-		WindowRole:    request.WindowRole,
-		WindowSeconds: request.WindowSeconds,
+		AuthIndex:  request.AuthIndex,
+		Now:        now,
+		RangeStart: now.Add(-codexQuotaHistoryRange),
+		WindowRole: request.WindowRole,
 	}, s.pricing.NewResolver())
 	if err != nil {
 		return response, fmt.Errorf("get codex quota history: %w", err)
@@ -182,10 +186,10 @@ func (s *Service) GetCodexQuotaHistory(ctx context.Context, request CodexQuotaHi
 
 func codexQuotaHistoryResponseFromRepository(history repositorydto.CodexQuotaEfficiencyHistory) CodexQuotaHistoryResponse {
 	response := CodexQuotaHistoryResponse{
-		GeneratedAt:     history.GeneratedAt,
-		RangeStart:      history.RangeStart,
-		Windows:         make([]CodexQuotaHistoryWindow, 0, len(history.Windows)),
-		CompletedCycles: make([]CodexQuotaHistoryCycle, 0, len(history.CompletedCycles)),
+		GeneratedAt: history.GeneratedAt,
+		RangeStart:  history.RangeStart,
+		Windows:     make([]CodexQuotaHistoryWindow, 0, len(history.Windows)),
+		Cycles:      make([]CodexQuotaHistoryCycle, 0, len(history.Cycles)),
 	}
 	for _, window := range history.Windows {
 		response.Windows = append(response.Windows, codexQuotaHistoryWindowFromRepository(window))
@@ -194,12 +198,8 @@ func codexQuotaHistoryResponseFromRepository(history repositorydto.CodexQuotaEff
 		window := codexQuotaHistoryWindowFromRepository(*history.SelectedWindow)
 		response.SelectedWindow = &window
 	}
-	if history.CurrentCycle != nil {
-		cycle := codexQuotaHistoryCycleFromRepository(*history.CurrentCycle)
-		response.CurrentCycle = &cycle
-	}
-	for _, cycle := range history.CompletedCycles {
-		response.CompletedCycles = append(response.CompletedCycles, codexQuotaHistoryCycleFromRepository(cycle))
+	for _, cycle := range history.Cycles {
+		response.Cycles = append(response.Cycles, codexQuotaHistoryCycleFromRepository(cycle))
 	}
 	return response
 }
@@ -224,13 +224,20 @@ func cloneCodexQuotaHistoryString(value *string) *string {
 
 func codexQuotaHistoryCycleFromRepository(cycle repositorydto.CodexQuotaEfficiencyCycle) CodexQuotaHistoryCycle {
 	response := CodexQuotaHistoryCycle{
-		ID:              cycle.ID,
-		WindowStartedAt: cycle.WindowStartedAt,
-		ResetAt:         cycle.ResetAt,
-		FirstObservedAt: cycle.FirstObservedAt,
-		LastObservedAt:  cycle.LastObservedAt,
-		Usage:           codexQuotaHistoryUsageFromRepository(cycle.Usage),
-		Transitions:     make([]CodexQuotaHistoryTransition, 0, len(cycle.Transitions)),
+		ID:                    cycle.ID,
+		Status:                cycle.Status,
+		WindowSeconds:         cycle.WindowSeconds,
+		WindowStartedAt:       cycle.WindowStartedAt,
+		ResetAt:               cycle.ResetAt,
+		EffectiveStartedAt:    cycle.EffectiveStartedAt,
+		EffectiveEndedAt:      cycle.EffectiveEndedAt,
+		FirstObservedAt:       cycle.FirstObservedAt,
+		LastObservedAt:        cycle.LastObservedAt,
+		FirstRemainingPercent: cloneCodexQuotaHistoryInt(cycle.FirstRemainingPercent),
+		LastRemainingPercent:  cloneCodexQuotaHistoryInt(cycle.LastRemainingPercent),
+		ObservationCount:      cycle.ObservationCount,
+		Usage:                 codexQuotaHistoryUsageFromRepository(cycle.Usage),
+		Transitions:           make([]CodexQuotaHistoryTransition, 0, len(cycle.Transitions)),
 	}
 	for _, transition := range cycle.Transitions {
 		response.Transitions = append(response.Transitions, CodexQuotaHistoryTransition{
@@ -247,6 +254,14 @@ func codexQuotaHistoryCycleFromRepository(cycle repositorydto.CodexQuotaEfficien
 		})
 	}
 	return response
+}
+
+func cloneCodexQuotaHistoryInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func codexQuotaHistoryUsageFromRepository(usage repositorydto.CodexQuotaEfficiencyUsage) CodexQuotaHistoryUsage {

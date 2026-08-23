@@ -157,6 +157,22 @@ describe('PriceRulesModal', () => {
     expect(removeButton.querySelector('svg')).toBeNull()
   })
 
+  it('keeps all three rule fields on the shared pill input contract', async () => {
+    await renderModal({ model: 'model-a', loadRules: async () => [] })
+
+    expect(document.body.querySelectorAll('.input[data-rule-field]')).toHaveLength(3)
+    const inputRule = modalStylesSource.match(/\.ruleInput:global\(\.input\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+    const removeButtonRule = modalStylesSource.match(/\.removeButton\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+    expect(inputRule).toContain('height: 32px;')
+    expect(inputRule).toContain('min-height: 32px;')
+    expect(inputRule).toContain('padding: 6px 12px;')
+    expect(inputRule).toContain('line-height: 18px;')
+    expect(inputRule).toContain('border-radius: 999px;')
+    expect(inputRule).not.toContain('height: 40px;')
+    expect(removeButtonRule).toContain('margin-top: 16px;')
+  })
+
   it('shows row validation and does not call the backend for a partial rule', async () => {
     const saveRules = vi.fn(async (_model: string, _rules: ReplacePricingRuleInput[]) => [])
     await renderModal({ model: 'model-a', loadRules: async () => [], saveRules })

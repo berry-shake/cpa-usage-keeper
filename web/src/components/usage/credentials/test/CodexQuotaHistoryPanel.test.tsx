@@ -64,15 +64,22 @@ const response: CodexQuotaHistoryResponse = {
   range_start: '2026-07-22T12:00:00Z',
   windows: [
     { window_role: 'primary', window_kind: 'weekly', window_seconds: 604800, has_current_cycle: true, last_observed_at: '2026-08-21T11:50:00Z' },
-    { window_role: 'secondary', window_kind: 'five_hour', window_seconds: 18000, has_current_cycle: false, last_observed_at: '2026-08-20T10:00:00Z' },
+    { window_role: 'secondary', window_kind: 'five_hour', window_seconds: 18000, has_current_cycle: true, last_observed_at: '2026-08-21T11:50:00Z' },
   ],
   selected_window: { window_role: 'primary', window_kind: 'weekly', window_seconds: 604800, has_current_cycle: true, last_observed_at: '2026-08-21T11:50:00Z' },
-  current_cycle: {
+  cycles: [{
     id: 2,
+    status: 'current',
+    window_seconds: 604800,
     window_started_at: '2026-08-17T00:00:00Z',
     reset_at: '2026-08-24T00:00:00Z',
+    effective_started_at: '2026-08-17T00:00:00Z',
+    effective_ended_at: '2026-08-24T00:00:00Z',
     first_observed_at: '2026-08-17T02:00:00Z',
     last_observed_at: '2026-08-21T11:50:00Z',
+    first_remaining_percent: 90,
+    last_remaining_percent: 86,
+    observation_count: 3,
     usage: usage(5000, 5, false),
     transitions: [
       {
@@ -100,13 +107,19 @@ const response: CodexQuotaHistoryResponse = {
         cost_per_point_available: true,
       },
     ],
-  },
-  completed_cycles: [{
+  }, {
     id: 1,
+    status: 'completed',
+    window_seconds: 604800,
     window_started_at: '2026-08-10T00:00:00Z',
     reset_at: '2026-08-17T00:00:00Z',
+    effective_started_at: '2026-08-10T00:00:00Z',
+    effective_ended_at: '2026-08-17T00:00:00Z',
     first_observed_at: '2026-08-10T03:00:00Z',
     last_observed_at: '2026-08-16T23:50:00Z',
+    first_remaining_percent: 93,
+    last_remaining_percent: 93,
+    observation_count: 2,
     usage: usage(2000, 2),
     transitions: [],
   }],
@@ -145,7 +158,12 @@ describe('CodexQuotaHistoryPanel', () => {
 
     expect(fetchCodexQuotaHistory).toHaveBeenCalledTimes(1)
     expect(fetchCodexQuotaHistory).toHaveBeenCalledWith('codex-auth', {}, expect.any(AbortSignal))
-    expect(document.body.querySelectorAll('[aria-label="usage_stats.credentials_quota_history_window_selector"] button')).toHaveLength(2)
+    const windowButtons = [...document.body.querySelectorAll<HTMLButtonElement>('[aria-label="usage_stats.credentials_quota_history_window_selector"] button')]
+    expect(windowButtons).toHaveLength(2)
+    expect(windowButtons[0]?.textContent).toBe('usage_stats.credentials_quota_history_window_weekly')
+    expect(windowButtons[1]?.textContent).toBe('usage_stats.credentials_quota_history_window_five_hour')
+    expect(document.body.textContent).not.toContain('usage_stats.credentials_quota_history_role_primary')
+    expect(document.body.textContent).not.toContain('usage_stats.credentials_quota_history_role_secondary')
     expect(latestChartData?.labels).toEqual(['90% → 89%', '89% → 88%', '88% → 87%', '87% → 86%'])
     expect(latestChartData?.datasets).toHaveLength(2)
     expect(latestChartData?.datasets[0]).toMatchObject({
@@ -179,7 +197,8 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(latestChartOptions?.scales?.cost?.ticks).toMatchObject({ maxTicksLimit: 5 })
     expect(document.body.querySelector<HTMLElement>('[data-codex-quota-cost-legend]')?.style.getPropertyValue('--quota-cost-line-color')).toBe('#ff5a40')
     expect(document.body.querySelector('[aria-label="usage_stats.credentials_quota_history_metric_selector"]')).toBeNull()
-    expect(document.body.querySelector('[data-codex-quota-cycle-id="1"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-codex-quota-cycle-id="2"][data-codex-quota-cycle-status="current"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-codex-quota-cycle-id="1"][data-codex-quota-cycle-status="completed"]')).not.toBeNull()
     const medianSummary = document.body.querySelector('[data-codex-quota-median-summary]')
     expect(medianSummary?.parentElement?.tagName).toBe('P')
     expect(medianSummary?.textContent).toContain('usage_stats.credentials_quota_history_median · 1.00K Token/1% · $1.00/1%')
@@ -227,9 +246,55 @@ describe('CodexQuotaHistoryPanel', () => {
     ])
   })
 
+  it('keeps a current 76 percent baseline visible in the cycle list before any transition exists', async () => {
+    const baselineResponse = cloneResponse()
+    baselineResponse.cycles[0].transitions = []
+    baselineResponse.cycles[0].first_remaining_percent = 76
+    baselineResponse.cycles[0].last_remaining_percent = 76
+    baselineResponse.cycles[0].observation_count = 8
+    fetchCodexQuotaHistory.mockResolvedValue(baselineResponse)
+
+    await act(async () => {
+      root.render(<CodexQuotaHistoryPanel authIndex="codex-auth" />)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const currentRecord = document.body.querySelector('[data-codex-quota-cycle-id="2"][data-codex-quota-cycle-status="current"]')
+    expect(currentRecord?.textContent).toContain('usage_stats.credentials_quota_history_percent_summary:{"percent":76,"count":8}')
+    expect(currentRecord?.textContent).toContain('usage_stats.credentials_quota_history_cycle_expected_reset')
+    expect(document.body.textContent).toContain('usage_stats.credentials_quota_history_no_transition')
+    expect(document.body.querySelector('[data-codex-quota-efficiency-chart]')).toBeNull()
+  })
+
+  it('shows a Free monthly Primary as Monthly without exposing its role', async () => {
+    const monthlyResponse = cloneResponse()
+    monthlyResponse.windows = [{
+      window_role: 'primary',
+      window_kind: 'monthly',
+      window_seconds: 2592000,
+      has_current_cycle: true,
+      last_observed_at: '2026-08-21T11:50:00Z',
+    }]
+    monthlyResponse.selected_window = monthlyResponse.windows[0]
+    monthlyResponse.cycles = [monthlyResponse.cycles[0]]
+    monthlyResponse.cycles[0].window_seconds = 2592000
+    fetchCodexQuotaHistory.mockResolvedValue(monthlyResponse)
+
+    await act(async () => {
+      root.render(<CodexQuotaHistoryPanel authIndex="free-codex-auth" />)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(document.body.textContent).toContain('usage_stats.credentials_quota_history_window_monthly')
+    expect(document.body.textContent).not.toContain('usage_stats.credentials_quota_history_role_primary')
+    expect(document.body.querySelector('[aria-label="usage_stats.credentials_quota_history_window_selector"]')).toBeNull()
+  })
+
   it('explains why an ended cycle total Cost is unavailable', async () => {
     const missingCycleCostResponse = cloneResponse()
-    missingCycleCostResponse.completed_cycles[0].usage.cost_available = false
+    missingCycleCostResponse.cycles[1].usage.cost_available = false
     fetchCodexQuotaHistory.mockResolvedValue(missingCycleCostResponse)
     await act(async () => {
       root.render(<CodexQuotaHistoryPanel authIndex="codex-auth" />)
@@ -271,7 +336,7 @@ describe('CodexQuotaHistoryPanel', () => {
       await Promise.resolve()
     })
     const secondaryButton = [...document.body.querySelectorAll<HTMLButtonElement>('[aria-label="usage_stats.credentials_quota_history_window_selector"] button')]
-      .find((button) => button.textContent?.includes('usage_stats.credentials_quota_history_role_secondary'))
+      .find((button) => button.textContent === 'usage_stats.credentials_quota_history_window_five_hour')
     await act(async () => {
       secondaryButton?.click()
       await Promise.resolve()
@@ -279,7 +344,7 @@ describe('CodexQuotaHistoryPanel', () => {
     })
     expect(fetchCodexQuotaHistory).toHaveBeenLastCalledWith(
       'codex-auth',
-      { windowRole: 'secondary', windowSeconds: 18000 },
+      { windowRole: 'secondary' },
       expect.any(AbortSignal),
     )
   })
@@ -296,7 +361,7 @@ describe('CodexQuotaHistoryPanel', () => {
       await Promise.resolve()
     })
     const secondaryButton = [...document.body.querySelectorAll<HTMLButtonElement>('[aria-label="usage_stats.credentials_quota_history_window_selector"] button')]
-      .find((button) => button.textContent?.includes('usage_stats.credentials_quota_history_role_secondary'))
+      .find((button) => button.textContent === 'usage_stats.credentials_quota_history_window_five_hour')
     await act(async () => {
       secondaryButton?.click()
       await Promise.resolve()
@@ -310,14 +375,14 @@ describe('CodexQuotaHistoryPanel', () => {
     })
     expect(fetchCodexQuotaHistory).toHaveBeenLastCalledWith(
       'codex-auth',
-      { windowRole: 'secondary', windowSeconds: 18000 },
+      { windowRole: 'secondary' },
       expect.any(AbortSignal),
     )
   })
 
   it('draws an isolated Cost sample without adding points to a continuous line', async () => {
     const singleSampleResponse = cloneResponse()
-    singleSampleResponse.current_cycle!.transitions = singleSampleResponse.current_cycle!.transitions.slice(0, 1)
+    singleSampleResponse.cycles[0].transitions = singleSampleResponse.cycles[0].transitions.slice(0, 1)
     fetchCodexQuotaHistory.mockResolvedValue(singleSampleResponse)
     await act(async () => {
       root.render(<CodexQuotaHistoryPanel authIndex="codex-auth" />)
@@ -330,7 +395,7 @@ describe('CodexQuotaHistoryPanel', () => {
 
   it('shows the Analysis-style pricing hint and hides the partial Cost median', async () => {
     const partialCostResponse = cloneResponse()
-    const missingCostTransition = partialCostResponse.current_cycle!.transitions[1]
+    const missingCostTransition = partialCostResponse.cycles[0].transitions[1]
     missingCostTransition.usage.cost_available = false
     missingCostTransition.cost_per_point_available = false
     fetchCodexQuotaHistory.mockResolvedValue(partialCostResponse)
@@ -352,8 +417,8 @@ describe('CodexQuotaHistoryPanel', () => {
 
   it('preserves the project-timezone wall clock from API timestamps', async () => {
     const offsetResponse = cloneResponse()
-    offsetResponse.current_cycle!.first_observed_at = '2026-08-21T13:01:00+08:00'
-    offsetResponse.current_cycle!.last_observed_at = '2026-08-21T14:02:00+08:00'
+    offsetResponse.cycles[0].first_observed_at = '2026-08-21T13:01:00+08:00'
+    offsetResponse.cycles[0].last_observed_at = '2026-08-21T14:02:00+08:00'
     fetchCodexQuotaHistory.mockResolvedValue(offsetResponse)
     await act(async () => {
       root.render(<CodexQuotaHistoryPanel authIndex="codex-auth" />)

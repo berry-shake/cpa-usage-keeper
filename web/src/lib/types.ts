@@ -538,7 +538,7 @@ export interface UsageQuotaCacheResponse {
   items: UsageQuotaCacheItem[]
 }
 
-// CodexQuotaHistoryWindow 以 Primary/Secondary 角色和上游真实秒数组成窗口系列键。
+// CodexQuotaHistoryWindow 以最近响应存在的 Primary/Secondary 角色为稳定键，并携带最新周期标题。
 export interface CodexQuotaHistoryWindow {
   window_role: 'primary' | 'secondary'
   window_kind?: 'five_hour' | 'weekly' | 'monthly'
@@ -579,22 +579,28 @@ export interface CodexQuotaHistoryTransition {
 // CodexQuotaHistoryCycle 同时提供周期真实边界、Keeper 观察边界、周期总量和效率区间。
 export interface CodexQuotaHistoryCycle {
   id: number
+  status: 'current' | 'completed'
+  window_seconds: number
   window_started_at: string
   reset_at: string
+  effective_started_at: string
+  effective_ended_at: string
   first_observed_at: string
   last_observed_at: string
+  first_remaining_percent: number | null
+  last_remaining_percent: number | null
+  observation_count: number
   usage: CodexQuotaHistoryUsage
   transitions: CodexQuotaHistoryTransition[]
 }
 
-// CodexQuotaHistoryResponse 一次请求驱动当前周期图表、周期摘要和最近三十天历史列表。
+// CodexQuotaHistoryResponse 一次请求驱动当前周期图表和包含进行中周期的最近三十天完整列表。
 export interface CodexQuotaHistoryResponse {
   generated_at: string
   range_start: string
   windows: CodexQuotaHistoryWindow[]
   selected_window: CodexQuotaHistoryWindow | null
-  current_cycle: CodexQuotaHistoryCycle | null
-  completed_cycles: CodexQuotaHistoryCycle[]
+  cycles: CodexQuotaHistoryCycle[]
 }
 
 export interface AuthFilesManagementResponse {

@@ -114,15 +114,15 @@ func TestBuildCodexUsageHeaderSnapshotCreatesImmutableCacheAndHistoryProjections
 	if len(rows) != 2 || rows[0].Key != "rate_limit.primary_window" || rows[1].Key != "additional_rate_limits.GPT-5.3-Codex-Spark.primary_window" {
 		t.Fatalf("unexpected immutable cache output rows: %#v", rows)
 	}
-	// history 投影只允许无 group Primary，并保留 raw、整数剩余值、窗口和观察时间。
+	// history 投影只允许无 group Primary，并保留整数剩余值、窗口秒数和观察时间。
 	if len(snapshot.MainQuotaObservations) != 1 {
 		t.Fatalf("expected one main quota observation, got %+v", snapshot.MainQuotaObservations)
 	}
 	observation := snapshot.MainQuotaObservations[0]
-	if observation.AuthIndex != "codex-auth" || observation.WindowRole != "primary" || observation.WindowSeconds != 18_000 || observation.RemainingPercent != 96 || observation.FirstRawUsedPercent != 4 || !observation.FirstObservedAt.Equal(observedAt) {
+	if observation.AuthIndex != "codex-auth" || observation.WindowRole != "primary" || observation.WindowSeconds != 18_000 || observation.RemainingPercent != 96 || !observation.FirstObservedAt.Equal(observedAt) {
 		t.Fatalf("unexpected main quota observation: %+v", observation)
 	}
-	if observation.WindowKind == nil || *observation.WindowKind != "five_hour" || observation.ResetAtSource != "absolute" {
+	if observation.ResetAtSource != "absolute" {
 		t.Fatalf("unexpected main quota window metadata: %+v", observation)
 	}
 }
@@ -152,7 +152,7 @@ func TestBuildCodexUsageHeaderSnapshotKeepsUnknownMainWindowHistoryOnly(t *testi
 		t.Fatalf("expected one unknown-window history observation, got %+v", snapshot.MainQuotaObservations)
 	}
 	observation := snapshot.MainQuotaObservations[0]
-	if observation.WindowSeconds != 43_200 || observation.WindowKind != nil || observation.RemainingPercent != 90 || observation.ResetAtSource != "relative" || !observation.ResetAt.Equal(observedAt.Add(time.Minute)) {
+	if observation.WindowSeconds != 43_200 || observation.RemainingPercent != 90 || observation.ResetAtSource != "relative" || !observation.ResetAt.Equal(observedAt.Add(time.Minute)) {
 		t.Fatalf("unexpected unknown-window history observation: %+v", observation)
 	}
 }

@@ -809,21 +809,21 @@ describe('fetchUsageEvents', () => {
     expect(init?.body).toBe(JSON.stringify({ auth_indexes: ['auth-1'] }));
   });
 
-  it('loads one encoded Codex quota history window series', async () => {
+  it('loads one encoded Codex quota history role', async () => {
     vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ generated_at: '2026-08-21T12:00:00Z', range_start: '2026-07-22T12:00:00Z', windows: [], selected_window: null, current_cycle: null, completed_cycles: [] }),
+      json: async () => ({ generated_at: '2026-08-21T12:00:00Z', range_start: '2026-07-22T12:00:00Z', windows: [], selected_window: null, cycles: [] }),
     } as Response);
     const signal = new AbortController().signal;
 
-    await fetchCodexQuotaHistory('codex/auth + user', { windowRole: 'primary', windowSeconds: 604800 }, signal);
+    await fetchCodexQuotaHistory('codex/auth + user', { windowRole: 'primary' }, signal);
 
     const [url, init] = fetchMock.mock.calls[0];
     const parsed = new URL(String(url), 'http://localhost');
     expect(parsed.pathname).toBe('/api/v1/quota/history/codex%2Fauth%20%2B%20user');
     expect(parsed.searchParams.get('window_role')).toBe('primary');
-    expect(parsed.searchParams.get('window_seconds')).toBe('604800');
+    expect(parsed.searchParams.has('window_seconds')).toBe(false);
     expect(init).toMatchObject({ credentials: 'include', signal });
   });
 

@@ -581,7 +581,7 @@
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-top: 3px solid var(--podium-accent);
-  border-radius: 12px;
+  border-radius: var(--keeper-card-radius);
   background: linear-gradient(145deg, color-mix(in srgb, var(--podium-accent) 9%, var(--bg-primary)), var(--bg-primary));
   box-shadow: var(--shadow);
 

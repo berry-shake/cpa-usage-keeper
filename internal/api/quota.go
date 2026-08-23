@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"cpa-usage-keeper/internal/quota"
@@ -34,14 +33,6 @@ func registerQuotaRoutes(router gin.IRoutes, provider QuotaProvider) {
 		if rawRole, ok := c.GetQuery("window_role"); ok {
 			role := strings.TrimSpace(rawRole)
 			request.WindowRole = &role
-		}
-		if rawSeconds, ok := c.GetQuery("window_seconds"); ok {
-			seconds, err := strconv.ParseInt(strings.TrimSpace(rawSeconds), 10, 64)
-			if err != nil || seconds <= 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "window_seconds must be a positive integer"})
-				return
-			}
-			request.WindowSeconds = &seconds
 		}
 		response, err := provider.GetCodexQuotaHistory(c.Request.Context(), request)
 		if err != nil {

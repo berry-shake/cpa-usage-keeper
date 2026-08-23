@@ -23,9 +23,8 @@ func All() []any {
 		&UsageLatencyStat{},
 		&AuthSession{},
 		&AppSetting{},
-		// CodexQuotaCycle 必须先于子表注册，确保全新数据库先创建外键目标。
-		&CodexQuotaCycle{},
-		// CodexQuotaPercentSegment 只保存额度百分比状态，不保存 Token 或 cost。
-		&CodexQuotaPercentSegment{},
+		// 通用额度周期必须先于百分比子表注册，确保全新数据库创建真实外键。
+		&QuotaCycle{},
+		&QuotaPercentSegment{},
 	}
 }

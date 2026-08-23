@@ -224,6 +224,7 @@ describe('Ranking table context styles', () => {
     expect(card).toContain('grid-template-areas:');
     expect(card).toContain('min-height: 136px;');
     expect(card).toContain('border-top: 3px solid var(--podium-accent);');
+    expect(card).toContain('border-radius: var(--keeper-card-radius);');
     expect(first).toContain('grid-column: 2;');
     expect(first).not.toContain('transform:');
     expect(second).toContain('grid-column: 1;');

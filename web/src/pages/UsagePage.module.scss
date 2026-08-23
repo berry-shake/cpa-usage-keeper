@@ -2152,7 +2152,7 @@
 .apiKeySettingsList {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .apiKeySettingsItem {
@@ -2175,10 +2175,18 @@
   min-width: 0;
 }
 
+.apiKeySettingsNameRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+}
+
 .apiKeySettingsName {
   display: -webkit-box;
   min-width: 0;
-  min-height: 40px;
   overflow: hidden;
   color: var(--text-primary);
   font-size: 13px;
@@ -2187,6 +2195,42 @@
   word-break: break-all;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.apiKeySettingsCopyIconButton {
+  appearance: none;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+    outline-offset: -2px;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+}
+
+.apiKeySettingsCopyIconButtonCopied {
+  color: var(--success-color);
 }
 
 .apiKeySettingsMeta {
@@ -2212,6 +2256,12 @@
   flex-direction: column;
   gap: 5px;
   min-width: 0;
+
+  :global(.form-group) {
+    width: 100%;
+    min-width: 0;
+    margin-bottom: 0;
+  }
 }
 
 .apiKeyFieldLabel,
@@ -2223,20 +2273,26 @@
   line-height: 1;
 }
 
-.apiKeyAliasInput {
+.apiKeyAliasInput:global(.input) {
   width: 100%;
+  height: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .apiKeySettingsActions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  align-self: stretch;
+  align-self: end;
   gap: 8px;
   min-width: 0;
 }
 
-.apiKeySettingsCopyButton,
 .apiKeySettingsSaveButton {
   min-width: 68px;
   justify-content: center;
@@ -2279,7 +2335,7 @@
   gap: 12px 16px;
   padding: 14px;
   border: 1px solid color-mix(in srgb, var(--border-color) 86%, transparent);
-  border-radius: 8px;
+  border-radius: 20px;
   background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
 }
 
@@ -2388,7 +2444,7 @@
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 16px;
   background: var(--bg-tertiary);
   font-size: 11px;
   line-height: 1.5;
@@ -2442,6 +2498,10 @@
 }
 
 @include tablet {
+  .apiKeySettingsList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .apiKeySettingsItem {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
@@ -2482,19 +2542,12 @@
     justify-content: stretch;
   }
 
-  .apiKeySettingsCopyButton,
   .apiKeySettingsSaveButton {
     flex: 1 1 0;
   }
 
   .apiKeyAliasField {
     width: 100%;
-
-    :global(.form-group) {
-      width: 100%;
-      min-width: 0;
-      margin-bottom: 0;
-    }
   }
 
   .apiKeyAliasInput {
@@ -3470,77 +3523,6 @@
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
-}
-
-.requestEventsResultSuccess {
-  color: var(--success-badge-text, #065f46);
-  background: var(--success-badge-bg, #d1fae5);
-  border: 1px solid var(--success-badge-border, #6ee7b7);
-}
-
-.requestEventsResultFailed {
-  color: var(--failure-badge-text);
-  background: var(--failure-badge-bg);
-  border: 1px solid var(--failure-badge-border);
-}
-
-.requestEventsResultSuccess,
-.requestEventsResultFailed {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 60px;
-  padding: 2px 8px;
-  border-radius: $radius-full;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-
-  &[data-result-locale='zh'] {
-    width: 50px;
-  }
-}
-
-.requestEventsResultLogButton {
-  position: relative;
-  font: inherit;
-  cursor: pointer;
-  appearance: none;
-  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
-
-  &:hover:not(:disabled) {
-    filter: brightness(0.97);
-  }
-
-  &:active:not(:disabled) {
-    transform: translateY(1px);
-  }
-
-  &:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 18%, transparent);
-  }
-
-  &:disabled {
-    cursor: wait;
-    opacity: 0.76;
-  }
-}
-
-.requestEventsResultLogIcon {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  border: 1px solid currentColor;
-  border-radius: $radius-full;
-  background: var(--bg-primary);
-  box-shadow: var(--shadow);
-  pointer-events: none;
 }
 
 .requestEventsLogViewer {

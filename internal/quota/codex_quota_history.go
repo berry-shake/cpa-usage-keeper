@@ -63,7 +63,7 @@ func buildCodexMainQuotaObservation(authIndex string, role string, window *Codex
 		return observation, false
 	}
 
-	// absolute reset 优先；relative-only 使用截断到秒的真实观察时间加倒计时。
+	// 优先采用上游直接返回的重置时刻；只有倒计时时，才用截断到秒的观察时间推算。
 	resetAt := time.Time{}
 	resetSource := ""
 	if window.HasResetAt && window.ResetAt > 0 {
@@ -80,7 +80,7 @@ func buildCodexMainQuotaObservation(authIndex string, role string, window *Codex
 	// 统一剩余百分比采用页面同口径：先钳制已用值，再四舍五入成 0–100 整数。
 	clampedUsed := math.Max(0, math.Min(100, window.UsedPercent))
 	remainingPercent := int(math.Round(100 - clampedUsed))
-	// 有限超界 raw 仍保留原值，同时用 debug 暴露上游异常而不污染统一范围。
+	// 有限超界值只用 debug 暴露上游异常，不进入统一历史 DTO。
 	if window.UsedPercent < 0 || window.UsedPercent > 100 {
 		logrus.WithFields(logrus.Fields{
 			"auth_index":       authIndex,
@@ -89,37 +89,16 @@ func buildCodexMainQuotaObservation(authIndex string, role string, window *Codex
 		}).Debug("codex quota raw used percent clamped for history")
 	}
 
-	// 窗口分类只是可空展示语义，原始秒数始终独立保存并参与周期身份。
-	windowKind := codexQuotaWindowKind(window.LimitWindowSeconds)
 	observation = repositorydto.CodexMainQuotaObservation{
-		AuthIndex:           authIndex,
-		WindowRole:          role,
-		WindowKind:          windowKind,
-		WindowSeconds:       window.LimitWindowSeconds,
-		ResetAtSource:       resetSource,
-		ResetAt:             resetAt,
-		RemainingPercent:    remainingPercent,
-		FirstRawUsedPercent: window.UsedPercent,
-		LastRawUsedPercent:  window.UsedPercent,
-		FirstObservedAt:     observedAt,
-		LastObservedAt:      observedAt,
-		ObservationCount:    1,
+		AuthIndex:        authIndex,
+		WindowRole:       role,
+		WindowSeconds:    window.LimitWindowSeconds,
+		ResetAtSource:    resetSource,
+		ResetAt:          resetAt,
+		RemainingPercent: remainingPercent,
+		FirstObservedAt:  observedAt,
+		LastObservedAt:   observedAt,
+		ObservationCount: 1,
 	}
 	return observation, true
-}
-
-func codexQuotaWindowKind(windowSeconds int64) *string {
-	// 当前已知窗口只负责分类；其它任意正秒数保持 nil，不能猜测成 weekly/monthly。
-	var kind string
-	switch windowSeconds {
-	case quotaWindowFiveHourSeconds:
-		kind = "five_hour"
-	case quotaWindowSevenDaySeconds:
-		kind = "weekly"
-	case quotaWindowThirtyDaySeconds, quotaWindowAverageMonthSeconds:
-		kind = "monthly"
-	default:
-		return nil
-	}
-	return &kind
 }

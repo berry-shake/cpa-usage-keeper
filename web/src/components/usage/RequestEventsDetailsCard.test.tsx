@@ -269,6 +269,7 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html).toContain('aria-label="Success. View request log"');
     expect(html).toContain('_requestEventsResultLogButton_');
     expect(html).toContain('_requestEventsResultLogIcon_');
+    expect(html).not.toContain('_requestEventsResultCompact_');
     expect(html).toMatch(/<button[^>]*>.*Success.*<\/button>/);
   });
 

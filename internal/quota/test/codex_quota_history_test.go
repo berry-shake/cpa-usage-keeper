@@ -47,13 +47,13 @@ func TestBuildCodexMainQuotaObservationsUsesPresenceFlagsAndExcludesReviewAdditi
 		t.Fatalf("expected only explicit primary main quota observation, got %+v", observations)
 	}
 	observation := observations[0]
-	if observation.WindowRole != "primary" || observation.RemainingPercent != 100 || observation.FirstRawUsedPercent != 0 {
+	if observation.WindowRole != "primary" || observation.RemainingPercent != 100 {
 		t.Fatalf("unexpected explicit-zero main quota observation: %+v", observation)
 	}
 }
 
 func TestBuildCodexMainQuotaObservationsClampsFiniteRawPercentAndRejectsNonFinite(t *testing.T) {
-	// 准备：有限超界 raw 必须保留但统一剩余值钳制；非有限 raw 不能持久化。
+	// 准备：有限超界 raw 只用来生成钳制后的剩余值；非有限 raw 不能进入历史。
 	observedAt := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
 	window := &quota.CodexUsageWindow{
 		UsedPercent:           125.5,
@@ -67,7 +67,7 @@ func TestBuildCodexMainQuotaObservationsClampsFiniteRawPercentAndRejectsNonFinit
 		RateLimit: &quota.CodexRateLimitInfo{PrimaryWindow: window},
 	}}}
 	observations := quota.BuildCodexMainQuotaObservations("codex-auth", output, observedAt)
-	if len(observations) != 1 || observations[0].RemainingPercent != 0 || observations[0].FirstRawUsedPercent != 125.5 {
+	if len(observations) != 1 || observations[0].RemainingPercent != 0 {
 		t.Fatalf("unexpected clamped finite raw observation: %+v", observations)
 	}
 

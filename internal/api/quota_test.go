@@ -105,12 +105,20 @@ func (s *quotaProviderStub) UpdateAutoRefreshSettings(ctx context.Context, setti
 	return settings, nil
 }
 
-func TestCodexQuotaHistoryForwardsRealWindowSelection(t *testing.T) {
+func TestCodexQuotaHistoryForwardsWindowRoleSelection(t *testing.T) {
 	generatedAt := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	provider := &quotaProviderStub{historyResponse: quota.CodexQuotaHistoryResponse{
-		GeneratedAt:     generatedAt,
-		RangeStart:      generatedAt.Add(-30 * 24 * time.Hour),
-		CompletedCycles: []quota.CodexQuotaHistoryCycle{},
+		GeneratedAt: generatedAt,
+		RangeStart:  generatedAt.Add(-30 * 24 * time.Hour),
+		Cycles: []quota.CodexQuotaHistoryCycle{{
+			ID:                 1,
+			Status:             "current",
+			WindowSeconds:      604800,
+			WindowStartedAt:    generatedAt.Add(-24 * time.Hour),
+			ResetAt:            generatedAt.Add(6 * 24 * time.Hour),
+			EffectiveStartedAt: generatedAt.Add(-24 * time.Hour),
+			EffectiveEndedAt:   generatedAt.Add(6 * 24 * time.Hour),
+		}},
 		Windows: []quota.CodexQuotaHistoryWindow{{
 			WindowRole:      "secondary",
 			WindowSeconds:   604800,
@@ -119,18 +127,18 @@ func TestCodexQuotaHistoryForwardsRealWindowSelection(t *testing.T) {
 		}},
 	}}
 	router := NewRouter(nil, nil, nil, nil, AuthConfig{}, nil, "", OptionalProviders{Quota: provider})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/quota/history/codex-auth?window_role=secondary&window_seconds=604800", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quota/history/codex-auth?window_role=secondary", nil)
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if provider.historyRequest.AuthIndex != "codex-auth" || provider.historyRequest.WindowRole == nil || *provider.historyRequest.WindowRole != "secondary" || provider.historyRequest.WindowSeconds == nil || *provider.historyRequest.WindowSeconds != 604800 {
+	if provider.historyRequest.AuthIndex != "codex-auth" || provider.historyRequest.WindowRole == nil || *provider.historyRequest.WindowRole != "secondary" {
 		t.Fatalf("unexpected quota history request: %+v", provider.historyRequest)
 	}
 	body := resp.Body.String()
-	if !contains(body, `"generated_at":"2026-08-21T12:00:00Z"`) || !contains(body, `"window_role":"secondary"`) || !contains(body, `"completed_cycles":[]`) {
+	if !contains(body, `"generated_at":"2026-08-21T12:00:00Z"`) || !contains(body, `"window_role":"secondary"`) || !contains(body, `"window_seconds":604800`) || !contains(body, `"effective_started_at":"2026-08-20T12:00:00Z"`) || !contains(body, `"effective_ended_at":"2026-08-27T12:00:00Z"`) {
 		t.Fatalf("unexpected quota history response: %s", body)
 	}
 }
@@ -142,7 +150,6 @@ func TestCodexQuotaHistoryMapsValidationAndIdentityErrors(t *testing.T) {
 		err        error
 		wantStatus int
 	}{
-		{name: "invalid seconds", path: "/api/v1/quota/history/codex-auth?window_seconds=abc", wantStatus: http.StatusBadRequest},
 		{name: "service validation", path: "/api/v1/quota/history/codex-auth?window_role=primary", err: quota.ErrValidation, wantStatus: http.StatusBadRequest},
 		{name: "unsupported identity", path: "/api/v1/quota/history/codex-auth", err: quota.ErrUnsupportedType, wantStatus: http.StatusBadRequest},
 		{name: "missing identity", path: "/api/v1/quota/history/codex-auth", err: quota.ErrNotFound, wantStatus: http.StatusNotFound},

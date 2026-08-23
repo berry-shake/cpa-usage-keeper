@@ -19,7 +19,9 @@ const scssRule = (selector: string) => {
 
 describe('Credential error event list styles', () => {
   it('separates error cards and their body from the drawer surface', () => {
+    expect(scssRule('.card')).toContain('border-radius: var(--keeper-card-radius)')
     expect(scssRule('.card')).toContain('background: var(--bg-secondary)')
+    expect(scssRule('.body')).toContain('border-radius: var(--keeper-card-radius)')
     expect(scssRule('.body')).toContain('background: var(--bg-tertiary)')
     expect(scssRule('.body')).toContain('border: 1px solid var(--border-color)')
     expect(scssRule('.body')).toContain('color: var(--text-primary)')

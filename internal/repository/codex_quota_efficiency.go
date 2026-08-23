@@ -20,8 +20,17 @@ import (
 type codexQuotaEfficiencyCycleWork struct {
 	// record 是后续同时累加周期总量和区间量的唯一对象。
 	record *repositorydto.CodexQuotaEfficiencyCycle
-	// queryEnd 对已结束周期等于 reset_at，对当前周期固定截到 GeneratedAt。
+	// queryStart 在窗口切换时截到新角色周期的首次观察时间，避免回算切换前用量。
+	queryStart time.Time
+	// queryEnd 对已结束周期等于角色有效终点，对当前周期固定截到 GeneratedAt。
 	queryEnd time.Time
+}
+
+// codexQuotaEfficiencyCyclePeriod 保存一个角色周期在查询层实际生效的半开时间边界。
+type codexQuotaEfficiencyCyclePeriod struct {
+	start   time.Time
+	end     time.Time
+	current bool
 }
 
 // codexQuotaEfficiencyUsageEventRow 只流式读取动态聚合必需的 UsageEvent 字段。
@@ -96,9 +105,9 @@ func BuildCodexQuotaEfficiencyHistory(ctx context.Context, db *gorm.DB, query re
 	result.RangeStart = query.RangeStart
 
 	// 父表时间使用 sortableTime，SQL 参数也必须用固定宽度 UTC 文本才能保持 instant 顺序。
-	var cycles []entities.CodexQuotaCycle
+	var cycles []entities.QuotaCycle
 	err := db.WithContext(ctx).Clauses(dbresolver.Read).
-		Where("auth_index = ? AND reset_at >= ? AND window_started_at < ?", query.AuthIndex, timeutil.FormatSortableStorageTime(query.RangeStart), timeutil.FormatSortableStorageTime(query.Now)).
+		Where("provider = ? AND auth_index = ? AND reset_at >= ? AND window_started_at < ?", codexQuotaProvider, query.AuthIndex, timeutil.FormatSortableStorageTime(query.RangeStart), timeutil.FormatSortableStorageTime(query.Now)).
 		Order("reset_at DESC, id DESC").
 		Find(&cycles).Error
 	if err != nil {
@@ -109,19 +118,21 @@ func BuildCodexQuotaEfficiencyHistory(ctx context.Context, db *gorm.DB, query re
 	}
 
 	// 一次父表结果同时生成窗口选项，避免切换器为同一批数据再执行一条 distinct 查询。
-	result.Windows = buildCodexQuotaEfficiencyWindows(cycles, query.Now)
-	selected := selectCodexQuotaEfficiencyWindow(result.Windows, query.WindowRole, query.WindowSeconds)
+	latestObservedAt := codexQuotaEfficiencyLatestObservedAt(cycles)
+	result.Windows = buildCodexQuotaEfficiencyWindows(cycles, query.Now, latestObservedAt)
+	selected := selectCodexQuotaEfficiencyWindow(result.Windows, query.WindowRole)
 	if selected == nil {
 		return result, nil
 	}
 	selectedCopy := *selected
 	result.SelectedWindow = &selectedCopy
 
-	// 只把选中窗口系列的当前/已结束周期送入子段和 UsageEvent 聚合，数据库不处理前端未展示的系列。
-	selectedCycles := make([]entities.CodexQuotaCycle, 0, len(cycles))
+	// 角色是稳定选择身份；同一个 Primary/Secondary 的 5h、Weekly、Monthly 周期共同进入完整历史。
+	selectedCycles := make([]entities.QuotaCycle, 0, len(cycles))
 	cycleIDs := make([]int64, 0, len(cycles))
 	for _, cycle := range cycles {
-		if string(cycle.WindowRole) != selected.WindowRole || cycle.WindowSeconds != selected.WindowSeconds {
+		windowRole, ok := codexWindowRoleFromQuotaKey(cycle.QuotaKey)
+		if !ok || windowRole != selected.WindowRole {
 			continue
 		}
 		selectedCycles = append(selectedCycles, cycle)
@@ -130,51 +141,61 @@ func BuildCodexQuotaEfficiencyHistory(ctx context.Context, db *gorm.DB, query re
 	if len(selectedCycles) == 0 {
 		return result, nil
 	}
+	periods := buildCodexQuotaEfficiencyCyclePeriods(selectedCycles, selected.HasCurrentCycle, query.Now)
 
 	// 所有子段用一次 IN 查询读出；每周期最多 101 个整数桶，不允许对父周期逐条 Preload。
-	var segments []entities.CodexQuotaPercentSegment
+	var segments []entities.QuotaPercentSegment
 	if err := db.WithContext(ctx).Clauses(dbresolver.Read).
 		Where("cycle_id IN ?", cycleIDs).
 		Order("cycle_id ASC, first_observed_at ASC, id ASC").
 		Find(&segments).Error; err != nil {
 		return result, fmt.Errorf("list codex quota efficiency segments: %w", err)
 	}
-	segmentsByCycle := make(map[int64][]entities.CodexQuotaPercentSegment, len(selectedCycles))
+	segmentsByCycle := make(map[int64][]entities.QuotaPercentSegment, len(selectedCycles))
 	for _, segment := range segments {
 		segmentsByCycle[segment.CycleID] = append(segmentsByCycle[segment.CycleID], segment)
 	}
 
-	// 先建立全部指针对象再聚合，避免 completed slice 扩容后让 map 中的元素地址失效。
+	// 先建立全部指针对象再聚合；统一列表状态完全由本次固定的 now 判定。
 	works := make([]codexQuotaEfficiencyCycleWork, 0, len(selectedCycles))
-	completed := make([]*repositorydto.CodexQuotaEfficiencyCycle, 0, len(selectedCycles))
-	var current *repositorydto.CodexQuotaEfficiencyCycle
+	records := make([]*repositorydto.CodexQuotaEfficiencyCycle, 0, len(selectedCycles))
 	for _, cycle := range selectedCycles {
-		active := !query.Now.Before(cycle.WindowStartedAt) && query.Now.Before(cycle.ResetAt)
-		ended := !cycle.ResetAt.After(query.Now)
+		period := periods[cycle.ID]
+		if period.end.Before(query.RangeStart) {
+			continue
+		}
+		active := period.current
+		ended := !period.end.After(query.Now)
 		if !active && !ended {
 			continue
 		}
-		record := &repositorydto.CodexQuotaEfficiencyCycle{
-			ID:              cycle.ID,
-			WindowStartedAt: cycle.WindowStartedAt,
-			ResetAt:         cycle.ResetAt,
-			FirstObservedAt: cycle.FirstObservedAt,
-			LastObservedAt:  cycle.LastObservedAt,
-			Usage:           repositorydto.CodexQuotaEfficiencyUsage{CostAvailable: true},
-			Transitions:     buildCodexQuotaEfficiencyTransitions(segmentsByCycle[cycle.ID]),
+		status := "completed"
+		if active {
+			status = "current"
 		}
-		queryEnd := cycle.ResetAt
+		firstPercent, lastPercent, observationCount := quotaCyclePercentSummary(segmentsByCycle[cycle.ID])
+		record := &repositorydto.CodexQuotaEfficiencyCycle{
+			ID:                    cycle.ID,
+			Status:                status,
+			WindowSeconds:         cycle.WindowSeconds,
+			WindowStartedAt:       cycle.WindowStartedAt,
+			ResetAt:               cycle.ResetAt,
+			EffectiveStartedAt:    period.start,
+			EffectiveEndedAt:      period.end,
+			FirstObservedAt:       cycle.FirstObservedAt,
+			LastObservedAt:        cycle.LastObservedAt,
+			FirstRemainingPercent: firstPercent,
+			LastRemainingPercent:  lastPercent,
+			ObservationCount:      observationCount,
+			Usage:                 repositorydto.CodexQuotaEfficiencyUsage{CostAvailable: true},
+			Transitions:           buildCodexQuotaEfficiencyTransitions(segmentsByCycle[cycle.ID]),
+		}
+		queryEnd := period.end
 		if active {
 			queryEnd = query.Now
-			// 同一系列理论上只有一个活跃周期；若旧数据重叠，reset 较晚的父表排序结果优先。
-			if current != nil {
-				continue
-			}
-			current = record
-		} else {
-			completed = append(completed, record)
 		}
-		works = append(works, codexQuotaEfficiencyCycleWork{record: record, queryEnd: queryEnd})
+		records = append(records, record)
+		works = append(works, codexQuotaEfficiencyCycleWork{record: record, queryStart: period.start, queryEnd: queryEnd})
 	}
 
 	// 单次有序流只从 SQLite 逐行读取必需字段；Go 线性归类后仅保留少量 pricing 分组。
@@ -185,67 +206,115 @@ func BuildCodexQuotaEfficiencyHistory(ctx context.Context, db *gorm.DB, query re
 	for _, work := range works {
 		finalizeCodexQuotaEfficiencyTransitions(work.record)
 	}
-	result.CurrentCycle = current
-	result.CompletedCycles = make([]repositorydto.CodexQuotaEfficiencyCycle, 0, len(completed))
-	for _, record := range completed {
-		result.CompletedCycles = append(result.CompletedCycles, *record)
+	result.Cycles = make([]repositorydto.CodexQuotaEfficiencyCycle, 0, len(records))
+	for _, record := range records {
+		result.Cycles = append(result.Cycles, *record)
 	}
+	// 当前周期固定优先；历史按角色实际结束时间倒序，窗口切换不会继续沿用更远的原始 reset。
+	sort.SliceStable(result.Cycles, func(left, right int) bool {
+		if result.Cycles[left].Status != result.Cycles[right].Status {
+			return result.Cycles[left].Status == "current"
+		}
+		return result.Cycles[left].EffectiveEndedAt.After(result.Cycles[right].EffectiveEndedAt)
+	})
 	return result, nil
 }
 
-func buildCodexQuotaEfficiencyWindows(cycles []entities.CodexQuotaCycle, now time.Time) []repositorydto.CodexQuotaEfficiencyWindow {
-	// role+seconds 是真实系列键；kind 只作为展示文案，不能把变化后的未知窗口合并到固定枚举。
-	type windowKey struct {
-		role    string
-		seconds int64
+func codexWindowRoleFromQuotaKey(quotaKey string) (string, bool) {
+	switch quotaKey {
+	case codexPrimaryQuotaKey:
+		return string(entities.CodexQuotaWindowRolePrimary), true
+	case codexSecondaryQuotaKey:
+		return string(entities.CodexQuotaWindowRoleSecondary), true
+	default:
+		return "", false
 	}
-	windowsByKey := make(map[windowKey]repositorydto.CodexQuotaEfficiencyWindow)
+}
+
+func codexQuotaEfficiencyWindowKind(windowSeconds int64) *string {
+	var kind string
+	switch windowSeconds {
+	case 5 * 60 * 60:
+		kind = string(entities.CodexQuotaWindowKindFiveHour)
+	case 7 * 24 * 60 * 60:
+		kind = string(entities.CodexQuotaWindowKindWeekly)
+	case 30 * 24 * 60 * 60, 365 * 24 * 60 * 60 / 12:
+		kind = string(entities.CodexQuotaWindowKindMonthly)
+	default:
+		return nil
+	}
+	return &kind
+}
+
+func quotaCyclePercentSummary(segments []entities.QuotaPercentSegment) (*int, *int, int64) {
+	if len(segments) == 0 {
+		return nil, nil, 0
+	}
+	first := segments[0].RemainingPercent
+	last := segments[len(segments)-1].RemainingPercent
+	var observationCount int64
+	for _, segment := range segments {
+		observationCount += segment.ObservationCount
+	}
+	return &first, &last, observationCount
+}
+
+func codexQuotaEfficiencyLatestObservedAt(cycles []entities.QuotaCycle) time.Time {
+	var latest time.Time
 	for _, cycle := range cycles {
-		key := windowKey{role: string(cycle.WindowRole), seconds: cycle.WindowSeconds}
-		window := windowsByKey[key]
-		window.WindowRole = key.role
-		window.WindowSeconds = key.seconds
-		if window.WindowKind == nil && cycle.WindowKind != nil {
-			kind := *cycle.WindowKind
-			window.WindowKind = &kind
+		if cycle.LastObservedAt.After(latest) {
+			latest = cycle.LastObservedAt
 		}
-		if cycle.LastObservedAt.After(window.LastObservedAt) {
-			window.LastObservedAt = cycle.LastObservedAt
-		}
-		if !now.Before(cycle.WindowStartedAt) && now.Before(cycle.ResetAt) {
-			window.HasCurrentCycle = true
-		}
-		windowsByKey[key] = window
 	}
-	windows := make([]repositorydto.CodexQuotaEfficiencyWindow, 0, len(windowsByKey))
-	for _, window := range windowsByKey {
-		windows = append(windows, window)
+	return latest
+}
+
+func buildCodexQuotaEfficiencyWindows(cycles []entities.QuotaCycle, now time.Time, latestObservedAt time.Time) []repositorydto.CodexQuotaEfficiencyWindow {
+	// 上游角色是稳定窗口身份；每个角色只保留最近一次观察到的周期长度作为选择器标题。
+	latestCycleByRole := make(map[string]entities.QuotaCycle, 2)
+	for _, cycle := range cycles {
+		role, ok := codexWindowRoleFromQuotaKey(cycle.QuotaKey)
+		if !ok {
+			continue
+		}
+		latest, found := latestCycleByRole[role]
+		if !found || cycle.LastObservedAt.After(latest.LastObservedAt) || (cycle.LastObservedAt.Equal(latest.LastObservedAt) && cycle.ID > latest.ID) {
+			latestCycleByRole[role] = cycle
+		}
 	}
-	// 确定性顺序让前端键盘切换稳定：Primary 优先，同角色按较短真实窗口优先。
+	windows := make([]repositorydto.CodexQuotaEfficiencyWindow, 0, len(latestCycleByRole))
+	for role, cycle := range latestCycleByRole {
+		// 选择器只呈现最近一次账号响应真实返回的角色，避免已消失 Secondary 与当前 Primary 显示成两个同名 Weekly。
+		if !cycle.LastObservedAt.Equal(latestObservedAt) {
+			continue
+		}
+		windows = append(windows, repositorydto.CodexQuotaEfficiencyWindow{
+			WindowRole:      role,
+			WindowKind:      codexQuotaEfficiencyWindowKind(cycle.WindowSeconds),
+			WindowSeconds:   cycle.WindowSeconds,
+			HasCurrentCycle: !now.Before(cycle.WindowStartedAt) && now.Before(cycle.ResetAt),
+			LastObservedAt:  cycle.LastObservedAt,
+		})
+	}
+	// 确定性顺序让前端键盘切换稳定：Primary 固定优先，Secondary 固定随后。
 	sort.Slice(windows, func(left, right int) bool {
-		if windows[left].WindowRole != windows[right].WindowRole {
-			return windows[left].WindowRole == string(entities.CodexQuotaWindowRolePrimary)
-		}
-		return windows[left].WindowSeconds < windows[right].WindowSeconds
+		return windows[left].WindowRole == string(entities.CodexQuotaWindowRolePrimary) && windows[right].WindowRole != string(entities.CodexQuotaWindowRolePrimary)
 	})
 	return windows
 }
 
-func selectCodexQuotaEfficiencyWindow(windows []repositorydto.CodexQuotaEfficiencyWindow, role *string, seconds *int64) *repositorydto.CodexQuotaEfficiencyWindow {
-	// 显式筛选只接受完全匹配；调用层负责校验 role/seconds 的值域。
-	if role != nil || seconds != nil {
+func selectCodexQuotaEfficiencyWindow(windows []repositorydto.CodexQuotaEfficiencyWindow, role *string) *repositorydto.CodexQuotaEfficiencyWindow {
+	// 显式筛选只按上游角色匹配；周期长度变化不会创建第二个同角色选择项。
+	if role != nil {
 		for index := range windows {
-			if role != nil && windows[index].WindowRole != strings.ToLower(strings.TrimSpace(*role)) {
-				continue
-			}
-			if seconds != nil && windows[index].WindowSeconds != *seconds {
+			if windows[index].WindowRole != strings.ToLower(strings.TrimSpace(*role)) {
 				continue
 			}
 			return &windows[index]
 		}
 		return nil
 	}
-	// 默认先选当前活跃系列；多个系列同时活跃时沿用 windows 的 Primary/短窗口确定性顺序。
+	// 默认先选当前活跃角色；Primary 与 Secondary 同时存在时沿用上面的稳定角色顺序。
 	for index := range windows {
 		if windows[index].HasCurrentCycle {
 			return &windows[index]
@@ -261,7 +330,46 @@ func selectCodexQuotaEfficiencyWindow(windows []repositorydto.CodexQuotaEfficien
 	return selected
 }
 
-func buildCodexQuotaEfficiencyTransitions(segments []entities.CodexQuotaPercentSegment) []repositorydto.CodexQuotaEfficiencyTransition {
+func buildCodexQuotaEfficiencyCyclePeriods(cycles []entities.QuotaCycle, roleHasCurrentCycle bool, now time.Time) map[int64]codexQuotaEfficiencyCyclePeriod {
+	// 观察顺序表达角色真实演进；复制后排序，避免扰动调用方用于历史倒序展示的父周期切片。
+	ordered := append([]entities.QuotaCycle(nil), cycles...)
+	sort.SliceStable(ordered, func(left, right int) bool {
+		if !ordered[left].FirstObservedAt.Equal(ordered[right].FirstObservedAt) {
+			return ordered[left].FirstObservedAt.Before(ordered[right].FirstObservedAt)
+		}
+		return ordered[left].ID < ordered[right].ID
+	})
+	periods := make(map[int64]codexQuotaEfficiencyCyclePeriod, len(ordered))
+	for index, cycle := range ordered {
+		period := codexQuotaEfficiencyCyclePeriod{start: cycle.WindowStartedAt, end: cycle.ResetAt}
+		if index > 0 {
+			previousCycle := ordered[index-1]
+			previousPeriod := periods[previousCycle.ID]
+			// 周期长度变化或理论周期重叠都以新周期首次观察时间为角色切换边界。
+			switched := previousCycle.WindowSeconds != cycle.WindowSeconds || cycle.FirstObservedAt.Before(previousPeriod.end)
+			if switched {
+				if cycle.FirstObservedAt.Before(previousPeriod.end) {
+					previousPeriod.end = cycle.FirstObservedAt
+				}
+				if period.start.Before(cycle.FirstObservedAt) {
+					period.start = cycle.FirstObservedAt
+				}
+				periods[previousCycle.ID] = previousPeriod
+			}
+		}
+		periods[cycle.ID] = period
+	}
+	if len(ordered) == 0 {
+		return periods
+	}
+	latestCycle := ordered[len(ordered)-1]
+	latestPeriod := periods[latestCycle.ID]
+	latestPeriod.current = roleHasCurrentCycle && !now.Before(latestPeriod.start) && now.Before(latestPeriod.end)
+	periods[latestCycle.ID] = latestPeriod
+	return periods
+}
+
+func buildCodexQuotaEfficiencyTransitions(segments []entities.QuotaPercentSegment) []repositorydto.CodexQuotaEfficiencyTransition {
 	transitions := make([]repositorydto.CodexQuotaEfficiencyTransition, 0, max(0, len(segments)-1))
 	for index := 1; index < len(segments); index++ {
 		previous := segments[index-1]
@@ -293,19 +401,19 @@ func streamCodexQuotaEfficiencyUsage(ctx context.Context, db *gorm.DB, authIndex
 	}
 	// 有序事件流与周期时间线同向前进，每条事件无需遍历全部周期或变化区间。
 	sort.Slice(works, func(left, right int) bool {
-		if !works[left].record.WindowStartedAt.Equal(works[right].record.WindowStartedAt) {
-			return works[left].record.WindowStartedAt.Before(works[right].record.WindowStartedAt)
+		if !works[left].queryStart.Equal(works[right].queryStart) {
+			return works[left].queryStart.Before(works[right].queryStart)
 		}
 		if !works[left].queryEnd.Equal(works[right].queryEnd) {
 			return works[left].queryEnd.Before(works[right].queryEnd)
 		}
 		return works[left].record.ID < works[right].record.ID
 	})
-	globalStart := works[0].record.WindowStartedAt
+	globalStart := works[0].queryStart
 	globalEnd := works[0].queryEnd
 	for _, work := range works[1:] {
-		if work.record.WindowStartedAt.Before(globalStart) {
-			globalStart = work.record.WindowStartedAt
+		if work.queryStart.Before(globalStart) {
+			globalStart = work.queryStart
 		}
 		if work.queryEnd.After(globalEnd) {
 			globalEnd = work.queryEnd
@@ -354,7 +462,7 @@ func streamCodexQuotaEfficiencyUsage(ctx context.Context, db *gorm.DB, authIndex
 			break
 		}
 		work := &works[workIndex]
-		if event.Timestamp.Before(work.record.WindowStartedAt) {
+		if event.Timestamp.Before(work.queryStart) {
 			continue
 		}
 		cycleAccumulators[workIndex].add(event)

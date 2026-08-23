@@ -83,6 +83,8 @@ const (
 	migrationCreateErrorEvents = "20260820_create_error_events"
 	// migrationCodexQuotaHistory 创建 Codex 主额度周期父表和整数百分比状态子表。
 	migrationCodexQuotaHistory = "20260820_codex_quota_history"
+	// migrationRebuildQuotaHistory 清空错误 Codex 历史并切换到通用额度历史父子表。
+	migrationRebuildQuotaHistory = "20260822_rebuild_quota_history"
 )
 
 type schemaMigration struct {
@@ -204,6 +206,8 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationCreateErrorEvents, run: createErrorEventsMigration},
 		// 新表 migration 使用默认单事务，schema 与版本标记必须一起提交或回滚。
 		{version: migrationCodexQuotaHistory, run: createCodexQuotaHistoryMigration},
+		// 破坏性清空与通用表创建必须和版本标记处于同一个默认事务。
+		{version: migrationRebuildQuotaHistory, run: rebuildQuotaHistoryMigration},
 	}
 }
 

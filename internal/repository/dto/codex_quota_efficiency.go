@@ -12,33 +12,29 @@ type CodexQuotaEfficiencyQuery struct {
 	RangeStart time.Time
 	// WindowRole 可选地选择 Primary 或 Secondary；nil 表示由 repository 按当前周期决定。
 	WindowRole *string
-	// WindowSeconds 可选地选择上游真实窗口秒数；nil 表示由 repository 按当前周期决定。
-	WindowSeconds *int64
 }
 
-// CodexQuotaEfficiencyHistory 是图表、周期摘要和历史列表共同复用的规范化查询结果。
+// CodexQuotaEfficiencyHistory 是图表、周期摘要和完整周期列表共同复用的规范化查询结果。
 type CodexQuotaEfficiencyHistory struct {
 	// GeneratedAt 是本次 pricing snapshot 与当前周期截点共同绑定的生成时间。
 	GeneratedAt time.Time
 	// RangeStart 是响应实际采用的历史下界，供调用层明确“最近 30 天”口径。
 	RangeStart time.Time
-	// Windows 列出范围内真实存在的窗口系列，不根据 five_hour/weekly/monthly 写死窗口。
+	// Windows 只列最近一次账号响应存在的角色，每个角色最多一项并使用其最新真实周期。
 	Windows []CodexQuotaEfficiencyWindow
 	// SelectedWindow 是当前响应实际展开的单个窗口；没有历史时为 nil。
 	SelectedWindow *CodexQuotaEfficiencyWindow
-	// CurrentCycle 只包含 now 落入其真实边界的周期，不会在 CompletedCycles 中重复。
-	CurrentCycle *CodexQuotaEfficiencyCycle
-	// CompletedCycles 按 reset_at 倒序返回范围内已经结束的周期。
-	CompletedCycles []CodexQuotaEfficiencyCycle
+	// Cycles 由后端统一标记 current/completed；当前周期优先，其余按角色有效结束时间倒序。
+	Cycles []CodexQuotaEfficiencyCycle
 }
 
-// CodexQuotaEfficiencyWindow 用 role 与真实秒数唯一表达一个可切换窗口系列。
+// CodexQuotaEfficiencyWindow 用上游角色稳定表达一个窗口，周期长度取该角色的最新观察值。
 type CodexQuotaEfficiencyWindow struct {
 	// WindowRole 是上游主额度中的 primary 或 secondary 位置。
 	WindowRole string
 	// WindowKind 是当前已知秒数的友好分类；未知正窗口保持 nil。
 	WindowKind *string
-	// WindowSeconds 保留上游真实秒数，窗口变化后不会被固定枚举吞掉。
+	// WindowSeconds 是该角色最近观察到的真实窗口秒数，只用于展示当前周期类型。
 	WindowSeconds int64
 	// HasCurrentCycle 表示这个系列在 GeneratedAt 是否存在正在进行的周期。
 	HasCurrentCycle bool
@@ -50,14 +46,27 @@ type CodexQuotaEfficiencyWindow struct {
 type CodexQuotaEfficiencyCycle struct {
 	// ID 是历史父行 ID，只用于稳定标识周期，不是 UsageEvent 外键。
 	ID int64
+	// Status 只允许 current/completed，前端不得自行用浏览器时间重算。
+	Status string
+	// WindowSeconds 是这个历史周期自身的上游真实秒数，不跟随角色最新周期变化。
+	WindowSeconds int64
 	// WindowStartedAt 是由 reset_at 减真实窗口秒数得到的周期开始边界。
 	WindowStartedAt time.Time
 	// ResetAt 是周期结束的半开右边界。
 	ResetAt time.Time
+	// EffectiveStartedAt 是角色在本周期真正生效的查询起点；窗口切换时不追溯切换前用量。
+	EffectiveStartedAt time.Time
+	// EffectiveEndedAt 是角色在本周期真正结束的查询终点；窗口切换或角色消失时可早于 ResetAt。
+	EffectiveEndedAt time.Time
 	// FirstObservedAt 是 Keeper 首次看到该周期的时间，不能冒充周期开始。
 	FirstObservedAt time.Time
 	// LastObservedAt 是 Keeper 最近看到该周期的时间。
 	LastObservedAt time.Time
+	// FirstRemainingPercent 与 LastRemainingPercent 让单基线周期也能在列表中明确展示。
+	FirstRemainingPercent *int
+	LastRemainingPercent  *int
+	// ObservationCount 是本周期所有整数百分比状态段的真实观察次数总和。
+	ObservationCount int64
 	// Usage 聚合整个周期边界内的 OAuth UsageEvent，包括百分比稳定期间的事件。
 	Usage CodexQuotaEfficiencyUsage
 	// Transitions 只包含真实相邻剩余百分比状态形成的效率样本。

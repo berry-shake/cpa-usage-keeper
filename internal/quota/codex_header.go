@@ -142,12 +142,12 @@ func parseCodexDecodedHeaderUsageWindow(headers http.Header, prefix string) *Cod
 		HasUsedPercent:        true,
 		HasLimitWindowSeconds: true,
 	}
-	// relative reset 允许明确零秒；负数没有合法边界。
+	// 重置倒计时允许明确零秒；负数没有合法边界。
 	if value, ok := parseIntHeader(headers, prefix+"Reset-After-Seconds"); ok && value >= 0 {
 		window.ResetAfterSeconds = value
 		window.HasResetAfterSeconds = true
 	}
-	// absolute reset 只接受正 Unix 秒，并在 history 构造时优先于 relative。
+	// 上游直接返回的重置时刻只接受正 Unix 秒，并在历史构造时优先于倒计时推算值。
 	if value, ok := parseIntHeader(headers, prefix+"Reset-At"); ok && value > 0 {
 		window.ResetAt = value
 		window.HasResetAt = true

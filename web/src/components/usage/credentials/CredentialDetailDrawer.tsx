@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '@/components/ui/Modal'
 import { IconRefreshCw } from '@/components/ui/icons'
@@ -9,7 +9,7 @@ import type { ErrorEvent, UsageEvent, UsageEventRequestLogResponse } from '@/lib
 import { AuthFileQuotaPanel } from './AuthFileCredentialsSection'
 import { CredentialErrorEventsList } from './CredentialErrorEventsList'
 import { CredentialHealthPanel } from './CredentialHealthPanel'
-import { CredentialPriorityBadge, formatCredentialNumber, formatCredentialPercent } from './CredentialSectionShell'
+import { CredentialPriorityBadge, cacheReadRateTone, credentialToneClassName, formatCredentialNumber, formatCredentialPercent, successRateTone } from './CredentialSectionShell'
 import { CredentialSubscriptionBadge } from './CredentialSubscriptionBadge'
 import { CredentialRequestEventsList } from './CredentialRequestEventsList'
 import { CodexQuotaHistoryPanel } from './CodexQuotaHistoryPanel'
@@ -494,10 +494,20 @@ export function CredentialDetailDrawer({
         {activeTab === 'overview' ? (
           <section id={overviewPanelId} role="tabpanel" aria-labelledby={overviewTabId} className={styles.overviewPanel}>
           <div className={styles.summaryGrid}>
-            <DetailMetric label={t('usage_stats.total_requests')} value={formatCredentialNumber(row.totalRequests)} detail={`${t('usage_stats.success')} ${formatCredentialNumber(row.successCount)} · ${t('usage_stats.failure')} ${formatCredentialNumber(row.failureCount)}`} />
-            <DetailMetric label={t('usage_stats.success_rate')} value={formatCredentialPercent(row.successRate)} />
+            <DetailMetric
+              label={t('usage_stats.total_requests')}
+              value={formatCredentialNumber(row.totalRequests)}
+              detail={(
+                <>
+                  <span className={credentialStyles.credentialMetricValueSuccess}>{t('usage_stats.success')} {formatCredentialNumber(row.successCount)}</span>
+                  {' · '}
+                  <span className={credentialStyles.credentialMetricValueDanger}>{t('usage_stats.failure')} {formatCredentialNumber(row.failureCount)}</span>
+                </>
+              )}
+            />
+            <DetailMetric valueTone={successRateTone(row.successRate)} label={t('usage_stats.success_rate')} value={formatCredentialPercent(row.successRate)} />
             <DetailMetric label={t('usage_stats.total_tokens')} value={formatCredentialNumber(row.totalTokens)} />
-            <DetailMetric label={t('usage_stats.cache_rate')} value={formatCredentialPercent(row.cacheReadRate)} />
+            <DetailMetric valueTone={cacheReadRateTone(row.cacheReadRate)} label={t('usage_stats.cache_rate')} value={formatCredentialPercent(row.cacheReadRate)} />
           </div>
           <div className={`${styles.overviewGrid} ${selection.kind === 'ai-provider' ? styles.overviewGridSingle : ''}`.trim()}>
             <section className={styles.overviewSection}>
@@ -577,11 +587,15 @@ export function CredentialDetailDrawer({
   )
 }
 
-function DetailMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
+type DetailMetricTone = 'success' | 'warning' | 'danger' | 'neutral'
+
+function DetailMetric({ valueTone, label, value, detail }: { valueTone?: DetailMetricTone; label: string; value: string; detail?: ReactNode }) {
+  const resolvedValueTone = valueTone ?? 'neutral'
+
   return (
-    <div className={styles.summaryMetric}>
+    <div className={styles.summaryMetric} data-credential-detail-metric-tone={valueTone}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong className={credentialToneClassName('credentialMetricValue', resolvedValueTone)}>{value}</strong>
       {detail ? <small>{detail}</small> : null}
     </div>
   )

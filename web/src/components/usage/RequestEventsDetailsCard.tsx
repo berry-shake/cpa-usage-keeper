@@ -15,7 +15,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { MainActionButton } from '@/components/ui/MainActionButton';
 import { PortalTooltip, usePortalTooltip } from '@/components/ui/PortalTooltip';
 import { Select } from '@/components/ui/Select';
-import { IconChevronDown, IconDownload, IconScrollText, IconSettings } from '@/components/ui/icons';
+import { IconChevronDown, IconDownload, IconSettings } from '@/components/ui/icons';
 import type { UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption } from '@/lib/types';
 import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment';
 import {
@@ -34,6 +34,7 @@ import {
 } from './requestEventColumns';
 import { RequestEventsColumnSettingsModal } from './RequestEventsColumnSettingsModal';
 import { RequestEventLogModal } from './RequestEventLogModal';
+import { RequestEventResultBadge } from './RequestEventResultBadge';
 
 export { splitRequestLogVirtualChunks } from './RequestEventLogModal';
 
@@ -421,7 +422,6 @@ export function RequestEventsDetailsCard({
   const [columnSettingsOpen, setColumnSettingsOpen] = useState(false);
   const [columnSettingsSession, setColumnSettingsSession] = useState(0);
   const requestEventsTableWrapperRef = useRef<HTMLDivElement | null>(null);
-  const resultLocale = t('usage_stats.success') === 'Success' ? 'en' : 'zh';
   const latencyHint = t('usage_stats.latency_unit_hint', {
     field: LATENCY_SOURCE_FIELD,
     unit: t('usage_stats.duration_unit_ms'),
@@ -791,33 +791,15 @@ export function RequestEventsDetailsCard({
         label: t('usage_stats.request_events_result'),
         header: <th className={styles.requestEventsNoWrapCell}>{t('usage_stats.request_events_result')}</th>,
         renderCell: (row) => {
-          const resultLabel = row.failed ? t('usage_stats.failure') : t('usage_stats.success');
           const loading = requestLogLoadingEventId === row.id;
-          const resultClassName = row.failed ? styles.requestEventsResultFailed : styles.requestEventsResultSuccess;
           const canOpenLog = Boolean(requestLogAccessEnabled && row.requestId && onRequestLogOpen);
           return (
             <td className={styles.requestEventsNoWrapCell}>
-              {canOpenLog ? (
-                <button
-                  type="button"
-                  className={`${resultClassName} ${styles.requestEventsResultLogButton}`.trim()}
-                  data-result-locale={resultLocale}
-                  onClick={() => {
-                    onRequestLogOpen?.(row.event);
-                  }}
-                  title={t('usage_stats.request_events_log_hint')}
-                  aria-label={loading ? t('usage_stats.request_events_log_loading_aria', { result: resultLabel }) : t('usage_stats.request_events_log_open_aria', { result: resultLabel })}
-                  aria-busy={loading}
-                  disabled={loading}
-                >
-                  <span>{resultLabel}</span>
-                  <span className={styles.requestEventsResultLogIcon} aria-hidden="true">
-                    <IconScrollText size={9} />
-                  </span>
-                </button>
-              ) : (
-                <span className={resultClassName} data-result-locale={resultLocale}>{resultLabel}</span>
-              )}
+              <RequestEventResultBadge
+                failed={row.failed}
+                loading={loading}
+                onOpen={canOpenLog ? () => onRequestLogOpen?.(row.event) : undefined}
+              />
             </td>
           );
         },
@@ -944,7 +926,6 @@ export function RequestEventsDetailsCard({
     requestLogAccessEnabled,
     requestLogLoadingEventId,
     renderClientMetadataCell,
-    resultLocale,
     speedHint,
     t,
     ttftHint,

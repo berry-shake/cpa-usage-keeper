@@ -22,7 +22,7 @@ type ServiceOptions struct {
 	UsageHeaderSnapshotFlushInterval time.Duration
 	// CodexQuotaHistoryFlushInterval 覆盖独立历史 runner 固定批次边界前的十秒等待，主要供定向测试缩短等待。
 	CodexQuotaHistoryFlushInterval time.Duration
-	// CodexQuotaHistoryQueueSize 覆盖 Header/主动查询共享的有界队列容量，非正值使用生产默认值。
+	// CodexQuotaHistoryQueueSize 分别覆盖 Header 与可信主动查询两条有界队列容量，非正值使用生产默认值。
 	CodexQuotaHistoryQueueSize int
 	PricingCatalog             *pricing.Catalog
 }
@@ -77,10 +77,14 @@ type Service struct {
 	usageHeaderClosing       bool
 	usageHeaderCloseOnce     sync.Once
 
-	// codexQuotaHistoryQueue 有界保存 Header 快照指针或主动查询 observation 所有权，生产者永不等待。
-	codexQuotaHistoryQueue chan codexQuotaHistoryInput
-	// codexQuotaHistoryWake 只通知 runner“队列已有数据”；容量为一即可合并重复唤醒，不复制队列内容。
-	codexQuotaHistoryWake chan struct{}
+	// codexQuotaHistoryHeaderQueue 有界保存 Header 快照指针，生产者永不等待。
+	codexQuotaHistoryHeaderQueue chan codexQuotaHistoryInput
+	// codexQuotaHistoryHeaderWake 只通知 runner“Header 队列已有数据”；容量为一即可合并重复唤醒。
+	codexQuotaHistoryHeaderWake chan struct{}
+	// codexQuotaHistoryTrustedQueue 独立保存低频可信主动查询 observation，不与 Header 共用 writer 批次。
+	codexQuotaHistoryTrustedQueue chan codexQuotaHistoryInput
+	// codexQuotaHistoryTrustedWake 让可信来源跳过 Header 十秒窗口并立即触发 runner。
+	codexQuotaHistoryTrustedWake chan struct{}
 	// codexQuotaHistoryStopCh 只表达 runner 停止；队列不关闭以避免并发发送 panic。
 	codexQuotaHistoryStopCh chan struct{}
 	// codexQuotaHistoryDoneCh 在 shutdown best-effort flush 完成后关闭。
@@ -105,6 +109,8 @@ type Service struct {
 
 type CheckRequest struct {
 	AuthIndex string `json:"auth_index"`
+	// Source 决定运行期额度历史的队列分流与可信校准权限，不进入数据库或对外响应。
+	Source RefreshSource `json:"-"`
 }
 
 type CheckResponse struct {
@@ -171,8 +177,10 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 		usageHeaderDoneCh:               make(chan struct{}),
 		usageHeaderFlushInterval:        usageHeaderFlushInterval,
 		usageHeaderNewTimer:             newUsageHeaderTimer,
-		codexQuotaHistoryQueue:          make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
-		codexQuotaHistoryWake:           make(chan struct{}, 1),
+		codexQuotaHistoryHeaderQueue:    make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
+		codexQuotaHistoryHeaderWake:     make(chan struct{}, 1),
+		codexQuotaHistoryTrustedQueue:   make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
+		codexQuotaHistoryTrustedWake:    make(chan struct{}, 1),
 		codexQuotaHistoryStopCh:         make(chan struct{}),
 		codexQuotaHistoryDoneCh:         make(chan struct{}),
 		codexQuotaHistoryFlushInterval:  codexHistoryFlushInterval,
@@ -290,9 +298,12 @@ func (s *Service) Check(ctx context.Context, request CheckRequest) (CheckRespons
 	// 主动查询只从原始 CodexResult 提取 Primary/Secondary；Review/Additional 从结构上不参与遍历。
 	if usageHeaderIdentityIsCodex(identity) {
 		observations := BuildCodexMainQuotaObservations(authIndex, providerOutput, time.Now())
-		if len(observations) > 0 && !s.tryAppendCodexQuotaHistoryObservations(observations) {
+		if len(observations) > 0 && !s.tryAppendCodexQuotaHistoryObservations(observations, request.Source) {
 			// history 是 best-effort 统计链路，队列满或 shutdown 不能改变手动/定时/巡检刷新结果。
-			logrus.WithField("auth_index", authIndex).Warn("codex quota history active observation append skipped")
+			logrus.WithFields(logrus.Fields{
+				"auth_index": authIndex,
+				"source":     refreshSourceLogValue(request.Source),
+			}).Warn("codex quota history active observation append skipped")
 		}
 	}
 	response := CheckResponse{
