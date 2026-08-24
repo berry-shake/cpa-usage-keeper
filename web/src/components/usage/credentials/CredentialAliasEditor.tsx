@@ -1,4 +1,4 @@
-import { useState, type HTMLAttributes } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { IconCheck, IconPencil, IconX } from '@/components/ui/icons'
@@ -10,7 +10,6 @@ interface CredentialAliasEditorProps {
   alias?: string | null
   saving: boolean
   disabled?: boolean
-  displayNameProps?: HTMLAttributes<HTMLElement>
   onOpenDetails?: () => void
   onSaveAlias: (id: string, alias: string) => Promise<void>
 }
@@ -19,14 +18,13 @@ export function isCredentialAliasEditorDisabled(identityId: string, isDeleted?: 
   return Boolean(isDeleted || (aliasSavingId && aliasSavingId !== identityId))
 }
 
-export function CredentialAliasEditor({ identityId, displayName, alias, saving, disabled = false, displayNameProps, onOpenDetails, onSaveAlias }: CredentialAliasEditorProps) {
+export function CredentialAliasEditor({ identityId, displayName, alias, saving, disabled = false, onOpenDetails, onSaveAlias }: CredentialAliasEditorProps) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [draftAlias, setDraftAlias] = useState(alias ?? '')
   const currentAlias = alias ?? ''
   const canEdit = !disabled && identityId.trim() !== ''
   const canSave = !saving && draftAlias.trim() !== currentAlias.trim()
-  const displayNameClassName = `${styles.credentialAliasNameSlot} ${displayNameProps?.className ?? ''}`.trim()
 
   const startEditing = () => {
     if (!canEdit) return
@@ -105,9 +103,8 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
       <span className={styles.credentialAliasDisplayLayout}>
         {onOpenDetails ? (
           <button
-            {...displayNameProps}
             type="button"
-            className={`${displayNameClassName} ${styles.credentialDetailNameButton}`.trim()}
+            className={`${styles.credentialAliasNameSlot} ${styles.credentialDetailNameButton}`}
             data-credential-detail-trigger="true"
             onClick={onOpenDetails}
           >
@@ -115,7 +112,7 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
             <span className={styles.credentialDetailNameArrow} aria-hidden="true">›</span>
           </button>
         ) : (
-          <span {...displayNameProps} className={displayNameClassName}>{displayName}</span>
+          <span className={styles.credentialAliasNameSlot}>{displayName}</span>
         )}
         <span className={styles.credentialAliasActionSlot}>
           {canEdit && (

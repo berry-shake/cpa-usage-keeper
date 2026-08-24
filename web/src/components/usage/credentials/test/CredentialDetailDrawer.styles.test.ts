@@ -66,4 +66,10 @@ describe('CredentialDetailDrawer styles', () => {
     expect(drawerStyles).not.toContain('#3b82f6')
     expect(drawerStyles).not.toContain('#8b5cf6')
   })
+
+  it('stacks identity and quota cards in the mobile Overview layout', () => {
+    const mobileRules = scssRule('@include mobile')
+
+    expect(mobileRules).toMatch(/\.overviewGrid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/)
+  })
 })

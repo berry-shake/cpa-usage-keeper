@@ -118,6 +118,7 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
         <>
           <CurrentCycleEfficiencyCard
             cycle={currentCycle}
+            window={history.selected_window}
             isDark={resolvedTheme === 'dark'}
             locale={locale}
           />
@@ -132,10 +133,12 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
 
 function CurrentCycleEfficiencyCard({
   cycle,
+  window,
   isDark,
   locale,
 }: {
   cycle: CodexQuotaHistoryCycle | null
+  window: CodexQuotaHistoryWindow | null
   isDark: boolean
   locale?: string
 }) {
@@ -149,17 +152,30 @@ function CurrentCycleEfficiencyCard({
     <section className={styles.card} data-codex-quota-current-cycle="true">
       <header className={styles.cardHeader}>
         <div>
-          <h3>{t('usage_stats.credentials_quota_history_current_title')}</h3>
+          <h3>
+            {t('usage_stats.credentials_quota_history_current_title')}
+            {window ? ` · ${formatWindowLabel(window, t)}` : ''}
+          </h3>
           <p>
             {cycle
-              ? t('usage_stats.credentials_quota_history_observed_range', {
-                start: formatDateTime(cycle.first_observed_at, locale),
-                end: formatDateTime(cycle.last_observed_at, locale),
-              })
+              ? <>
+                <span className={styles.currentCycleRange} data-codex-quota-cycle-range="true">
+                  {t('usage_stats.credentials_quota_history_cycle_range', {
+                    start: formatDateTime(cycle.window_started_at, locale),
+                    end: formatDateTime(cycle.reset_at, locale),
+                  })}
+                </span>
+                <span className={styles.currentObservedRange} data-codex-quota-observed-range="true">
+                  {t('usage_stats.credentials_quota_history_observed_range', {
+                    start: formatDateTime(cycle.first_observed_at, locale),
+                    end: formatDateTime(cycle.last_observed_at, locale),
+                  })}
+                </span>
+              </>
               : t('usage_stats.credentials_quota_history_no_current')}
             {cycle && chart.tokenMedian != null ? (
               <span className={styles.medianSummary} data-codex-quota-median-summary="true">
-                {' · '}{t('usage_stats.credentials_quota_history_median')} · {formatCompactNumber(chart.tokenMedian)} Token/1%
+                {t('usage_stats.credentials_quota_history_median')} · {formatCompactNumber(chart.tokenMedian)} Token/1%
                 {chart.costMedian != null ? ` · ${formatUsd(chart.costMedian)}/1%` : ''}
               </span>
             ) : null}

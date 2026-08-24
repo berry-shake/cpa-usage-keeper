@@ -104,6 +104,50 @@ func TestBuildCodexQuotaEfficiencyHistoryClassifiesCycleAndTransitionUsageOnce(t
 	}
 }
 
+func TestBuildCodexQuotaEfficiencyHistoryUsesNewCycleStartForOverlappingWeeklyCycles(t *testing.T) {
+	// 上游延后 Weekly reset 时，新的理论起点必须立即取代旧周期的重叠部分，不能等到 Keeper 首次观察。
+	oldStart := time.Date(2026, 8, 20, 3, 35, 0, 0, time.UTC)
+	oldReset := time.Date(2026, 8, 27, 3, 35, 0, 0, time.UTC)
+	newStart := time.Date(2026, 8, 23, 16, 21, 0, 0, time.UTC)
+	newReset := time.Date(2026, 8, 30, 16, 21, 0, 0, time.UTC)
+	newObservedAt := newStart.Add(2 * time.Hour)
+	now := time.Date(2026, 8, 25, 4, 0, 0, 0, time.UTC)
+	db := openTestDatabase(t)
+	oldCycle := seedCodexQuotaEfficiencyCycle(t, db, "codex-auth", oldStart, oldReset, []codexQuotaEfficiencySegmentSeed{
+		{remaining: 61, first: newStart.Add(-15 * time.Minute), last: newStart.Add(-15 * time.Minute)},
+	})
+	newCycle := seedCodexQuotaEfficiencyCycle(t, db, "codex-auth", newStart, newReset, []codexQuotaEfficiencySegmentSeed{
+		{remaining: 100, first: newObservedAt, last: newObservedAt},
+	})
+	seedCodexQuotaEfficiencyUsage(t, db,
+		usageEventForQuotaEfficiency("before-new-cycle", "oauth", "codex-auth", newStart.Add(-10*time.Minute), 100),
+		usageEventForQuotaEfficiency("at-new-cycle-start", "oauth", "codex-auth", newStart, 200),
+		usageEventForQuotaEfficiency("before-new-cycle-observed", "oauth", "codex-auth", newStart.Add(30*time.Minute), 300),
+	)
+
+	result, err := repository.BuildCodexQuotaEfficiencyHistory(context.Background(), db, repositorydto.CodexQuotaEfficiencyQuery{
+		AuthIndex:  "codex-auth",
+		Now:        now,
+		RangeStart: now.Add(-30 * 24 * time.Hour),
+	}, codexQuotaEfficiencyPricingResolver(t))
+	if err != nil {
+		t.Fatalf("BuildCodexQuotaEfficiencyHistory returned error: %v", err)
+	}
+	if len(result.Cycles) != 2 || result.Cycles[0].ID != newCycle.ID || result.Cycles[1].ID != oldCycle.ID {
+		t.Fatalf("expected current and completed Weekly cycles, got %+v", result.Cycles)
+	}
+	current := result.Cycles[0]
+	completed := result.Cycles[1]
+	if !current.WindowStartedAt.Equal(newStart) || !current.ResetAt.Equal(newReset) || !completed.ResetAt.Equal(oldReset) {
+		t.Fatalf("expected raw cycle boundaries to remain unchanged, got current=%+v completed=%+v", current, completed)
+	}
+	if !current.EffectiveStartedAt.Equal(newStart) || !completed.EffectiveEndedAt.Equal(newStart) {
+		t.Fatalf("expected new cycle start to split overlapping Weekly periods, got current=%+v completed=%+v", current, completed)
+	}
+	assertCodexQuotaEfficiencyUsage(t, completed.Usage, 100, 0.0001, true)
+	assertCodexQuotaEfficiencyUsage(t, current.Usage, 500, 0.0005, true)
+}
+
 func TestBuildCodexQuotaEfficiencyHistoryUsesLatestWindowPerRoleAndCutsOverlappingUsage(t *testing.T) {
 	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 	previousObservedAt := now.Add(-2 * time.Hour)

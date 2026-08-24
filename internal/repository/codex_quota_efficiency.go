@@ -345,14 +345,19 @@ func buildCodexQuotaEfficiencyCyclePeriods(cycles []entities.QuotaCycle, roleHas
 		if index > 0 {
 			previousCycle := ordered[index-1]
 			previousPeriod := periods[previousCycle.ID]
-			// 周期长度变化或理论周期重叠都以新周期首次观察时间为角色切换边界。
-			switched := previousCycle.WindowSeconds != cycle.WindowSeconds || cycle.FirstObservedAt.Before(previousPeriod.end)
+			// 同一窗口被上游重排时以新周期理论起点为准；窗口类型切换仍以首次观察时间表达角色实际变更。
+			windowChanged := previousCycle.WindowSeconds != cycle.WindowSeconds
+			switchedAt := cycle.WindowStartedAt
+			if windowChanged {
+				switchedAt = cycle.FirstObservedAt
+			}
+			switched := windowChanged || switchedAt.Before(previousPeriod.end)
 			if switched {
-				if cycle.FirstObservedAt.Before(previousPeriod.end) {
-					previousPeriod.end = cycle.FirstObservedAt
+				if switchedAt.Before(previousPeriod.end) {
+					previousPeriod.end = switchedAt
 				}
-				if period.start.Before(cycle.FirstObservedAt) {
-					period.start = cycle.FirstObservedAt
+				if period.start.Before(switchedAt) {
+					period.start = switchedAt
 				}
 				periods[previousCycle.ID] = previousPeriod
 			}

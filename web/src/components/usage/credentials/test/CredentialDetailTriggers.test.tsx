@@ -116,7 +116,10 @@ describe('credential detail name triggers', () => {
     ))
 
     const authFileTrigger = container.querySelector<HTMLButtonElement>('[data-credential-detail-trigger="true"]')
+    const authFileRowElement = authFileTrigger?.closest('article')
     expect(authFileTrigger?.querySelector('[class*="credentialDetailNameArrow"]')).not.toBeNull()
+    await act(async () => authFileRowElement?.click())
+    expect(onOpenDetails).not.toHaveBeenCalled()
     await act(async () => authFileTrigger?.click())
     expect(onOpenDetails).toHaveBeenCalledWith(authFileRow)
     expect(container.querySelector('[aria-label="usage_stats.credentials_alias_edit"]')).not.toBeNull()

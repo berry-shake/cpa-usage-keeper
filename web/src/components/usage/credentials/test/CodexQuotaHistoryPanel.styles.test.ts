@@ -27,4 +27,10 @@ describe('Codex quota history styles', () => {
     expect(quotaHistoryStyles).toMatch(/\.costHeaderHint\s*\{[\s\S]*?text-align:\s*right;/)
     expect(quotaHistoryStyles).toMatch(/\.screenReaderOnly\s*\{[\s\S]*?clip-path:\s*inset\(50%\);/)
   })
+
+  it('keeps cycle metadata inline on desktop and splits it into clean mobile rows', () => {
+    expect(quotaHistoryStyles).toMatch(/\.currentObservedRange::before,\s*\.medianSummary::before\s*\{[\s\S]*?content:\s*' · ';/)
+    expect(quotaHistoryStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.currentCycleRange,\s*\.currentObservedRange,\s*\.medianSummary\s*\{[\s\S]*?display:\s*block;/)
+    expect(quotaHistoryStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.currentObservedRange::before,\s*\.medianSummary::before\s*\{[\s\S]*?content:\s*none;/)
+  })
 })

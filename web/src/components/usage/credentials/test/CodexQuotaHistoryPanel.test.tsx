@@ -267,6 +267,26 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(document.body.querySelector('[data-codex-quota-efficiency-chart]')).toBeNull()
   })
 
+  it('shows the selected single window and cycle range in the current efficiency card', async () => {
+    const singleWindowResponse = cloneResponse()
+    singleWindowResponse.windows = [singleWindowResponse.windows[0]]
+    singleWindowResponse.selected_window = singleWindowResponse.windows[0]
+    singleWindowResponse.cycles = [singleWindowResponse.cycles[0]]
+    fetchCodexQuotaHistory.mockResolvedValue(singleWindowResponse)
+
+    await act(async () => {
+      root.render(<CodexQuotaHistoryPanel authIndex="codex-auth" />)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const currentCard = document.body.querySelector('[data-codex-quota-current-cycle="true"]')
+    expect(currentCard?.textContent).toContain('usage_stats.credentials_quota_history_window_weekly')
+    expect(currentCard?.querySelector('[data-codex-quota-cycle-range]')?.textContent).toContain('usage_stats.credentials_quota_history_cycle_range')
+    expect(currentCard?.querySelector('[data-codex-quota-observed-range]')?.textContent).toContain('usage_stats.credentials_quota_history_observed_range')
+    expect(document.body.querySelector('[aria-label="usage_stats.credentials_quota_history_window_selector"]')).toBeNull()
+  })
+
   it('shows a Free monthly Primary as Monthly without exposing its role', async () => {
     const monthlyResponse = cloneResponse()
     monthlyResponse.windows = [{
@@ -408,7 +428,7 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(warning?.parentElement?.tagName).toBe('HEADER')
     expect(warning?.textContent).toBe('usage_stats.credentials_quota_history_cost_unavailable')
     expect(document.body.querySelector('[data-codex-quota-median-summary]')?.textContent).toBe(
-      ' · usage_stats.credentials_quota_history_median · 1.00K Token/1%',
+      'usage_stats.credentials_quota_history_median · 1.00K Token/1%',
     )
     expect(latestChartData?.datasets[1]?.data).toEqual([1, null, null, null])
     const pointRadius = latestChartData?.datasets[1]?.pointRadius as unknown as ((context: { dataIndex: number }) => number)
