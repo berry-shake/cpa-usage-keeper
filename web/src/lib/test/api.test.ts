@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateAuthSessionAlias, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -289,6 +289,23 @@ describe('fetchUsageEvents', () => {
     const revokeUrl = new URL(String(fetchMock.mock.calls[1][0]), 'http://localhost');
     expect(revokeUrl.pathname).toBe('/api/v1/auth/sessions/hash%2Fwith%20special');
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ credentials: 'include', method: 'DELETE' });
+  });
+
+  it('updates an admin session alias through the dedicated session endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'session/hash', kind: 'admin', role: 'admin', source: 'standard', alias: 'Office Mac' }),
+    } as Response);
+
+    const updated = await updateAuthSessionAlias('session/hash', 'Office Mac');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(updated.alias).toBe('Office Mac');
+    expect(new URL(String(url), 'http://localhost').pathname).toBe('/api/v1/auth/sessions/session%2Fhash');
+    expect(init).toMatchObject({ credentials: 'include', method: 'PATCH' });
+    expect(headerValue(init, 'Content-Type')).toBe('application/json');
+    expect(init?.body).toBe(JSON.stringify({ alias: 'Office Mac' }));
   });
 
   it('loads quota auto refresh settings from the typed quota endpoint', async () => {

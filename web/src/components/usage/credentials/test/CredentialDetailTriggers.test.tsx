@@ -134,11 +134,13 @@ describe('credential detail name triggers', () => {
         page={1}
         totalPages={1}
         pageSize={10}
+        activeOnly={false}
         sort="priority"
         loading={false}
         onOpenDetails={onOpenDetails}
         onPageChange={() => undefined}
         onPageSizeChange={() => undefined}
+        onActiveOnlyChange={() => undefined}
         onSortChange={() => undefined}
       />,
     ))

@@ -453,6 +453,8 @@ describe('Credential section styles', () => {
   })
 
   it('places the Auth Files quota usage mode switch in the pagination toolbar before sorting', () => {
+    const quotaModeControl = scssRule(credentialStyles, '.credentialQuotaModeControl')
+
     expect(authFileSectionSource).toContain('credentialQuotaActionStack')
     expect(credentialStyles).toContain('credentialQuotaActionStack')
     expect(authFileSectionSource).toContain('leadingControls={showHealthMode ? undefined : <QuotaUsageModeSwitch')
@@ -462,6 +464,7 @@ describe('Credential section styles', () => {
     expect(authFileSectionSource).toContain('credentials_quota_usage_mode_current')
     expect(authFileSectionSource).toContain('credentials_quota_usage_mode_estimated')
     expect(credentialStyles).toMatch(/\.credentialQuotaModeControl\s*\{[\s\S]*?display:\s*flex;/)
+    expect(quotaModeControl).toContain('font-size: 11px')
     expect(credentialStyles).toMatch(/\.credentialQuotaModeSwitcher\s*\{[\s\S]*?border-radius:\s*999px;/)
     expect(credentialStyles).toMatch(/\.credentialQuotaModeThumbEstimated\s*\{[\s\S]*?transform:\s*translateX\(100%\);/)
     expect(credentialHealthSource).toContain('HEALTH_BUCKET_MINUTES = 10')
@@ -497,11 +500,21 @@ describe('Credential section styles', () => {
   })
 
   it('uses a fixed centered pagination bar height', () => {
+    const pagination = scssRule(credentialStyles, '.credentialPagination')
+    const pageSizeControl = scssRule(credentialStyles, '.credentialPageSizeControl')
+    const paginationSelect = scssRule(credentialStyles, '.credentialPaginationSelect')
+    const sortControl = scssRule(credentialStyles, '.credentialPaginationSortControl')
+    const sortSizer = scssRule(credentialStyles, '.credentialPaginationSortSizer', 1)
+    const sortSelect = scssRule(credentialStyles, '.credentialPaginationSortSelect', 1)
+    const paginationDropdown = scssRule(credentialStyles, '.credentialPaginationDropdown')
+
     expect(credentialStyles).toMatch(/\.credentialPagination\s*\{[\s\S]*?--usage-pagination-bar-height:\s*51px;/)
     expect(credentialStyles).toMatch(/\.credentialPagination\s*\{[\s\S]*?height:\s*var\(--usage-pagination-bar-height\);/)
     expect(credentialStyles).toMatch(/\.credentialPagination\s*\{[\s\S]*?box-sizing:\s*border-box;/)
     expect(credentialStyles).toMatch(/\.credentialPagination\s*\{[\s\S]*?align-items:\s*center;/)
     expect(credentialStyles).toMatch(/\.credentialPagination\s*\{[\s\S]*?padding:\s*0 22px;/)
+    expect(pagination).toContain('font-size: 11px')
+    expect(pageSizeControl).toContain('font-size: 11px')
     expect(credentialStyles).toMatch(/@include tablet\s*\{[\s\S]*?\.credentialPagination\s*\{[\s\S]*?overflow-x:\s*auto;/)
     expect(credentialStyles).toMatch(/@include tablet\s*\{[\s\S]*?\.credentialPaginationControls\s*\{[\s\S]*?width:\s*max-content;/)
     expect(credentialStyles).toMatch(/@include tablet\s*\{[\s\S]*?\.credentialQuotaModeControl[\s\S]*?\.credentialPageSizeControl\s*\{[\s\S]*?flex:\s*0 0 auto;/)
@@ -509,6 +522,24 @@ describe('Credential section styles', () => {
     expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialPaginationControls\s*\{[\s\S]*?width:\s*max-content;/)
     expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialQuotaModeControl[\s\S]*?\.credentialPageSizeControl\s*\{[\s\S]*?flex:\s*0 0 auto;/)
     expect(credentialStyles).toMatch(/@include mobile\s*\{[\s\S]*?\.credentialPageSizeControl\s*\{[\s\S]*?flex:\s*0 0 auto;/)
+    expect(credentialShellSource).toContain("import { Select } from '@/components/ui/Select'")
+    expect(credentialShellSource).not.toContain('<select')
+    expect(paginationSelect).toContain(':global(button)')
+    expect(paginationSelect).toContain('height: 32px')
+    expect(paginationSelect).toContain('border-radius: $radius-full')
+    expect(paginationSelect).toContain('background: var(--bg-secondary)')
+    expect(credentialShellSource).toContain('data-credential-pagination-sort-sizer="true"')
+    expect(credentialShellSource).toContain('sortOptions.map((option) =>')
+    expect(sortControl).toContain('display: inline-grid')
+    expect(sortSizer).toContain('visibility: hidden')
+    expect(sortSizer).toContain('white-space: nowrap')
+    expect(sortSizer).toContain('padding: 0 37px 0 10px')
+    expect(sortSelect).toContain('width: 100%')
+    expect(sortSelect).not.toContain('width: 124px')
+    expect(scssRule(credentialStyles, '.credentialPaginationPageSizeSelect')).toContain('width: 64px')
+    expect(credentialShellSource.match(/dropdownClassName=\{styles\.credentialPaginationDropdown\}/g)).toHaveLength(2)
+    expect(paginationDropdown).toContain(":global([role='option'])")
+    expect(paginationDropdown).toContain('font-size: 11px')
   })
 
   it('gives every Auth Files credential label a dedicated visual treatment', () => {

@@ -19,6 +19,7 @@ export interface AuthManagedSessionItem {
   kind: AuthManagedSessionKind
   role: AuthRole
   source?: AuthManagedSessionSource
+  alias?: string
   current?: boolean
   loginAt?: string
   lastSeenAt?: string

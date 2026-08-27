@@ -8,6 +8,7 @@ import type { PricingRule, ReplacePricingRuleInput } from '@/lib/types'
 import { PriceRulesModal } from '../PriceRulesModal'
 
 const modalStylesSource = readFileSync('src/components/usage/pricing/PriceRulesModal.module.scss', 'utf8')
+const questionMarkHelpStylesSource = readFileSync('src/components/ui/QuestionMarkHelpButton.module.scss', 'utf8')
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -336,21 +337,24 @@ describe('PriceRulesModal', () => {
 	const helpButton = document.body.querySelector<HTMLButtonElement>('[aria-label="How pricing rules work"]')
 	expect(helpButton).not.toBeNull()
 	expect(helpButton?.textContent).toBe('?')
-	expect(modalStylesSource).toMatch(/\.helpButton\s*\{[\s\S]*display:\s*inline-grid;/)
-	expect(modalStylesSource).toMatch(/\.helpButton\s*\{[\s\S]*width:\s*18px;/)
-	expect(modalStylesSource).toMatch(/\.helpButton\s*\{[\s\S]*height:\s*18px;/)
-	expect(modalStylesSource).toMatch(/\.helpButton\s*\{[\s\S]*background:\s*var\(--bg-secondary\);/)
-	expect(modalStylesSource).toMatch(/\.helpButton\s*\{[\s\S]*font-size:\s*11px;/)
-	expect(modalStylesSource).toMatch(/\.helpButton\s*\{[\s\S]*font-weight:\s*750;/)
-	expect(modalStylesSource).toMatch(/\.helpButton\s*\{[\s\S]*cursor:\s*default;/)
+	expect(questionMarkHelpStylesSource).toMatch(/\.button\s*\{[\s\S]*display:\s*inline-grid;/)
+	expect(questionMarkHelpStylesSource).toMatch(/\.button\s*\{[\s\S]*width:\s*18px;/)
+	expect(questionMarkHelpStylesSource).toMatch(/\.button\s*\{[\s\S]*height:\s*18px;/)
+	expect(questionMarkHelpStylesSource).toMatch(/\.button\s*\{[\s\S]*background:\s*var\(--bg-secondary\);/)
+	expect(questionMarkHelpStylesSource).toMatch(/\.button\s*\{[\s\S]*font-size:\s*11px;/)
+	expect(questionMarkHelpStylesSource).toMatch(/\.button\s*\{[\s\S]*font-weight:\s*750;/)
+	expect(questionMarkHelpStylesSource).toMatch(/\.button\s*\{[\s\S]*cursor:\s*default;/)
 	helpButton!.getBoundingClientRect = () => ({
 	  x: 280, y: 160, left: 280, top: 160, right: 298, bottom: 178,
 	  width: 18, height: 18, toJSON: () => ({}),
 	})
 	await act(async () => helpButton!.focus())
 	const describedBy = helpButton?.getAttribute('aria-describedby')
-	const tooltip = describedBy ? document.body.querySelector<HTMLElement>(`#${describedBy}[role="tooltip"]`) : null
+	const description = describedBy ? document.getElementById(describedBy) : null
+	const tooltipId = helpButton?.getAttribute('aria-controls')
+	const tooltip = tooltipId ? document.body.querySelector<HTMLElement>(`#${tooltipId}[role="tooltip"]`) : null
 	expect(helpButton).not.toBeNull()
+	expect(description?.textContent).toContain('Matching rules multiply together.')
 	expect(tooltip?.style.position).toBe('fixed')
 	expect(tooltip?.style.transform).toBe('translateY(-100%)')
 	expect(tooltip?.style.maxHeight).toBe('136px')
@@ -371,7 +375,7 @@ describe('PriceRulesModal', () => {
 
     const helpButton = document.body.querySelector<HTMLButtonElement>('[aria-label="How pricing rules work"]')
     const help = helpButton?.parentElement
-    const tooltipId = helpButton?.getAttribute('aria-describedby')
+    const tooltipId = helpButton?.getAttribute('aria-controls')
     const tooltip = tooltipId ? document.body.querySelector<HTMLElement>(`#${tooltipId}`) : null
     expect(help).not.toBeNull()
     expect(tooltip).not.toBeNull()
@@ -399,7 +403,7 @@ describe('PriceRulesModal', () => {
     })
     await dispatchPointer(helpButton!, 'pointerdown', 'touch')
 
-    const tooltipId = helpButton?.getAttribute('aria-describedby')
+    const tooltipId = helpButton?.getAttribute('aria-controls')
     const tooltip = tooltipId ? document.body.querySelector<HTMLElement>(`#${tooltipId}`) : null
     expect(tooltip?.getAttribute('aria-hidden')).toBe('false')
     expect(Number.parseFloat(tooltip?.style.maxHeight ?? '')).toBeLessThan(144)
@@ -412,7 +416,7 @@ describe('PriceRulesModal', () => {
 
     const helpButton = document.body.querySelector<HTMLButtonElement>('[aria-label="How pricing rules work"]')
     expect(helpButton).not.toBeNull()
-    const tooltipId = helpButton?.getAttribute('aria-describedby')
+    const tooltipId = helpButton?.getAttribute('aria-controls')
     const tooltip = tooltipId ? document.body.querySelector<HTMLElement>(`#${tooltipId}`) : null
 
     await dispatchPointer(helpButton!, 'pointerdown', 'touch')

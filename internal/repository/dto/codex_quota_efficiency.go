@@ -54,7 +54,7 @@ type CodexQuotaEfficiencyCycle struct {
 	WindowStartedAt time.Time
 	// ResetAt 是周期结束的半开右边界。
 	ResetAt time.Time
-	// EffectiveStartedAt 是角色在本周期真正生效的查询起点；窗口切换时不追溯切换前用量。
+	// EffectiveStartedAt 是角色在本周期真正生效的查询起点；重叠周期统一使用新周期理论起点切分。
 	EffectiveStartedAt time.Time
 	// EffectiveEndedAt 是角色在本周期真正结束的查询终点；窗口切换或角色消失时可早于 ResetAt。
 	EffectiveEndedAt time.Time

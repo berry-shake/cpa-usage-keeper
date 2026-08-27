@@ -85,6 +85,8 @@ const (
 	migrationCodexQuotaHistory = "20260820_codex_quota_history"
 	// migrationRebuildQuotaHistory 清空错误 Codex 历史并切换到通用额度历史父子表。
 	migrationRebuildQuotaHistory = "20260822_rebuild_quota_history"
+	// migrationAddAuthSessionAlias 保存单个管理员会话的可选辨识名称。
+	migrationAddAuthSessionAlias = "20260824_add_auth_session_alias"
 )
 
 type schemaMigration struct {
@@ -208,6 +210,7 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationCodexQuotaHistory, run: createCodexQuotaHistoryMigration},
 		// 破坏性清空与通用表创建必须和版本标记处于同一个默认事务。
 		{version: migrationRebuildQuotaHistory, run: rebuildQuotaHistoryMigration},
+		{version: migrationAddAuthSessionAlias, run: addAuthSessionAliasMigration},
 	}
 }
 

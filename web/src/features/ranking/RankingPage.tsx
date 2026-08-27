@@ -1,10 +1,11 @@
-import { type KeyboardEvent, useId, useMemo, useState } from 'react';
+import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { MainActionButton } from '@/components/ui/MainActionButton';
 import { Modal } from '@/components/ui/Modal';
+import { QuestionMarkHelp } from '@/components/ui/QuestionMarkHelp';
 import { RankingApiError } from './api';
 import { RankingAvatar } from './components/RankingAvatar';
 import { RankingMetricSelect, RankingToolbar } from './components/RankingToolbar';
@@ -130,13 +131,11 @@ export function RankingPage(props: RankingPageProps) {
   const [pendingProfile, setPendingProfile] = useState<RankingProfileRequest | null>(null);
   const [profileModalStep, setProfileModalStep] = useState<ProfileModalStep | null>(null);
   const [profileActionSuccess, setProfileActionSuccess] = useState<ProfileAction | null>(null);
-  const [privacyTooltipOpen, setPrivacyTooltipOpen] = useState(false);
   const [localProfileEntry, setLocalProfileEntry] = useState<RankingLeaderboardEntry | null>(null);
   const [localProfileAlias, setLocalProfileAlias] = useState('');
   const [localProfileAvatarID, setLocalProfileAvatarID] = useState(1);
   const [localProfileSaving, setLocalProfileSaving] = useState(false);
   const [localProfileError, setLocalProfileError] = useState<unknown>(null);
-  const privacyTooltipID = useId();
   const currentBoard = props.leaderboard?.period === props.period && props.leaderboard.metric === props.metric
     ? props.leaderboard
     : null;
@@ -150,12 +149,10 @@ export function RankingPage(props: RankingPageProps) {
     setProfileError(normalized.error);
     if (normalized.error) return;
     setPendingProfile({ display_name: normalized.value, avatar_id: avatarID });
-    setPrivacyTooltipOpen(false);
     setProfileModalStep('confirm-join');
   };
 
   const showProfileStep = () => {
-    setPrivacyTooltipOpen(false);
     setProfileModalStep('profile');
   };
 
@@ -193,7 +190,6 @@ export function RankingPage(props: RankingPageProps) {
     setPendingProfile(null);
     setProfileActionSuccess(null);
     props.onClearActionError();
-    setPrivacyTooltipOpen(false);
     setProfileModalStep(null);
   };
 
@@ -290,7 +286,6 @@ export function RankingPage(props: RankingPageProps) {
         variant="danger"
         appearance="action"
         onClick={() => {
-          setPrivacyTooltipOpen(false);
           setProfileModalStep('confirm-exit');
         }}
         disabled={props.action !== null}
@@ -315,7 +310,6 @@ export function RankingPage(props: RankingPageProps) {
               variant="secondary"
               appearance="action"
               onClick={() => {
-                setPrivacyTooltipOpen(false);
                 setProfileModalStep('confirm-pause');
               }}
               disabled={props.action !== null}
@@ -378,22 +372,18 @@ export function RankingPage(props: RankingPageProps) {
         title={profileModalStep === 'profile' ? (
           <span className={styles.profileModalTitle}>
             <span>{modalTitle}</span>
-            <button
-              type="button"
-              className={`${styles.profilePrivacyHint} ${privacyTooltipOpen ? styles.profilePrivacyHintOpen : ''}`.trim()}
-              aria-label={t('ranking.privacy_title')}
-              aria-describedby={privacyTooltipID}
-              aria-controls={privacyTooltipID}
-              aria-expanded={privacyTooltipOpen}
-              onClick={() => setPrivacyTooltipOpen((open) => !open)}
-              onBlur={() => setPrivacyTooltipOpen(false)}
-              data-ranking-privacy-hint
+            <QuestionMarkHelp
+              label={t('ranking.privacy_title')}
+              description={t('ranking.privacy_description')}
+              portal={false}
+              className={styles.profilePrivacyHelp}
+              tooltipClassName={styles.profilePrivacyTooltip}
+              tooltipVisibleClassName={styles.profilePrivacyTooltipVisible}
+              buttonProps={{ 'data-ranking-privacy-hint': true }}
+              tooltipProps={{ 'data-ranking-privacy-tooltip': true }}
             >
-              ?
-              <span id={privacyTooltipID} className={styles.profilePrivacyTooltip} role="tooltip" data-ranking-privacy-tooltip>
-                {t('ranking.privacy_description')}
-              </span>
-            </button>
+              {t('ranking.privacy_description')}
+            </QuestionMarkHelp>
           </span>
         ) : modalTitle}
         onClose={closeProfileModal}
@@ -710,8 +700,6 @@ function LeaderboardCard({
   t,
   language,
 }: LeaderboardCardProps) {
-  const [scoreExplanationOpen, setScoreExplanationOpen] = useState(false);
-  const scoreExplanationID = useId();
   const rows = useMemo(() => board?.entries.slice(0, 100) ?? [], [board]);
   const podium = rows.slice(0, 3);
   const tableRows = rows;
@@ -737,27 +725,19 @@ function LeaderboardCard({
             </div>
             {scoreExplanation ? (
               <span className={styles.scoreExplanationSlot} data-ranking-score-explanation-slot>
-                <button
-                  type="button"
-                  className={`${styles.profilePrivacyHint} ${styles.scoreExplanationHint} ${scoreExplanationOpen ? styles.profilePrivacyHintOpen : ''}`.trim()}
-                  aria-label={t('ranking.score_explanation_label')}
-                  aria-describedby={scoreExplanationID}
-                  aria-controls={scoreExplanationID}
-                  aria-expanded={scoreExplanationOpen}
-                  onClick={() => setScoreExplanationOpen((open) => !open)}
-                  onBlur={() => setScoreExplanationOpen(false)}
-                  data-ranking-score-explanation
+                <QuestionMarkHelp
+                  label={t('ranking.score_explanation_label')}
+                  description={scoreExplanation}
+                  portal={false}
+                  className={styles.profilePrivacyHelp}
+                  buttonClassName={styles.scoreExplanationHint}
+                  tooltipClassName={styles.profilePrivacyTooltip}
+                  tooltipVisibleClassName={styles.profilePrivacyTooltipVisible}
+                  buttonProps={{ 'data-ranking-score-explanation': true }}
+                  tooltipProps={{ 'data-ranking-score-explanation-tooltip': true }}
                 >
-                  ?
-                  <span
-                    id={scoreExplanationID}
-                    className={styles.profilePrivacyTooltip}
-                    role="tooltip"
-                    data-ranking-score-explanation-tooltip
-                  >
-                    {scoreExplanation}
-                  </span>
-                </button>
+                  {scoreExplanation}
+                </QuestionMarkHelp>
               </span>
             ) : null}
             <div className={styles.leaderboardHeaderToolbar} data-ranking-header-toolbar>

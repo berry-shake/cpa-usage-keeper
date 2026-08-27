@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { IconCheck, IconPencil, IconX } from '@/components/ui/icons'
@@ -22,9 +22,23 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [draftAlias, setDraftAlias] = useState(alias ?? '')
+  const editButtonRef = useRef<HTMLButtonElement | null>(null)
+  const restoreFocusRef = useRef(false)
   const currentAlias = alias ?? ''
   const canEdit = !disabled && identityId.trim() !== ''
-  const canSave = !saving && draftAlias.trim() !== currentAlias.trim()
+  const canSave = !saving && !disabled && draftAlias.trim() !== currentAlias.trim()
+
+  useEffect(() => {
+    if (!editing && restoreFocusRef.current) {
+      restoreFocusRef.current = false
+      editButtonRef.current?.focus()
+    }
+  }, [editing])
+
+  const finishEditing = () => {
+    restoreFocusRef.current = true
+    setEditing(false)
+  }
 
   const startEditing = () => {
     if (!canEdit) return
@@ -32,15 +46,15 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
     setEditing(true)
   }
   const cancelEditing = () => {
-    if (saving) return
+    if (saving || disabled) return
     setDraftAlias(currentAlias)
-    setEditing(false)
+    finishEditing()
   }
   const saveAlias = async () => {
     if (!canSave) return
     try {
       await onSaveAlias(identityId, draftAlias)
-      setEditing(false)
+      finishEditing()
     } catch {
       // 保存失败时保持编辑态，方便用户直接修正或重试。
     }
@@ -54,7 +68,7 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
             className={styles.credentialAliasInput}
             value={draftAlias}
             placeholder={t('usage_stats.credentials_alias_placeholder')}
-            disabled={saving}
+            disabled={saving || disabled}
             maxLength={50}
             onChange={(event) => setDraftAlias(event.target.value)}
             onKeyDown={(event) => {
@@ -86,7 +100,7 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
               type="button"
               className={styles.credentialAliasIconButton}
               onClick={cancelEditing}
-              disabled={saving}
+              disabled={saving || disabled}
               title={t('usage_stats.credentials_alias_cancel')}
               aria-label={t('usage_stats.credentials_alias_cancel')}
             >
@@ -119,6 +133,7 @@ export function CredentialAliasEditor({ identityId, displayName, alias, saving, 
             <button
               type="button"
               className={styles.credentialAliasEditButton}
+              ref={editButtonRef}
               onClick={startEditing}
               title={t('usage_stats.credentials_alias_edit')}
               aria-label={t('usage_stats.credentials_alias_edit')}

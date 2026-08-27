@@ -290,6 +290,20 @@ export async function revokeAuthSession(id: string): Promise<void> {
   }
 }
 
+export async function updateAuthSessionAlias(id: string, alias: string): Promise<AuthManagedSessionsResponse['items'][number]> {
+  const response = await apiFetch(apiPath(`/auth/sessions/${encodeURIComponent(id)}`), {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ alias }),
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update auth session alias: ${response.status}`)
+  }
+  return response.json()
+}
+
 const buildUsageRangeParams = (request: UsageRangeRequest): URLSearchParams => {
   const params = new URLSearchParams()
   params.set('range', resolveUsageRequestRange(request.range))

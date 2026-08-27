@@ -348,6 +348,7 @@
   font-size: 12px;
   font-weight: 600;
   line-height: 1.2;
+  text-decoration: none;
   padding: 8px 12px;
   border-radius: 999px;
   cursor: pointer;
@@ -1951,6 +1952,7 @@
   background: var(--danger-badge-bg, #fee2e2);
   border: 1px solid var(--danger-badge-border, #fca5a5);
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .requestCountCell {
@@ -2404,27 +2406,149 @@
 }
 
 .sessionSettingsCurrent {
-  width: fit-content;
-  max-width: 100%;
-  padding: 3px 7px;
-  border: 1px solid color-mix(in srgb, var(--accent-color) 44%, var(--border-color));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
-  color: var(--accent-color);
-  font-size: 10px;
-  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
+}
+
+.sessionSettingsCurrentDot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success-color) 18%, transparent);
+  animation: sessionSettingsCurrentPulse 1.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes sessionSettingsCurrentPulse {
+  0%,
+  100% {
+    opacity: 0.64;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sessionSettingsCurrentDot {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .sessionSettingsNameRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 6px 8px;
   align-items: center;
   min-width: 0;
 }
 
+.sessionSettingsAliasEditor {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sessionSettingsAliasEditorEditing {
+  width: min(236px, 100%);
+}
+
+.sessionSettingsAliasDisplayLayout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sessionSettingsAliasEditLayout {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) max-content;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.sessionSettingsAliasEditActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sessionSettingsAliasInput {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+
+  &:focus {
+    outline: 2px solid color-mix(in srgb, var(--primary-color) 72%, transparent);
+    outline-offset: 1px;
+  }
+
+  &:disabled {
+    opacity: 0.7;
+  }
+}
+
+.sessionSettingsAliasEditButton,
+.sessionSettingsAliasIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background-color 0.16s ease, opacity 0.16s ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--primary-color) 36%, var(--border-color));
+    background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-primary));
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.54;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+}
+
 .sessionSettingsName {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
@@ -2465,17 +2589,27 @@
 }
 
 .sessionSettingsSource {
+  display: inline-flex;
+  align-items: center;
   width: fit-content;
   max-width: 100%;
-  padding: 3px 7px;
-  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
-  color: var(--text-tertiary);
-  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: $radius-full;
+  font-size: 9px;
   font-weight: 800;
   line-height: 1;
   white-space: nowrap;
+}
+
+.sessionSettingsSourceStandard {
+  background: color-mix(in srgb, #3b82f6 12%, var(--bg-primary));
+  color: #3b82f6;
+}
+
+.sessionSettingsSourceEmbed {
+  background: color-mix(in srgb, #f59e0b 13%, var(--bg-primary));
+  color: #d97706;
+  padding-inline: 4px;
 }
 
 .sessionSettingsActions {
@@ -3476,6 +3610,38 @@
   font-variant-numeric: tabular-nums;
 }
 
+.requestEventsStackedCell {
+  min-width: 0;
+  vertical-align: middle;
+
+  > span {
+    display: block;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.requestEventsStackedPrimary,
+.requestEventsPrimaryCell {
+  color: var(--text-primary);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.requestEventsStackedSecondary {
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.requestEventsStackedLabel {
+  color: var(--text-secondary);
+}
+
 .requestEventsSpeedModeCell {
   cursor: default;
 
@@ -3491,16 +3657,14 @@
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
     monospace;
   font-size: 11px;
-  max-width: 280px;
   word-break: break-all;
 }
 
 .requestEventsSourceCell {
-  min-width: 165px;
+  max-width: 280px;
 }
 
 .requestEventsAPIKeyCell {
-  min-width: 135px;
   max-width: 240px;
 }
 
@@ -3508,14 +3672,25 @@
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 5px;
+  gap: 4px;
   max-width: 100%;
 }
 
+.requestEventsSourceIdentity {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+}
+
 .requestEventsSourceValue {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-primary);
   font-weight: 650;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .requestEventsSourceTags {
@@ -3523,6 +3698,13 @@
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+}
+
+.requestEventsExecutorCell {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .requestEventsLogViewer {

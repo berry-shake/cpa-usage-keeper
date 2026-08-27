@@ -181,12 +181,13 @@ func TestBuildCodexQuotaEfficiencyHistoryUsesLatestWindowPerRoleAndCutsOverlappi
 	if result.SelectedWindow.WindowRole != "primary" || result.SelectedWindow.WindowSeconds != int64((7*24*time.Hour)/time.Second) || !result.SelectedWindow.HasCurrentCycle {
 		t.Fatalf("expected current Primary Weekly selection, got %+v", result.SelectedWindow)
 	}
-	if len(result.Cycles) != 2 || result.Cycles[0].ID != newPrimary.ID || result.Cycles[0].Status != "current" || result.Cycles[1].ID != oldPrimary.ID || result.Cycles[1].Status != "completed" {
-		t.Fatalf("expected current Weekly and completed 5h cycles under Primary, got %+v", result.Cycles)
+	if len(result.Cycles) != 1 || result.Cycles[0].ID != newPrimary.ID || result.Cycles[0].Status != "current" {
+		t.Fatalf("expected the Weekly cycle to fully supersede 5h cycle %d, got %+v", oldPrimary.ID, result.Cycles)
 	}
-	assertCodexQuotaEfficiencyUsage(t, result.Cycles[0].Usage, 200, 0.0002, true)
-	assertCodexQuotaEfficiencyUsage(t, result.Cycles[1].Usage, 100, 0.0001, true)
-
+	if !result.Cycles[0].EffectiveStartedAt.Equal(newPrimary.WindowStartedAt) {
+		t.Fatalf("expected Weekly theoretical start to remain effective, got %+v", result.Cycles[0])
+	}
+	assertCodexQuotaEfficiencyUsage(t, result.Cycles[0].Usage, 300, 0.0003, true)
 }
 
 func TestBuildCodexQuotaEfficiencyHistoryClassifiesSingleWindowKindsByDuration(t *testing.T) {
@@ -240,7 +241,7 @@ func TestBuildCodexQuotaEfficiencyHistoryClassifiesSingleWindowKindsByDuration(t
 
 func TestBuildCodexQuotaEfficiencyHistoryRestoresFiveHourPrimaryWithWeeklySecondary(t *testing.T) {
 	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
-	previousObservedAt := now.Add(-2 * time.Hour)
+	previousObservedAt := now.Add(-5 * time.Hour)
 	restoredAt := now.Add(-time.Hour)
 	db := openTestDatabase(t)
 	oldPrimary := seedCodexQuotaEfficiencyRoleCycle(t, db, "codex-auth", entities.CodexQuotaWindowRolePrimary, now.Add(-24*time.Hour), now.Add(6*24*time.Hour), []codexQuotaEfficiencySegmentSeed{
@@ -252,6 +253,11 @@ func TestBuildCodexQuotaEfficiencyHistoryRestoresFiveHourPrimaryWithWeeklySecond
 	seedCodexQuotaEfficiencyRoleCycle(t, db, "codex-auth", entities.CodexQuotaWindowRoleSecondary, now.Add(-24*time.Hour), now.Add(6*24*time.Hour), []codexQuotaEfficiencySegmentSeed{
 		{remaining: 69, first: restoredAt, last: restoredAt},
 	})
+	seedCodexQuotaEfficiencyUsage(t, db,
+		usageEventForQuotaEfficiency("before-five-hour-start", "oauth", "codex-auth", now.Add(-5*time.Hour), 100),
+		usageEventForQuotaEfficiency("before-five-hour-observed", "oauth", "codex-auth", now.Add(-3*time.Hour), 200),
+		usageEventForQuotaEfficiency("after-five-hour-observed", "oauth", "codex-auth", now.Add(-30*time.Minute), 300),
+	)
 
 	result, err := repository.BuildCodexQuotaEfficiencyHistory(context.Background(), db, repositorydto.CodexQuotaEfficiencyQuery{
 		AuthIndex:  "codex-auth",
@@ -270,9 +276,11 @@ func TestBuildCodexQuotaEfficiencyHistoryRestoresFiveHourPrimaryWithWeeklySecond
 	if len(result.Cycles) != 2 || result.Cycles[0].ID != newPrimary.ID || result.Cycles[0].Status != "current" || result.Cycles[1].ID != oldPrimary.ID || result.Cycles[1].Status != "completed" {
 		t.Fatalf("expected current 5h and completed Weekly cycles under Primary, got %+v", result.Cycles)
 	}
-	if !result.Cycles[0].EffectiveStartedAt.Equal(restoredAt) || !result.Cycles[1].EffectiveEndedAt.Equal(restoredAt) {
-		t.Fatalf("expected restoration observation to split Primary periods, got %+v", result.Cycles)
+	if !result.Cycles[0].EffectiveStartedAt.Equal(newPrimary.WindowStartedAt) || !result.Cycles[1].EffectiveEndedAt.Equal(newPrimary.WindowStartedAt) {
+		t.Fatalf("expected restored 5h theoretical start to split Primary periods, got %+v", result.Cycles)
 	}
+	assertCodexQuotaEfficiencyUsage(t, result.Cycles[0].Usage, 500, 0.0005, true)
+	assertCodexQuotaEfficiencyUsage(t, result.Cycles[1].Usage, 100, 0.0001, true)
 }
 
 type codexQuotaEfficiencyQueryLogger struct {

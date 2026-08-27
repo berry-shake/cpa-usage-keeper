@@ -45,9 +45,9 @@ vi.mock('react-i18next', () => {
   }
 })
 
-const usage = (tokens: number, cost: number, available = true) => ({
-  requests: 1,
-  successful_requests: 1,
+const usage = (tokens: number, cost: number, available = true, requests = 1) => ({
+  requests,
+  successful_requests: requests,
   failed_requests: 0,
   input_tokens: tokens,
   output_tokens: 0,
@@ -80,7 +80,7 @@ const response: CodexQuotaHistoryResponse = {
     first_remaining_percent: 90,
     last_remaining_percent: 86,
     observation_count: 3,
-    usage: usage(5000, 5, false),
+    usage: usage(5000, 5, true, 14),
     transitions: [
       {
         from_remaining_percent: 90,
@@ -89,7 +89,7 @@ const response: CodexQuotaHistoryResponse = {
         is_direct: true,
         interval_started_at: '2026-08-20T10:00:00Z',
         interval_ended_at: '2026-08-20T10:10:00Z',
-        usage: usage(1000, 1),
+        usage: usage(1000, 1, true, 10),
         tokens_per_point: 1000,
         cost_per_point: 1,
         cost_per_point_available: true,
@@ -101,7 +101,7 @@ const response: CodexQuotaHistoryResponse = {
         is_direct: false,
         interval_started_at: '2026-08-20T11:00:00Z',
         interval_ended_at: '2026-08-20T11:30:00Z',
-        usage: usage(3000, 3),
+        usage: usage(3000, 3, true, 60),
         tokens_per_point: 1000,
         cost_per_point: 1,
         cost_per_point_available: true,
@@ -199,9 +199,33 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(document.body.querySelector('[aria-label="usage_stats.credentials_quota_history_metric_selector"]')).toBeNull()
     expect(document.body.querySelector('[data-codex-quota-cycle-id="2"][data-codex-quota-cycle-status="current"]')).not.toBeNull()
     expect(document.body.querySelector('[data-codex-quota-cycle-id="1"][data-codex-quota-cycle-status="completed"]')).not.toBeNull()
-    const medianSummary = document.body.querySelector('[data-codex-quota-median-summary]')
-    expect(medianSummary?.parentElement?.tagName).toBe('P')
-    expect(medianSummary?.textContent).toContain('usage_stats.credentials_quota_history_median · 1.00K Token/1% · $1.00/1%')
+    const chartSummary = document.body.querySelector('[data-codex-quota-chart-summary]')
+    const usedSummary = chartSummary?.querySelector('[data-codex-quota-summary="used"]')
+    const fullEstimateSummary = chartSummary?.querySelector('[data-codex-quota-summary="full-estimate"]')
+    const medianSummary = chartSummary?.querySelector('[data-codex-quota-summary="median"]')
+    expect([...document.body.querySelectorAll('[data-codex-quota-chart-summary] > [data-codex-quota-summary]')]
+      .map((summary) => summary.getAttribute('data-codex-quota-summary'))).toEqual(['median', 'used', 'full-estimate'])
+    expect(usedSummary?.textContent).toContain('usage_stats.credentials_quota_history_used')
+    expect(usedSummary?.querySelector('[data-codex-quota-summary-metric="requests"]')?.textContent).toBe('14')
+    expect(usedSummary?.querySelector('[data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('5.00K')
+    expect(usedSummary?.querySelector('[data-codex-quota-summary-metric="cost"]')?.textContent).toBe('$5.00')
+    expect(fullEstimateSummary?.textContent).toContain('usage_stats.credentials_quota_history_full_estimate')
+    expect(fullEstimateSummary?.querySelector('[data-codex-quota-summary-metric="requests"]')?.textContent).toBe('100')
+    expect(fullEstimateSummary?.querySelector('[data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('35.71K')
+    expect(fullEstimateSummary?.querySelector('[data-codex-quota-summary-metric="cost"]')?.textContent).toBe('$35.71')
+    expect(medianSummary?.textContent).toContain('usage_stats.credentials_quota_history_median_per_point')
+    expect(medianSummary?.querySelector('[data-codex-quota-summary-metric="requests"]')?.textContent).toBe('20')
+    expect(medianSummary?.querySelector('[data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('1.00K')
+    expect(medianSummary?.querySelector('[data-codex-quota-summary-metric="cost"]')?.textContent).toBe('$1.00')
+    for (const summary of [usedSummary, fullEstimateSummary, medianSummary]) {
+      const metrics = [...(summary?.querySelectorAll('[data-codex-quota-summary-metric]') ?? [])]
+      expect(metrics.map((metric) => metric.getAttribute('data-codex-quota-summary-metric'))).toEqual(['requests', 'tokens', 'cost'])
+      for (const metric of metrics) {
+        const icon = metric.querySelector('img')
+        expect(icon?.getAttribute('alt')).toBe('')
+        expect(icon?.getAttribute('aria-hidden')).toBe('true')
+      }
+    }
     expect(document.body.textContent).toContain('usage_stats.credentials_quota_history_cycle_start')
     expect(document.body.textContent).toContain('usage_stats.credentials_quota_history_cycle_end')
     expect(document.body.textContent).toContain('usage_stats.credentials_quota_history_first_observed')
@@ -246,6 +270,53 @@ describe('CodexQuotaHistoryPanel', () => {
     ])
   })
 
+  it('shows three current-cycle summaries and adds estimated unused only to completed cycles', async () => {
+    await act(async () => {
+      root.render(<CodexQuotaHistoryPanel authIndex="codex-auth" />)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const currentRecord = document.body.querySelector('[data-codex-quota-cycle-id="2"]')
+    const currentSummary = currentRecord?.querySelector('[data-codex-quota-cycle-summary]')
+    expect([...currentSummary!.querySelectorAll(':scope > [data-codex-quota-summary]')]
+      .map((summary) => summary.getAttribute('data-codex-quota-summary'))).toEqual([
+      'median',
+      'used',
+      'full-estimate',
+    ])
+    const medianRequestMetric = currentSummary?.querySelector('[data-codex-quota-summary="median"] [data-codex-quota-summary-metric="requests"]')
+    expect(medianRequestMetric?.textContent).toBe('20')
+    expect(medianRequestMetric?.getAttribute('role')).toBe('img')
+    expect(medianRequestMetric?.getAttribute('aria-label')).toBe('usage_stats.total_requests: 20')
+    expect(currentSummary?.querySelector('[data-codex-quota-summary="median"] [data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('1.00K')
+    expect(currentSummary?.querySelector('[data-codex-quota-summary="median"] [data-codex-quota-summary-metric="cost"]')?.textContent).toBe('$1.00')
+    expect(currentSummary?.querySelector('[data-codex-quota-summary="used"] [data-codex-quota-summary-metric="requests"]')?.textContent).toBe('14')
+    expect(currentSummary?.querySelector('[data-codex-quota-summary="full-estimate"] [data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('35.71K')
+    expect(currentSummary?.querySelector('[data-codex-quota-summary="estimated-unused"]')).toBeNull()
+
+    const completedRecord = document.body.querySelector('[data-codex-quota-cycle-id="1"]')
+    const completedSummary = completedRecord?.querySelector('[data-codex-quota-cycle-summary]')
+    expect([...completedSummary!.querySelectorAll(':scope > [data-codex-quota-summary]')]
+      .map((summary) => summary.getAttribute('data-codex-quota-summary'))).toEqual([
+      'median',
+      'full-estimate',
+      'used',
+      'estimated-unused',
+    ])
+    expect(completedSummary?.querySelector('[data-codex-quota-summary="median"]')?.textContent).toContain('—')
+    expect(completedSummary?.querySelector('[data-codex-quota-summary="used"] [data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('2.00K')
+    expect(completedSummary?.querySelector('[data-codex-quota-summary="full-estimate"] [data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('28.57K')
+    const estimatedUnused = completedSummary?.querySelector('[data-codex-quota-summary="estimated-unused"]')
+    expect(estimatedUnused?.textContent).toContain('usage_stats.credentials_quota_history_estimated_unused')
+    expect([...estimatedUnused!.querySelectorAll('[data-codex-quota-summary-metric]')]
+      .map((metric) => metric.getAttribute('data-codex-quota-summary-metric'))).toEqual(['percentage', 'tokens', 'cost'])
+    expect(estimatedUnused?.querySelector('[data-codex-quota-summary-metric="percentage"]')?.textContent).toBe('93%')
+    expect(estimatedUnused?.querySelector('[data-codex-quota-summary-metric="percentage"] img')?.getAttribute('src')).toContain('Unused%20percentage')
+    expect(estimatedUnused?.querySelector('[data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('26.57K')
+    expect(estimatedUnused?.querySelector('[data-codex-quota-summary-metric="cost"]')?.textContent).toBe('$26.57')
+  })
+
   it('keeps a current 76 percent baseline visible in the cycle list before any transition exists', async () => {
     const baselineResponse = cloneResponse()
     baselineResponse.cycles[0].transitions = []
@@ -265,6 +336,10 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(currentRecord?.textContent).toContain('usage_stats.credentials_quota_history_cycle_expected_reset')
     expect(document.body.textContent).toContain('usage_stats.credentials_quota_history_no_transition')
     expect(document.body.querySelector('[data-codex-quota-efficiency-chart]')).toBeNull()
+    const chartSummary = document.body.querySelector('[data-codex-quota-current-cycle="true"] [data-codex-quota-chart-summary]')
+    expect(chartSummary?.querySelector('[data-codex-quota-summary="median"]')?.textContent).toContain('—')
+    expect(chartSummary?.querySelector('[data-codex-quota-summary="used"] [data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('5.00K')
+    expect(chartSummary?.querySelector('[data-codex-quota-summary="full-estimate"] [data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('20.83K')
   })
 
   it('shows the selected single window and cycle range in the current efficiency card', async () => {
@@ -322,9 +397,13 @@ describe('CodexQuotaHistoryPanel', () => {
       await Promise.resolve()
     })
 
-    expect(document.body.textContent).toContain(
-      'usage_stats.credentials_quota_history_cycle_total:{"requests":"1","tokens":"2.00K","cost":"usage_stats.credentials_quota_history_cost_missing"}',
-    )
+    const completedSummary = document.body.querySelector('[data-codex-quota-cycle-id="1"] [data-codex-quota-cycle-summary]')
+    expect(completedSummary?.querySelector('[data-codex-quota-summary="used"] [data-codex-quota-summary-metric="cost"]')?.textContent)
+      .toBe('usage_stats.credentials_quota_history_cost_missing')
+    expect(completedSummary?.querySelector('[data-codex-quota-summary="full-estimate"] [data-codex-quota-summary-metric="cost"]')?.textContent)
+      .toBe('usage_stats.credentials_quota_history_cost_missing')
+    expect(completedSummary?.querySelector('[data-codex-quota-summary="estimated-unused"] [data-codex-quota-summary-metric="cost"]')?.textContent)
+      .toBe('usage_stats.credentials_quota_history_cost_missing')
   })
 
   it('uses the Analysis tooltip surface in dark mode', async () => {
@@ -427,8 +506,8 @@ describe('CodexQuotaHistoryPanel', () => {
     const warning = document.body.querySelector('[data-codex-quota-cost-warning]')
     expect(warning?.parentElement?.tagName).toBe('HEADER')
     expect(warning?.textContent).toBe('usage_stats.credentials_quota_history_cost_unavailable')
-    expect(document.body.querySelector('[data-codex-quota-median-summary]')?.textContent).toBe(
-      'usage_stats.credentials_quota_history_median · 1.00K Token/1%',
+    expect(document.body.querySelector('[data-codex-quota-summary="median"]')?.textContent).toContain(
+      'usage_stats.credentials_quota_history_cost_missing',
     )
     expect(latestChartData?.datasets[1]?.data).toEqual([1, null, null, null])
     const pointRadius = latestChartData?.datasets[1]?.pointRadius as unknown as ((context: { dataIndex: number }) => number)

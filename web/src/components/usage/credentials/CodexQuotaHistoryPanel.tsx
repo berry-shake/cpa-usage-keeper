@@ -3,6 +3,10 @@ import { useTranslation } from 'react-i18next'
 import type { ChartData, ChartOptions } from 'chart.js'
 import { Chart } from 'react-chartjs-2'
 import '@/lib/chartjs'
+import quotaCostIcon from '@/assets/icons/quota-cost.svg'
+import quotaRequestIcon from '@/assets/icons/quota-request.svg'
+import quotaTokenIcon from '@/assets/icons/quota-token.svg'
+import quotaUnusedIcon from '@/assets/icons/quota-unused.svg'
 import { ApiError, fetchCodexQuotaHistory, type FetchCodexQuotaHistoryOptions } from '@/lib/api'
 import type { CodexQuotaHistoryCycle, CodexQuotaHistoryResponse, CodexQuotaHistoryTransition, CodexQuotaHistoryWindow } from '@/lib/types'
 import { useThemeStore } from '@/stores'
@@ -18,6 +22,23 @@ interface QuotaEfficiencyPoint {
   label: string
   transition: CodexQuotaHistoryTransition
 }
+
+interface QuotaSummaryMetrics {
+  requests: number
+  tokens: number
+  cost: number
+  costAvailable: boolean
+  percentage?: number
+}
+
+interface QuotaCycleSummary {
+  median: QuotaSummaryMetrics | null
+  used: QuotaSummaryMetrics
+  fullEstimate: QuotaSummaryMetrics | null
+  estimatedUnused: QuotaSummaryMetrics | null
+}
+
+type QuotaSummaryKind = 'used' | 'full-estimate' | 'median' | 'estimated-unused'
 
 const QUOTA_EFFICIENCY_BAR_COLORS = {
   direct: { base: '#2563eb', light: '#93c5fd' },
@@ -82,6 +103,9 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
   const locale = i18n?.resolvedLanguage || i18n?.language
   // 当前周期身份完全由后端 status 决定；前端不使用浏览器时间重算周期状态。
   const currentCycle = history?.cycles.find((cycle) => cycle.status === 'current') ?? null
+  const cycleSummaries = useMemo(() => new Map(
+    (history?.cycles ?? []).map((cycle) => [cycle.id, buildQuotaCycleSummary(cycle)]),
+  ), [history])
 
   return (
     <div className={styles.panel} data-codex-quota-history-panel="true">
@@ -121,8 +145,9 @@ export function CodexQuotaHistoryPanel({ authIndex, onAuthRequired }: CodexQuota
             window={history.selected_window}
             isDark={resolvedTheme === 'dark'}
             locale={locale}
+            summary={currentCycle ? cycleSummaries.get(currentCycle.id) ?? null : null}
           />
-          <CyclesList cycles={history.cycles} locale={locale} />
+          <CyclesList cycles={history.cycles} locale={locale} summaries={cycleSummaries} />
         </>
       ) : !error ? (
         <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_empty')}</div>
@@ -136,11 +161,13 @@ function CurrentCycleEfficiencyCard({
   window,
   isDark,
   locale,
+  summary,
 }: {
   cycle: CodexQuotaHistoryCycle | null
   window: CodexQuotaHistoryWindow | null
   isDark: boolean
   locale?: string
+  summary: QuotaCycleSummary | null
 }) {
   const { t } = useTranslation()
   const chart = useMemo(
@@ -156,7 +183,7 @@ function CurrentCycleEfficiencyCard({
             {t('usage_stats.credentials_quota_history_current_title')}
             {window ? ` · ${formatWindowLabel(window, t)}` : ''}
           </h3>
-          <p>
+          <p className={styles.currentCycleMeta}>
             {cycle
               ? <>
                 <span className={styles.currentCycleRange} data-codex-quota-cycle-range="true">
@@ -173,12 +200,6 @@ function CurrentCycleEfficiencyCard({
                 </span>
               </>
               : t('usage_stats.credentials_quota_history_no_current')}
-            {cycle && chart.tokenMedian != null ? (
-              <span className={styles.medianSummary} data-codex-quota-median-summary="true">
-                {t('usage_stats.credentials_quota_history_median')} · {formatCompactNumber(chart.tokenMedian)} Token/1%
-                {chart.costMedian != null ? ` · ${formatUsd(chart.costMedian)}/1%` : ''}
-              </span>
-            ) : null}
           </p>
         </div>
         {cycle && chart.hasUnavailableCost ? (
@@ -189,30 +210,191 @@ function CurrentCycleEfficiencyCard({
       </header>
       {!cycle ? (
         <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_current')}</div>
-      ) : cycle.transitions.length === 0 ? (
-        <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_transition')}</div>
       ) : (
         <>
-          <div className={styles.chartFrame} data-codex-quota-efficiency-chart="combined" aria-hidden="true">
-            <Chart type="bar" data={chart.data} options={chart.options} />
-          </div>
-          <CurrentCycleAccessibleSummary transitions={cycle.transitions} locale={locale} />
-          <div className={styles.chartLegend}>
-            <span><i className={styles.directDot} />{t('usage_stats.credentials_quota_history_direct')}</span>
-            <span><i className={styles.crossDot} />{t('usage_stats.credentials_quota_history_cross')}</span>
-            <span>
-              <i
-                className={styles.costLine}
-                data-codex-quota-cost-legend="true"
-                style={{ '--quota-cost-line-color': USAGE_CHART_REQUESTS_LINE_COLOR } as CSSProperties}
-              />
-              {t('usage_stats.credentials_quota_history_cost_per_point')}
-            </span>
-          </div>
+          {cycle.transitions.length === 0 ? (
+            <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_transition')}</div>
+          ) : <>
+            <div className={styles.chartFrame} data-codex-quota-efficiency-chart="combined" aria-hidden="true">
+              <Chart type="bar" data={chart.data} options={chart.options} />
+            </div>
+            <CurrentCycleAccessibleSummary transitions={cycle.transitions} locale={locale} />
+            <div className={styles.chartLegend}>
+              <span><i className={styles.directDot} />{t('usage_stats.credentials_quota_history_direct')}</span>
+              <span><i className={styles.crossDot} />{t('usage_stats.credentials_quota_history_cross')}</span>
+              <span>
+                <i
+                  className={styles.costLine}
+                  data-codex-quota-cost-legend="true"
+                  style={{ '--quota-cost-line-color': USAGE_CHART_REQUESTS_LINE_COLOR } as CSSProperties}
+                />
+                {t('usage_stats.credentials_quota_history_cost_per_point')}
+              </span>
+            </div>
+          </>}
+          <CurrentCycleQuotaSummary summary={summary} />
         </>
       )}
     </section>
   )
+}
+
+function CurrentCycleQuotaSummary({ summary }: { summary: QuotaCycleSummary | null }) {
+  const { t } = useTranslation()
+
+  return (
+    <dl className={styles.chartSummary} data-codex-quota-chart-summary="true">
+      <QuotaSummaryRow kind="median" label={t('usage_stats.credentials_quota_history_median_per_point')} metrics={summary?.median ?? null} />
+      <QuotaSummaryRow kind="used" label={t('usage_stats.credentials_quota_history_used')} metrics={summary?.used ?? null} />
+      <QuotaSummaryRow kind="full-estimate" label={t('usage_stats.credentials_quota_history_full_estimate')} metrics={summary?.fullEstimate ?? null} />
+    </dl>
+  )
+}
+
+function QuotaSummaryRow({
+  kind,
+  label,
+  metrics,
+  leadingMetric = 'requests',
+}: {
+  kind: QuotaSummaryKind
+  label: string
+  metrics: QuotaSummaryMetrics | null
+  leadingMetric?: 'requests' | 'percentage'
+}) {
+  const { t } = useTranslation()
+  const values = metrics ? {
+    requests: formatQuotaSummaryRequests(metrics.requests),
+    percentage: metrics.percentage == null ? '—' : formatQuotaSummaryPercentage(metrics.percentage),
+    tokens: formatCompactNumber(metrics.tokens),
+    cost: metrics.costAvailable ? formatUsd(metrics.cost) : t('usage_stats.credentials_quota_history_cost_missing'),
+  } : null
+  return (
+    <div className={styles.chartSummaryRow} data-codex-quota-summary={kind}>
+      <dt>{label}</dt>
+      <dd>{values ? <>
+        {leadingMetric === 'requests' ? <QuotaSummaryMetric
+          kind="requests"
+          icon={quotaRequestIcon}
+          label={t('usage_stats.total_requests')}
+          value={values.requests}
+        /> : <QuotaSummaryMetric
+          kind="percentage"
+          icon={quotaUnusedIcon}
+          label={t('usage_stats.credentials_quota_history_unused_percentage')}
+          value={values.percentage}
+        />}
+        <QuotaSummaryMetric
+          kind="tokens"
+          icon={quotaTokenIcon}
+          label={t('usage_stats.total_tokens')}
+          value={values.tokens}
+        />
+        <QuotaSummaryMetric
+          kind="cost"
+          icon={quotaCostIcon}
+          label={t('usage_stats.total_cost')}
+          value={values.cost}
+        />
+      </> : '—'}</dd>
+    </div>
+  )
+}
+
+function QuotaSummaryMetric({
+  kind,
+  icon,
+  label,
+  value,
+}: {
+  kind: 'requests' | 'percentage' | 'tokens' | 'cost'
+  icon: string
+  label: string
+  value: string
+}) {
+  return (
+    <span
+      className={styles.chartSummaryMetric}
+      data-codex-quota-summary-metric={kind}
+      role="img"
+      aria-label={`${label}: ${value}`}
+    >
+      <img src={icon} alt="" aria-hidden="true" />
+      <span>{value}</span>
+    </span>
+  )
+}
+
+function calculateFullQuotaEstimate(cycle: CodexQuotaHistoryCycle): QuotaSummaryMetrics | null {
+  const remainingPercent = cycle.last_remaining_percent
+  if (remainingPercent == null || !Number.isFinite(remainingPercent)) return null
+  const usedPercent = 100 - Math.min(100, Math.max(0, remainingPercent))
+  if (usedPercent <= 0 || cycle.usage.requests <= 0 || cycle.usage.total_tokens <= 0) return null
+  // 与认证文件列表 Estimated 口径一致：当前用量除以已用比例，外推到 100% 额度。
+  const ratio = usedPercent / 100
+  return {
+    requests: cycle.usage.requests / ratio,
+    tokens: cycle.usage.total_tokens / ratio,
+    cost: cycle.usage.total_cost_usd / ratio,
+    costAvailable: cycle.usage.cost_available,
+  }
+}
+
+function buildQuotaCycleSummary(cycle: CodexQuotaHistoryCycle): QuotaCycleSummary {
+  const used: QuotaSummaryMetrics = {
+    requests: cycle.usage.requests,
+    tokens: cycle.usage.total_tokens,
+    cost: cycle.usage.total_cost_usd,
+    costAvailable: cycle.usage.cost_available,
+  }
+  const fullEstimate = calculateFullQuotaEstimate(cycle)
+  const median = calculateQuotaMedianMetrics(cycle.transitions)
+  const estimatedUnused = cycle.status === 'completed' ? subtractQuotaMetrics(fullEstimate, used) : null
+  return { median, used, fullEstimate, estimatedUnused }
+}
+
+function calculateQuotaMedianMetrics(transitions: CodexQuotaHistoryTransition[]): QuotaSummaryMetrics | null {
+  const points = expandEfficiencyPoints(transitions)
+  if (points.length === 0) return null
+  const requestMedian = calculateMedian(points.map(({ transition }) => transition.usage.requests / transition.percentage_points))
+  const tokenMedian = calculateMedian(points.map(({ transition }) => transition.tokens_per_point))
+  const hasUnavailableCost = transitions.some((transition) => !transition.cost_per_point_available)
+  const costMedian = hasUnavailableCost
+    ? null
+    : calculateMedian(points.map(({ transition }) => transition.cost_per_point))
+  if (requestMedian == null || tokenMedian == null) return null
+  return {
+    requests: requestMedian,
+    tokens: tokenMedian,
+    cost: costMedian ?? 0,
+    costAvailable: costMedian != null,
+  }
+}
+
+function subtractQuotaMetrics(
+  fullEstimate: QuotaSummaryMetrics | null,
+  usage: QuotaSummaryMetrics,
+): QuotaSummaryMetrics | null {
+  if (!fullEstimate) return null
+  const unusedTokens = Math.max(fullEstimate.tokens - usage.tokens, 0)
+  return {
+    requests: Math.max(fullEstimate.requests - usage.requests, 0),
+    tokens: unusedTokens,
+    cost: Math.max(fullEstimate.cost - usage.cost, 0),
+    costAvailable: fullEstimate.costAvailable && usage.costAvailable,
+    percentage: fullEstimate.tokens > 0 ? (unusedTokens / fullEstimate.tokens) * 100 : 0,
+  }
+}
+
+function formatQuotaSummaryRequests(value: number): string {
+  if (Math.abs(value) >= 1_000) return formatCompactNumber(value)
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2,
+  }).format(value)
+}
+
+function formatQuotaSummaryPercentage(value: number): string {
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}%`
 }
 
 function CurrentCycleAccessibleSummary({
@@ -260,7 +442,15 @@ function CurrentCycleAccessibleSummary({
   )
 }
 
-function CyclesList({ cycles, locale }: { cycles: CodexQuotaHistoryCycle[]; locale?: string }) {
+function CyclesList({
+  cycles,
+  locale,
+  summaries,
+}: {
+  cycles: CodexQuotaHistoryCycle[]
+  locale?: string
+  summaries: Map<number, QuotaCycleSummary>
+}) {
   const { t } = useTranslation()
   return (
     <section className={styles.historySection} data-codex-quota-cycles="true">
@@ -275,14 +465,24 @@ function CyclesList({ cycles, locale }: { cycles: CodexQuotaHistoryCycle[]; loca
         <div className={styles.emptyState}>{t('usage_stats.credentials_quota_history_no_records')}</div>
       ) : (
         <div className={styles.cycleList}>
-          {cycles.map((cycle) => <CycleCard key={cycle.id} cycle={cycle} locale={locale} />)}
+          {cycles.map((cycle) => (
+            <CycleCard key={cycle.id} cycle={cycle} locale={locale} summary={summaries.get(cycle.id) ?? null} />
+          ))}
         </div>
       )}
     </section>
   )
 }
 
-function CycleCard({ cycle, locale }: { cycle: CodexQuotaHistoryCycle; locale?: string }) {
+function CycleCard({
+  cycle,
+  locale,
+  summary,
+}: {
+  cycle: CodexQuotaHistoryCycle
+  locale?: string
+  summary: QuotaCycleSummary | null
+}) {
   const { t } = useTranslation()
   const statusLabel = cycle.status === 'current'
     ? t('usage_stats.credentials_quota_history_status_current')
@@ -326,17 +526,49 @@ function CycleCard({ cycle, locale }: { cycle: CodexQuotaHistoryCycle; locale?: 
           ? 'usage_stats.credentials_quota_history_cycle_expected_reset'
           : 'usage_stats.credentials_quota_history_cycle_end')}</span>
         <strong>{formatDateTime(cycle.status === 'current' ? cycle.reset_at : cycle.effective_ended_at, locale)}</strong>
-        <small>
-          {t('usage_stats.credentials_quota_history_cycle_total', {
-            requests: formatCompactNumber(cycle.usage.requests),
-            tokens: formatCompactNumber(cycle.usage.total_tokens),
-            cost: cycle.usage.cost_available
-              ? formatUsd(cycle.usage.total_cost_usd)
-              : t('usage_stats.credentials_quota_history_cost_missing'),
-          })}
-        </small>
+        <CycleQuotaSummary status={cycle.status} summary={summary} />
       </div>
     </article>
+  )
+}
+
+function CycleQuotaSummary({
+  status,
+  summary,
+}: {
+  status: CodexQuotaHistoryCycle['status']
+  summary: QuotaCycleSummary | null
+}) {
+  const { t } = useTranslation()
+  const isCurrent = status === 'current'
+  return (
+    <dl
+      className={`${styles.cycleSummary} ${isCurrent ? styles.currentCycleSummary : styles.completedCycleSummary}`.trim()}
+      data-codex-quota-cycle-summary="true"
+    >
+      <QuotaSummaryRow kind="median" label={t('usage_stats.credentials_quota_history_median_per_point')} metrics={summary?.median ?? null} />
+      {isCurrent ? <>
+        <QuotaSummaryRow
+          kind="used"
+          label={t('usage_stats.credentials_quota_history_used')}
+          metrics={summary?.used ?? null}
+        />
+        <QuotaSummaryRow kind="full-estimate" label={t('usage_stats.credentials_quota_history_full_estimate')} metrics={summary?.fullEstimate ?? null} />
+      </> : <>
+        <QuotaSummaryRow kind="full-estimate" label={t('usage_stats.credentials_quota_history_full_estimate')} metrics={summary?.fullEstimate ?? null} />
+        <QuotaSummaryRow
+          kind="used"
+          label={t('usage_stats.credentials_quota_history_used')}
+          metrics={summary?.used ?? null}
+        />
+        <QuotaSummaryRow
+          kind="estimated-unused"
+          label={t('usage_stats.credentials_quota_history_estimated_unused')}
+          metrics={summary?.estimatedUnused ?? null}
+          leadingMetric="percentage"
+        />
+      </>}
+    </dl>
   )
 }
 
@@ -376,14 +608,11 @@ function buildEfficiencyChart(
 ): {
   data: QuotaEfficiencyChartData
   options: QuotaEfficiencyChartOptions
-  tokenMedian: number | null
-  costMedian: number | null
   hasUnavailableCost: boolean
 } {
   const points = expandEfficiencyPoints(transitions)
   const tokenValues = points.map(({ transition }) => transition.tokens_per_point)
   const costValues = points.map(({ transition }) => transition.cost_per_point_available ? transition.cost_per_point : null)
-  const availableCostValues = costValues.filter((value): value is number => value != null && Number.isFinite(value))
   const hasUnavailableCost = transitions.some((transition) => !transition.cost_per_point_available)
   const chartTheme = getUsageChartTheme(isDark)
   const text = chartTheme.textPrimary
@@ -493,8 +722,6 @@ function buildEfficiencyChart(
         },
       },
     },
-    tokenMedian: calculateMedian(tokenValues),
-    costMedian: hasUnavailableCost ? null : calculateMedian(availableCostValues),
     hasUnavailableCost,
   }
 }

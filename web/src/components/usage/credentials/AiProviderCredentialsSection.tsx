@@ -6,6 +6,7 @@ import { CredentialAliasEditor, isCredentialAliasEditorDisabled } from './Creden
 import { CredentialHealthPanel } from './CredentialHealthPanel'
 import { CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialTableHeader, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheReadRateTone, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon'
+import { QuestionMarkHelp } from '@/components/ui/QuestionMarkHelp'
 
 interface AiProviderCredentialsSectionProps {
   rows: AiProviderCredentialRow[]
@@ -13,6 +14,7 @@ interface AiProviderCredentialsSectionProps {
   page: number
   totalPages: number
   pageSize: number
+  activeOnly: boolean
   sort: UsageIdentityPageSort
   loading: boolean
   aliasSavingId?: string
@@ -20,17 +22,43 @@ interface AiProviderCredentialsSectionProps {
   onOpenDetails?: (row: AiProviderCredentialRow) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
+  onActiveOnlyChange: (activeOnly: boolean) => void
   onSortChange: (sort: UsageIdentityPageSort) => void
 }
 
-export function AiProviderCredentialsSection({ rows, total, page, totalPages, pageSize, sort, loading, aliasSavingId, onSaveAlias, onOpenDetails, onPageChange, onPageSizeChange, onSortChange }: AiProviderCredentialsSectionProps) {
+export function AiProviderCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, aliasSavingId, onSaveAlias, onOpenDetails, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange }: AiProviderCredentialsSectionProps) {
   const { t } = useTranslation()
+  const helpText = t('usage_stats.credentials_ai_providers_active_only_help')
 
   return (
     <CredentialSectionShell
       title={t('usage_stats.credentials_ai_providers_title')}
       subtitle={t('usage_stats.credentials_ai_providers_subtitle')}
       countLabel={t('usage_stats.credentials_count', { count: total })}
+      titleExtra={(
+        <div className={styles.credentialAuthFileTitleControls}>
+          <label className={styles.credentialActiveOnlySwitch}>
+            <span className={styles.credentialActiveOnlyLabel}>{t('usage_stats.credentials_ai_providers_active_only')}</span>
+            <input type="checkbox" checked={activeOnly} onChange={(event) => onActiveOnlyChange(event.target.checked)} />
+            <span className={styles.credentialActiveOnlyTrack} aria-hidden="true">
+              <span className={styles.credentialActiveOnlyThumb} />
+            </span>
+          </label>
+          <QuestionMarkHelp
+            label={t('usage_stats.credentials_ai_providers_active_only_help_label')}
+            description={helpText}
+            positioning={{
+              align: 'center',
+              estimatedHeight: 72,
+              maxWidth: 280,
+              offset: 10,
+              viewportPadding: 8,
+            }}
+          >
+            <span>{helpText}</span>
+          </QuestionMarkHelp>
+        </div>
+      )}
     >
       {loading && rows.length === 0 && <div className={styles.credentialEmptyState}>{t('common.loading')}</div>}
       {!loading && rows.length === 0 && <div className={styles.credentialEmptyState}>{t('usage_stats.credentials_ai_providers_empty')}</div>}
