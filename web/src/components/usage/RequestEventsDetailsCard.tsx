@@ -1134,7 +1134,7 @@ export function RequestEventsDetailsCard({
                     <div className={styles.requestEventMobileTitleBlock}>
                       <span className={styles.requestEventMobileModel}>{row.model}</span>
                       <span className={styles.requestEventMobileTimestamp} title={row.timestamp}>
-                        {row.timestampLabel}
+                        {row.timestampDateLabel ? `${row.timestampDateLabel} ${row.timestampTimeLabel}` : row.timestampTimeLabel}
                       </span>
                     </div>
                     <span

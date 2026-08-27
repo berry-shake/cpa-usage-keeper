@@ -7,7 +7,7 @@ import (
 
 	"cpa-usage-keeper/internal/auth"
 	"cpa-usage-keeper/internal/entities"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
