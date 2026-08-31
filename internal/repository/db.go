@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"cpa-usage-keeper/internal/repository/dto"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -9,13 +9,16 @@ import (
 	"strings"
 	"time"
 
+	"cpa-usage-keeper/internal/backup"
 	"cpa-usage-keeper/internal/config"
 	"cpa-usage-keeper/internal/entities"
 	"cpa-usage-keeper/internal/logging"
+	"cpa-usage-keeper/internal/repository/dto"
 	"cpa-usage-keeper/internal/repository/migration"
 	"cpa-usage-keeper/internal/timeutil"
 
 	"github.com/glebarez/sqlite"
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
 )
@@ -148,7 +151,17 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 	}
 
 	// 已有业务表的数据库必须走显式迁移，确保旧库按版本顺序补齐结构和索引。
-	if err := migration.Run(db); err != nil {
+	// 破坏性 migration 直接复用定时任务的 Writer，生成相同目录和 database_*.db 文件名。
+	migrationBackupWriter := backup.NewWriter(cfg.BackupDir)
+	if err := migration.Run(db, migration.RunOptions{BeforeDestructiveMigration: func(ctx context.Context, version string) error {
+		// 在线 SQLite backup 读取唯一 writer 的一致快照；失败会原样返回并阻止 migration 进入清表事务。
+		backupPath, err := migrationBackupWriter.WriteDatabase(ctx, sqlDB, time.Now())
+		if err != nil {
+			return err
+		}
+		logrus.WithFields(logrus.Fields{"version": version, "backup_path": backupPath}).Info("database backed up before destructive migration")
+		return nil
+	}}); err != nil {
 		return nil, fmt.Errorf("run schema migrations: %w", err)
 	}
 

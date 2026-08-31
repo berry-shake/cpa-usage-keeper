@@ -81,6 +81,55 @@ describe('AuthFileCredentialsSection title', () => {
     expect(html).not.toContain('usage_stats.credentials_auth_files_eyebrow')
   })
 
+  it('renders the 5h cache rate in health mode', () => {
+    const storage = new Map<string, string>([['cpa.credentials.authFiles.displayMode', 'health']])
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+    })
+    try {
+      const row = {
+        identity: { id: '1', identity: 'auth-1', is_deleted: false },
+        displayName: 'Auth File',
+        maskedIdentity: 'auth-1',
+        providerLabel: 'Codex',
+        typeLabel: 'codex',
+        authTypeLabel: 'oauth',
+        totalRequests: 2,
+        successCount: 2,
+        failureCount: 0,
+        successRate: 100,
+        totalTokens: 800,
+        cacheReadRate: 12.5,
+        windowCacheReadRate: 37.5,
+        credentialHealth: {
+          window_seconds: 18_000,
+          bucket_seconds: 600,
+          window_start: '2026-05-10T05:30:00Z',
+          window_end: '2026-05-10T10:30:00Z',
+          total_success: 2,
+          total_failure: 0,
+          success_rate: 100,
+          input_tokens: 800,
+          cache_read_tokens: 300,
+          buckets: [],
+        },
+        quota: [],
+        quotaLoading: false,
+        displayQuotas: [],
+      } as AuthFileCredentialRow
+
+      const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, createAuthFileSectionProps({ rows: [row], total: 1 })))
+
+      expect(html).toContain('usage_stats.credentials_health_cache_rate_5h')
+      expect(html).toContain('37.50%')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders shared metric headers without repeating labels in each row', () => {
     const row = {
       identity: { id: '1', identity: 'auth-1', type: 'codex', is_deleted: false },
@@ -96,6 +145,7 @@ describe('AuthFileCredentialsSection title', () => {
       successRate: 97.24,
       totalTokens: 456789,
       cacheReadRate: 41.5,
+      windowCacheReadRate: null,
       quota: [],
       quotaLoading: false,
       displayQuotas: [],
@@ -132,6 +182,7 @@ describe('AuthFileCredentialsSection title', () => {
       successRate: null,
       totalTokens: 0,
       cacheReadRate: null,
+      windowCacheReadRate: null,
       quota: [],
       quotaLoading: false,
       displayQuotas: [],
@@ -161,6 +212,7 @@ describe('AuthFileCredentialsSection title', () => {
       successRate: null,
       totalTokens: 0,
       cacheReadRate: null,
+      windowCacheReadRate: null,
       quota: [],
       quotaLoading: false,
       displayQuotas: [],
@@ -205,6 +257,7 @@ describe('AuthFileCredentialsSection quota reset action', () => {
     successRate: 100,
     totalTokens: 1200,
     cacheReadRate: 0,
+    windowCacheReadRate: null,
     quota: [],
     quotaLoading: false,
     displayQuotas: [],
@@ -327,6 +380,7 @@ describe('AuthFileCredentialsSection quota usage mode rendering', () => {
   }
   const row = {
     identity: { identity: 'auth-1', is_deleted: false },
+    windowCacheReadRate: null,
     displayQuotas: [quota],
     quota: [],
     quotaLoading: false,

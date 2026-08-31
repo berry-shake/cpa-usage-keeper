@@ -173,7 +173,7 @@ export function clearEmbedSessionToken(): void {
   }
 }
 
-async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers)
   if (isMutatingMethod(init?.method)) {
     headers.set('X-CPA-Usage-Keeper-Request', 'fetch')
@@ -324,6 +324,24 @@ export async function fetchKeyOverview(request: UsageRangeRequest, signal?: Abor
   const response = await apiFetch(`${apiPath('/key-overview')}?${params.toString()}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load key overview: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchKeyAnalysis(request: UsageRangeRequest, signal?: AbortSignal): Promise<AnalysisResponse> {
+  const params = buildUsageRangeParams(request)
+  const response = await apiFetch(`${apiPath('/key-analysis')}?${params.toString()}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load key analysis: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchKeyAnalysisLatency(request: UsageRangeRequest, signal?: AbortSignal): Promise<AnalysisLatencyDiagnostics> {
+  const params = buildUsageRangeParams(request)
+  const response = await apiFetch(`${apiPath('/key-analysis/latency')}?${params.toString()}`, { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load key analysis latency: ${response.status}`)
   }
   return response.json()
 }

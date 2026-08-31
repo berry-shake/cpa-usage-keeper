@@ -325,12 +325,13 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		sessionManager = auth.NewPersistentSessionManager(cfg.AuthSessionTTL, auth.NewGormSessionStore(db))
 	}
 	authConfig := api.AuthConfig{
-		Enabled:              cfg.AuthEnabled,
-		LoginPassword:        cfg.LoginPassword,
-		SessionTTL:           cfg.AuthSessionTTL,
-		BasePath:             cfg.AppBasePath,
-		FrameAncestorOrigins: frameAncestorOrigins(cfg),
-		TrustedProxyCIDRs:    cfg.TrustedProxyCIDRs,
+		Enabled:                         cfg.AuthEnabled,
+		LoginPassword:                   cfg.LoginPassword,
+		SessionTTL:                      cfg.AuthSessionTTL,
+		BasePath:                        cfg.AppBasePath,
+		FrameAncestorOrigins:            frameAncestorOrigins(cfg),
+		TrustedProxyCIDRs:               cfg.TrustedProxyCIDRs,
+		APIKeyViewerLocalRankingEnabled: cfg.APIKeyViewerLocalRankingEnabled,
 	}
 	authHandler := api.NewAuthHandler(authConfig, sessionManager)
 

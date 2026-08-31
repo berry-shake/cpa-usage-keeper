@@ -578,6 +578,8 @@ describe('credentialViewModels', () => {
       total_success: 2,
       total_failure: 1,
       success_rate: 66.6667,
+      input_tokens: 0,
+      cache_read_tokens: 0,
       buckets: [],
     }
 
@@ -590,6 +592,84 @@ describe('credentialViewModels', () => {
 
     expect(authFileRows[0].credentialHealth).toBe(credentialHealth)
     expect(aiProviderRows[0].credentialHealth).toBe(credentialHealth)
+  })
+
+  it('derives the AI Provider 5h cache rate from the health window totals', () => {
+    const rows = buildAiProviderCredentialRows([
+      identity({
+        auth_type: 2,
+        identity: 'provider-window',
+        // 终身累计与 5h 窗口刻意背离，确认两个字段各自独立取数。
+        input_tokens: 1_000,
+        cache_read_tokens: 100,
+        credential_health: {
+          window_seconds: 18_000,
+          bucket_seconds: 600,
+          window_start: '2026-05-10T05:30:00Z',
+          window_end: '2026-05-10T10:30:00Z',
+          total_success: 8,
+          total_failure: 0,
+          success_rate: 100,
+          input_tokens: 400,
+          cache_read_tokens: 250,
+          buckets: [],
+        },
+      }),
+    ])
+
+    expect(rows[0].cacheReadRate).toBe(10)
+    expect(rows[0].windowCacheReadRate).toBe(62.5)
+  })
+
+  it('derives the Auth File 5h cache rate from the health window totals', () => {
+    const rows = buildAuthFileCredentialRows([
+      identity({
+        auth_type: 1,
+        identity: 'auth-window',
+        credential_health: {
+          window_seconds: 18_000,
+          bucket_seconds: 600,
+          window_start: '2026-05-10T05:30:00Z',
+          window_end: '2026-05-10T10:30:00Z',
+          total_success: 8,
+          total_failure: 0,
+          success_rate: 100,
+          input_tokens: 800,
+          cache_read_tokens: 300,
+          buckets: [],
+        },
+      }),
+    ])
+
+    expect(rows[0].windowCacheReadRate).toBe(37.5)
+  })
+
+  it('reports a null AI Provider 5h cache rate when the window has no input tokens', () => {
+    const quietHealth = {
+      window_seconds: 18_000,
+      bucket_seconds: 600,
+      window_start: '2026-05-10T05:30:00Z',
+      window_end: '2026-05-10T10:30:00Z',
+      total_success: 0,
+      total_failure: 0,
+      success_rate: 0,
+      input_tokens: 0,
+      cache_read_tokens: 0,
+      buckets: [],
+    }
+
+    const withQuietWindow = buildAiProviderCredentialRows([
+      identity({ auth_type: 2, identity: 'quiet-provider', input_tokens: 1_000, cache_read_tokens: 500, credential_health: quietHealth }),
+    ])
+    const withoutHealth = buildAiProviderCredentialRows([
+      identity({ auth_type: 2, identity: 'no-health-provider', input_tokens: 1_000, cache_read_tokens: 500 }),
+    ])
+
+    // 窗口内无流量时只有窗口值为 null，终身累计仍照常展示。
+    expect(withQuietWindow[0].windowCacheReadRate).toBeNull()
+    expect(withQuietWindow[0].cacheReadRate).toBe(50)
+    expect(withoutHealth[0].windowCacheReadRate).toBeNull()
+    expect(withoutHealth[0].cacheReadRate).toBe(50)
   })
 
   it('builds AI provider rows without quota data', () => {
@@ -605,6 +685,7 @@ describe('credentialViewModels', () => {
     expect(rows[0].successRate).toBe(75)
     expect(rows[0].totalTokens).toBe(0)
     expect(rows[0].cacheReadRate).toBeNull()
+    expect(rows[0].windowCacheReadRate).toBeNull()
     expect('displayQuotas' in rows[0]).toBe(false)
   })
 })

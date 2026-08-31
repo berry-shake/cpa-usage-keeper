@@ -20,8 +20,10 @@ import (
 type ServiceOptions struct {
 	RefreshWorkerLimit               int
 	UsageHeaderSnapshotFlushInterval time.Duration
-	// CodexQuotaHistoryFlushInterval 覆盖独立历史 runner 固定批次边界前的十秒等待，主要供定向测试缩短等待。
+	// CodexQuotaHistoryFlushInterval 覆盖独立历史 runner 固定批次边界前的一分钟等待，主要供定向测试缩短等待。
 	CodexQuotaHistoryFlushInterval time.Duration
+	// CodexQuotaHistoryHeartbeatInterval 覆盖相同整数百分比再次物化的最短间隔，非正值使用五分钟生产默认值。
+	CodexQuotaHistoryHeartbeatInterval time.Duration
 	// CodexQuotaHistoryQueueSize 分别覆盖 Header 与可信主动查询两条有界队列容量，非正值使用生产默认值。
 	CodexQuotaHistoryQueueSize int
 	PricingCatalog             *pricing.Catalog
@@ -66,7 +68,7 @@ type Service struct {
 	// refreshWG 跟踪 service 派生的 dispatcher/worker/scheduler goroutine，App 关闭 DB 前会等待它们退出。
 	refreshWG sync.WaitGroup
 
-	// usageHeaderPending 按 auth_index 只保存一分钟窗口内最新的不可变快照指针。
+	// usageHeaderPending 按 auth_index 保存一分钟内合并后的不可变 cache 快照；history 使用独立队列。
 	usageHeaderPending       map[string]*UsageHeaderSnapshot
 	usageHeaderWake          chan struct{}
 	usageHeaderStopCh        chan struct{}
@@ -77,13 +79,13 @@ type Service struct {
 	usageHeaderClosing       bool
 	usageHeaderCloseOnce     sync.Once
 
-	// codexQuotaHistoryHeaderQueue 有界保存 Header 快照指针，生产者永不等待。
+	// codexQuotaHistoryHeaderQueue 有界保存 Header 快照指针；满载时 FIFO 丢队头并保留后到数据。
 	codexQuotaHistoryHeaderQueue chan codexQuotaHistoryInput
 	// codexQuotaHistoryHeaderWake 只通知 runner“Header 队列已有数据”；容量为一即可合并重复唤醒。
 	codexQuotaHistoryHeaderWake chan struct{}
-	// codexQuotaHistoryTrustedQueue 独立保存低频可信主动查询 observation，不与 Header 共用 writer 批次。
+	// codexQuotaHistoryTrustedQueue 独立保存低频可信主动查询 observation，使它能跳过 Header 等待并覆盖同角色旧候选。
 	codexQuotaHistoryTrustedQueue chan codexQuotaHistoryInput
-	// codexQuotaHistoryTrustedWake 让可信来源跳过 Header 十秒窗口并立即触发 runner。
+	// codexQuotaHistoryTrustedWake 让可信来源跳过 Header 一分钟窗口并立即触发 runner。
 	codexQuotaHistoryTrustedWake chan struct{}
 	// codexQuotaHistoryStopCh 只表达 runner 停止；队列不关闭以避免并发发送 panic。
 	codexQuotaHistoryStopCh chan struct{}
@@ -91,6 +93,8 @@ type Service struct {
 	codexQuotaHistoryDoneCh chan struct{}
 	// codexQuotaHistoryFlushInterval 是首条数据入队后、runner 固定本批队列数量前的等待时长。
 	codexQuotaHistoryFlushInterval time.Duration
+	// codexQuotaHistoryHeartbeatInterval 限制已落库同值状态最多每五分钟物化一次。
+	codexQuotaHistoryHeartbeatInterval time.Duration
 	// codexQuotaHistoryNewTimer 创建一次性窗口 timer，测试可替换但生产默认使用 time.Timer。
 	codexQuotaHistoryNewTimer func(time.Duration) (<-chan time.Time, func())
 	// codexQuotaHistoryWrite 是独立 repository writer；不进入 usage/inbox 事务。
@@ -144,10 +148,15 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 	if usageHeaderFlushInterval <= 0 {
 		usageHeaderFlushInterval = usageHeaderSnapshotFlushInterval
 	}
-	// 独立 history runner 默认每 10 秒合并一次；非正测试覆盖不改变生产语义。
+	// 独立 history runner 默认每一分钟合并一次；非正测试覆盖不改变生产语义。
 	codexHistoryFlushInterval := options.CodexQuotaHistoryFlushInterval
 	if codexHistoryFlushInterval <= 0 {
 		codexHistoryFlushInterval = codexQuotaHistoryFlushInterval
+	}
+	// 稳定值与请求量解耦，默认每五分钟最多更新一次父子历史行。
+	codexHistoryHeartbeatInterval := options.CodexQuotaHistoryHeartbeatInterval
+	if codexHistoryHeartbeatInterval <= 0 {
+		codexHistoryHeartbeatInterval = codexQuotaHistoryHeartbeatInterval
 	}
 	// 队列容量只限制内存和丢弃边界，不改变 cache latest-map 的接收能力。
 	codexHistoryQueueSize := options.CodexQuotaHistoryQueueSize
@@ -160,37 +169,38 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 		panic("pricing catalog is required")
 	}
 	service := &Service{
-		db:                              db,
-		registry:                        registry,
-		pricing:                         pricingCatalog,
-		refreshTasks:                    make(map[string]*RefreshTaskRecord),
-		resetInFlight:                   make(map[string]struct{}),
-		refreshWorkerTokens:             make(chan struct{}, workerLimit),
-		refreshTaskTTL:                  RefreshTransientTaskTTL,
-		refreshCooldown:                 time.Sleep,
-		refreshContext:                  refreshContext,
-		refreshCancel:                   refreshCancel,
-		autoRefreshSettingsChanged:      make(chan struct{}, 1),
-		usageHeaderPending:              make(map[string]*UsageHeaderSnapshot, usageHeaderPendingIdentityLimit),
-		usageHeaderWake:                 make(chan struct{}, 1),
-		usageHeaderStopCh:               make(chan struct{}),
-		usageHeaderDoneCh:               make(chan struct{}),
-		usageHeaderFlushInterval:        usageHeaderFlushInterval,
-		usageHeaderNewTimer:             newUsageHeaderTimer,
-		codexQuotaHistoryHeaderQueue:    make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
-		codexQuotaHistoryHeaderWake:     make(chan struct{}, 1),
-		codexQuotaHistoryTrustedQueue:   make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
-		codexQuotaHistoryTrustedWake:    make(chan struct{}, 1),
-		codexQuotaHistoryStopCh:         make(chan struct{}),
-		codexQuotaHistoryDoneCh:         make(chan struct{}),
-		codexQuotaHistoryFlushInterval:  codexHistoryFlushInterval,
-		codexQuotaHistoryNewTimer:       newCodexQuotaHistoryTimer,
-		codexQuotaHistoryWrite:          repository.WriteCodexMainQuotaObservations,
-		codexQuotaHistoryLoad:           repository.LoadLatestCodexQuotaHistoryState,
-		codexQuotaHistoryListIdentities: repository.ListActiveAuthFileUsageIdentitiesByAuthIndexes,
+		db:                                 db,
+		registry:                           registry,
+		pricing:                            pricingCatalog,
+		refreshTasks:                       make(map[string]*RefreshTaskRecord),
+		resetInFlight:                      make(map[string]struct{}),
+		refreshWorkerTokens:                make(chan struct{}, workerLimit),
+		refreshTaskTTL:                     RefreshTransientTaskTTL,
+		refreshCooldown:                    time.Sleep,
+		refreshContext:                     refreshContext,
+		refreshCancel:                      refreshCancel,
+		autoRefreshSettingsChanged:         make(chan struct{}, 1),
+		usageHeaderPending:                 make(map[string]*UsageHeaderSnapshot, usageHeaderPendingIdentityLimit),
+		usageHeaderWake:                    make(chan struct{}, 1),
+		usageHeaderStopCh:                  make(chan struct{}),
+		usageHeaderDoneCh:                  make(chan struct{}),
+		usageHeaderFlushInterval:           usageHeaderFlushInterval,
+		usageHeaderNewTimer:                newUsageHeaderTimer,
+		codexQuotaHistoryHeaderQueue:       make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
+		codexQuotaHistoryHeaderWake:        make(chan struct{}, 1),
+		codexQuotaHistoryTrustedQueue:      make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
+		codexQuotaHistoryTrustedWake:       make(chan struct{}, 1),
+		codexQuotaHistoryStopCh:            make(chan struct{}),
+		codexQuotaHistoryDoneCh:            make(chan struct{}),
+		codexQuotaHistoryFlushInterval:     codexHistoryFlushInterval,
+		codexQuotaHistoryHeartbeatInterval: codexHistoryHeartbeatInterval,
+		codexQuotaHistoryNewTimer:          newCodexQuotaHistoryTimer,
+		codexQuotaHistoryWrite:             repository.WriteCodexMainQuotaObservations,
+		codexQuotaHistoryLoad:              repository.LoadLatestCodexQuotaHistoryState,
+		codexQuotaHistoryListIdentities:    repository.ListActiveAuthFileUsageIdentitiesByAuthIndexes,
 	}
 	go service.runUsageHeaderSnapshotWorker()
-	// history 拥有独立队列、timer 和失败状态，不能复用一分钟 cache worker 的 pending map。
+	// history 拥有独立队列、timer 和稳定尾段，不能复用一分钟 cache worker 的 pending map。
 	go service.runCodexQuotaHistoryRunner()
 	return service
 }

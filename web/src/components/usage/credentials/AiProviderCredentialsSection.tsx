@@ -112,7 +112,7 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
               <MetricPill value={<TonePercent value={row.cacheReadRate} tone={cacheReadRateTone(row.cacheReadRate)} />} />
             </>
           )}
-          side={<CredentialHealthPanel displayName={row.displayName} health={row.credentialHealth} lastUsedAt={row.lastUsedText} statsUpdatedAt={row.statsUpdatedText} />}
+          side={<CredentialHealthPanel displayName={row.displayName} health={row.credentialHealth} lastUsedAt={row.lastUsedText} statsUpdatedAt={row.statsUpdatedText} windowCacheReadRate={row.windowCacheReadRate} />}
           rowClassName={styles.aiProviderCredentialRow}
         />
       ))}

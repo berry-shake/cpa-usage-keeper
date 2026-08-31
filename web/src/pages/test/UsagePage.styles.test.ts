@@ -7,8 +7,10 @@ const globalStyles = readSource(new URL('../../styles/global.scss', import.meta.
 const componentsStyles = readSource(new URL('../../styles/components.scss', import.meta.url))
 const usagePageStyles = readSource(new URL('../UsagePage.module.scss', import.meta.url))
 const usagePageSource = readSource(new URL('../UsagePage.tsx', import.meta.url))
-const keyOverviewPageStyles = readSource(new URL('../KeyOverviewPage.module.scss', import.meta.url))
+const keyOverviewPageStyles = readSource(new URL('../../features/key-viewer/KeyViewerShell.module.scss', import.meta.url))
 const keyOverviewPageSource = readSource(new URL('../KeyOverviewPage.tsx', import.meta.url))
+const keyAnalysisPageSource = readSource(new URL('../KeyAnalysisPage.tsx', import.meta.url))
+const keyViewerShellSource = readSource(new URL('../../features/key-viewer/KeyViewerShell.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
 const requestEventLogSource = readSource(new URL('../../components/usage/RequestEventLogModal.tsx', import.meta.url))
 const requestEventsColumnSettingsSource = readSource(new URL('../../components/usage/RequestEventsColumnSettingsModal.tsx', import.meta.url))
@@ -253,7 +255,8 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).not.toContain('TimeRangeControlPrototype')
     expect(keyOverviewPageSource).not.toContain('TimeRangeControlPrototype')
     expect(usagePageSource).toContain('parseStoredUsageRangeState')
-    expect(keyOverviewPageSource).toContain('parseStoredUsageRangeState')
+    expect(keyOverviewPageSource).toContain('loadKeyViewerTimeRange')
+    expect(keyAnalysisPageSource).toContain('loadKeyViewerTimeRange')
     expect(timeRangeControlSource).toContain('data-time-range-trigger="desktop"')
     expect(timeRangeControlSource).toContain('data-time-range-trigger="mobile"')
   })
@@ -275,6 +278,13 @@ describe('UsagePage toolbar styles', () => {
     expect(keyOverviewPageSource).toContain('customRange={customRange}')
     expect(keyOverviewPageSource).toContain('onChange={handleTimeRangeChange}')
     expect(keyOverviewPageSource).toContain('fetchKeyOverview(usageRangeQuery, controller.signal)')
+  })
+
+  it('persists one time range across API Key viewer pages', () => {
+    expect(keyOverviewPageSource).toContain('persistKeyViewerTimeRange(timeRangeState)')
+    expect(keyAnalysisPageSource).toContain('persistKeyViewerTimeRange(timeRangeState)')
+    expect(keyOverviewPageSource).not.toContain('cli-proxy-key-overview-range-v1')
+    expect(keyAnalysisPageSource).not.toContain('cli-proxy-key-analysis-range-v1')
   })
 
   it('shows a dedicated notice when Usage Events export capacity is full', () => {
@@ -837,9 +847,10 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).toContain('fetchUpdateCheck')
     expect(usagePageSource.indexOf("t('usage_stats.check_updates')")).toBeLessThan(usagePageSource.indexOf("t('common.logout')"))
     expect(usagePageSource.match(/<MainActionButton/g)).toHaveLength(2)
-    expect(keyOverviewPageSource.match(/<MainActionButton/g)).toHaveLength(2)
+    expect(keyOverviewPageSource.match(/<MainActionButton/g)).toHaveLength(1)
+    expect(keyViewerShellSource.match(/<MainActionButton/g)).toHaveLength(1)
     expect(usagePageSource).toContain("aria-label={t('common.logout')}")
-    expect(keyOverviewPageSource).toContain("aria-label={t('common.logout')}")
+    expect(keyViewerShellSource).toContain("aria-label={t('common.logout')}")
     expect(usagePageSource).not.toContain('styles.signOutPill')
     expect(keyOverviewPageSource).not.toContain('styles.logoutPill')
     expect(usagePageStyles).not.toContain('.signOutPill')
@@ -919,10 +930,11 @@ describe('UsagePage toolbar styles', () => {
     expect(connectedActiveTab).not.toContain('border-color:')
   })
 
-  it('keeps the connected shell out of CPAMC embed and Key Overview', () => {
+  it('keeps the connected shell out of CPAMC embed while sharing it with Key Overview', () => {
     expect(usagePageSource).toContain("${!isEmbeddedInCPAMC ? styles.tabBarConnected : ''}")
-    expect(keyOverviewPageSource).not.toContain('tabBarConnected')
-    expect(keyOverviewPageStyles).not.toContain('.tabBarConnected')
+    expect(keyViewerShellSource).toContain('styles.tabBarConnected')
+    expect(keyOverviewPageSource).toContain('KeyViewerShell')
+    expect(keyOverviewPageStyles).toContain('.tabBarConnected')
   })
 
   it('lets API Key Settings content scroll inside the card instead of being clipped', () => {
@@ -1543,7 +1555,7 @@ describe('UsagePage toolbar styles', () => {
     expect(priceSettingsSource).not.toContain('styles.usagePillAction')
   })
 
-  it('keeps the Request Event export menu styled and hoverable like the credential inspection control', () => {
+  it('keeps the Request Event export menu aligned with the credential inspection control', () => {
     const exportMenuBlock = styleRuleBlock(usagePageStyles, '.requestEventsExportMenu')
     const exportDropdownBlock = usagePageStyles.slice(
       usagePageStyles.indexOf('.requestEventsExportDropdown {'),

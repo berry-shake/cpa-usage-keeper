@@ -137,7 +137,7 @@ func setUsageHeaderTimerFactory(service *quota.Service, factory func(time.Durati
 }
 
 func setCodexQuotaHistoryTimerFactory(service *quota.Service, factory func(time.Duration) (<-chan time.Time, func())) {
-	// history runner 的手动 timer 只用于锁定十秒批次边界，不依赖真实墙钟调度。
+	// history runner 的手动 timer 只用于锁定一分钟批次边界，不依赖真实墙钟调度。
 	quotaServiceField(service, "codexQuotaHistoryNewTimer").Set(reflect.ValueOf(factory))
 }
 

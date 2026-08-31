@@ -17,7 +17,12 @@ interface AnalysisPanelProps {
   latencyError?: string;
   isDark: boolean;
   isMobile: boolean;
+  compositionDimensions?: readonly AnalysisCompositionDimension[];
 }
+
+export type AnalysisCompositionDimension = 'api_key' | 'model' | 'auth_files' | 'ai_provider';
+
+const DEFAULT_COMPOSITION_DIMENSIONS: readonly AnalysisCompositionDimension[] = ['api_key', 'model', 'auth_files', 'ai_provider'];
 
 type ChartRow = {
   label: string;
@@ -1563,7 +1568,7 @@ function LatencyDiagnosticsCard({ diagnostics, loading, error, isDark, isMobile 
 }
 
 type CompositionTab = {
-  id: 'api_key' | 'model' | 'auth_files' | 'ai_provider';
+  id: AnalysisCompositionDimension;
   label: string;
   items: AnalysisCompositionItem[];
 };
@@ -2339,7 +2344,16 @@ function Heatmap({ cells, apiKeys, apiKeyLabels, models, loading, isDark }: { ce
   );
 }
 
-export function AnalysisPanel({ analysis, loading, latencyDiagnostics, latencyLoading = false, latencyError = '', isDark, isMobile }: AnalysisPanelProps) {
+export function AnalysisPanel({
+  analysis,
+  loading,
+  latencyDiagnostics,
+  latencyLoading = false,
+  latencyError = '',
+  isDark,
+  isMobile,
+  compositionDimensions = DEFAULT_COMPOSITION_DIMENSIONS,
+}: AnalysisPanelProps) {
   const { t } = useTranslation();
   const tokenRows = useMemo(() => buildTokenUsageRows(analysis?.token_usage ?? [], analysis?.granularity ?? 'hourly', analysis?.timezone), [analysis]);
   const apiComposition = useMemo(() => takeMajorComposition(analysis?.api_key_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
@@ -2347,12 +2361,15 @@ export function AnalysisPanel({ analysis, loading, latencyDiagnostics, latencyLo
   const authFilesComposition = useMemo(() => takeMajorComposition(analysis?.auth_files_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
   const aiProviderComposition = useMemo(() => takeMajorComposition(analysis?.ai_provider_composition ?? [], t('usage_stats.analysis_others')), [analysis, t]);
   const analysisWindowMinutes = useMemo(() => calculateAnalysisWindowMinutes(analysis), [analysis]);
-  const compositionTabs = useMemo<CompositionTab[]>(() => [
-    { id: 'api_key', label: t('usage_stats.analysis_composition_api_key_tab'), items: apiComposition },
-    { id: 'model', label: t('usage_stats.analysis_composition_model_tab'), items: modelComposition },
-    { id: 'auth_files', label: t('usage_stats.analysis_composition_auth_files_tab'), items: authFilesComposition },
-    { id: 'ai_provider', label: t('usage_stats.analysis_composition_ai_provider_tab'), items: aiProviderComposition },
-  ], [apiComposition, modelComposition, authFilesComposition, aiProviderComposition, t]);
+  const compositionTabs = useMemo<CompositionTab[]>(() => {
+    const tabs: Record<AnalysisCompositionDimension, CompositionTab> = {
+      api_key: { id: 'api_key', label: t('usage_stats.analysis_composition_api_key_tab'), items: apiComposition },
+      model: { id: 'model', label: t('usage_stats.analysis_composition_model_tab'), items: modelComposition },
+      auth_files: { id: 'auth_files', label: t('usage_stats.analysis_composition_auth_files_tab'), items: authFilesComposition },
+      ai_provider: { id: 'ai_provider', label: t('usage_stats.analysis_composition_ai_provider_tab'), items: aiProviderComposition },
+    };
+    return compositionDimensions.map((dimension) => tabs[dimension]);
+  }, [apiComposition, modelComposition, authFilesComposition, aiProviderComposition, compositionDimensions, t]);
 
   return (
     <div className={styles.analysisPanel}>
