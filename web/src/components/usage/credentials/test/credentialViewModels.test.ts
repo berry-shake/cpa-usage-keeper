@@ -263,16 +263,18 @@ describe('credentialViewModels', () => {
 
   it('preserves Antigravity quota group metadata for provider-specific rendering', () => {
     const groupedQuota = {
-      key: 'bucket.gemini-5h',
+      key: 'bucket.antigravity-gemini-models.gemini-5h',
       label: '5h',
       scope: 'quota_group',
       metric: '5h',
-      groupKey: 'antigravity-group-1',
+      groupKey: 'antigravity-gemini-models',
       groupLabel: 'Gemini Models',
       groupDescription: 'Models within this group: Gemini Flash, Gemini Pro',
       remainingFraction: 0.72,
       window: { seconds: 18_000 },
       resetAt: '2026-05-09T12:00:00Z',
+      window_usage_tokens: 1_000_000,
+      window_usage_cost: 2.8,
     } as UsageQuotaRow & { groupKey: string; groupLabel: string; groupDescription: string }
     const quotas = new Map<string, UsageQuotaCheckResponse>([
       ['antigravity-auth', quotaResponse('antigravity-auth', [groupedQuota])],
@@ -285,9 +287,11 @@ describe('credentialViewModels', () => {
     expect(rows[0].displayQuotas[0]).toMatchObject({
       label: '5h',
       scope: 'quota_group',
-      groupKey: 'antigravity-group-1',
+      groupKey: 'antigravity-gemini-models',
       groupLabel: 'Gemini Models',
       groupDescription: 'Models within this group: Gemini Flash, Gemini Pro',
+      windowUsage: { tokens: '1.00M', cost: '$2.80' },
+      windowUsageEstimate: { tokens: '3.57M', cost: '$10.00' },
     })
   })
 

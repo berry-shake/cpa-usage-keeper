@@ -165,7 +165,7 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(document.body.textContent).not.toContain('usage_stats.credentials_quota_history_role_primary')
     expect(document.body.textContent).not.toContain('usage_stats.credentials_quota_history_role_secondary')
     expect(latestChartData?.labels).toEqual(['90% → 89%', '89% → 88%', '88% → 87%', '87% → 86%'])
-    expect(latestChartData?.datasets).toHaveLength(2)
+    expect(latestChartData?.datasets).toHaveLength(3)
     expect(latestChartData?.datasets[0]).toMatchObject({
       type: 'bar',
       yAxisID: 'tokens',
@@ -192,10 +192,23 @@ describe('CodexQuotaHistoryPanel', () => {
     })
     const pointRadius = latestChartData?.datasets[1]?.pointRadius as unknown as ((context: { dataIndex: number }) => number)
     expect([0, 1, 2, 3].map((dataIndex) => pointRadius({ dataIndex }))).toEqual([0, 0, 0, 0])
+    expect(latestChartData?.datasets[2]).toMatchObject({
+      type: 'line',
+      yAxisID: 'remaining',
+      data: [89, 88, 87, 86],
+      borderColor: 'rgba(120, 113, 108, 0.68)',
+      backgroundColor: 'rgba(120, 113, 108, 0.68)',
+      pointBackgroundColor: 'rgba(120, 113, 108, 0.68)',
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      tension: 0,
+    })
     expect(latestChartOptions?.scales?.x?.ticks).toMatchObject({ autoSkip: true, maxTicksLimit: 8, maxRotation: 0 })
     expect(latestChartOptions?.scales?.tokens?.ticks).toMatchObject({ maxTicksLimit: 5 })
     expect(latestChartOptions?.scales?.cost?.ticks).toMatchObject({ maxTicksLimit: 5 })
+    expect(latestChartOptions?.scales?.remaining).toMatchObject({ display: true, position: 'right', min: 0, max: 100 })
     expect(document.body.querySelector<HTMLElement>('[data-codex-quota-cost-legend]')?.style.getPropertyValue('--quota-cost-line-color')).toBe('#ff5a40')
+    expect(document.body.querySelector<HTMLElement>('[data-codex-quota-remaining-legend]')?.style.getPropertyValue('--quota-remaining-line-color')).toBe('rgba(120, 113, 108, 0.68)')
     expect(document.body.querySelector('[aria-label="usage_stats.credentials_quota_history_metric_selector"]')).toBeNull()
     expect(document.body.querySelector('[data-codex-quota-cycle-id="2"][data-codex-quota-cycle-status="current"]')).not.toBeNull()
     expect(document.body.querySelector('[data-codex-quota-cycle-id="1"][data-codex-quota-cycle-status="completed"]')).not.toBeNull()
@@ -233,7 +246,7 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(accessibleSummary?.textContent).toContain('90% → 89%')
     expect(accessibleSummary?.textContent).toContain('1.00K Token/1%')
     expect(accessibleSummary?.textContent).toContain('$1.00/1%')
-    expect(accessibleSummary?.textContent).toContain('usage_stats.credentials_quota_history_interval: Aug 20, 11:00 AM → Aug 20, 11:30 AM')
+    expect(accessibleSummary?.textContent).toContain('usage_stats.credentials_quota_history_interval: Aug 20, 11:00 → Aug 20, 11:30')
     expect(document.body.querySelector('[data-codex-quota-efficiency-chart]')?.getAttribute('aria-hidden')).toBe('true')
 
     const tooltipCallbacks = latestChartOptions?.plugins?.tooltip?.callbacks
@@ -260,11 +273,13 @@ describe('CodexQuotaHistoryPanel', () => {
       'usage_stats.credentials_quota_history_cost_per_point: $1.00',
     ])
     expect(afterBody?.([{ dataIndex: 0 }])).toEqual([
-      'usage_stats.credentials_quota_history_interval: Aug 20, 10:00 AM → Aug 20, 10:10 AM',
+      'usage_stats.credentials_quota_history_remaining_percentage: 89%',
+      'usage_stats.credentials_quota_history_interval: Aug 20, 10:00 → Aug 20, 10:10',
     ])
     expect(afterBody?.([{ dataIndex: 1 }])).toEqual([
+      'usage_stats.credentials_quota_history_remaining_percentage: 88%',
       'usage_stats.credentials_quota_history_change: 89% → 86%',
-      'usage_stats.credentials_quota_history_interval: Aug 20, 11:00 AM → Aug 20, 11:30 AM',
+      'usage_stats.credentials_quota_history_interval: Aug 20, 11:00 → Aug 20, 11:30',
       'usage_stats.total_tokens: 3.00K Token',
       'usage_stats.total_cost: $3.00',
     ])
@@ -425,6 +440,11 @@ describe('CodexQuotaHistoryPanel', () => {
       borderColor: '#ff5a40',
       backgroundColor: '#ff5a40',
     })
+    expect(latestChartData?.datasets[2]).toMatchObject({
+      borderColor: 'rgba(168, 162, 158, 0.68)',
+      backgroundColor: 'rgba(168, 162, 158, 0.68)',
+      pointBackgroundColor: 'rgba(168, 162, 158, 0.68)',
+    })
     expect(document.body.querySelector<HTMLElement>('[data-codex-quota-cost-legend]')?.style.getPropertyValue('--quota-cost-line-color')).toBe('#ff5a40')
   })
 
@@ -514,7 +534,7 @@ describe('CodexQuotaHistoryPanel', () => {
     expect([0, 1, 2, 3].map((dataIndex) => pointRadius({ dataIndex }))).toEqual([3, 0, 0, 0])
   })
 
-  it('preserves the project-timezone wall clock from API timestamps', async () => {
+  it('uses a 24-hour clock while preserving the project-timezone wall clock from API timestamps', async () => {
     const offsetResponse = cloneResponse()
     offsetResponse.cycles[0].first_observed_at = '2026-08-21T13:01:00+08:00'
     offsetResponse.cycles[0].last_observed_at = '2026-08-21T14:02:00+08:00'
@@ -524,7 +544,8 @@ describe('CodexQuotaHistoryPanel', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(document.body.textContent).toContain('"start":"Aug 21, 01:01 PM"')
-    expect(document.body.textContent).toContain('"end":"Aug 21, 02:02 PM"')
+    expect(document.body.textContent).toContain('"start":"Aug 21, 13:01"')
+    expect(document.body.textContent).toContain('"end":"Aug 21, 14:02"')
+    expect(document.body.textContent).toContain('"start":"Aug 17, 00:00"')
   })
 })

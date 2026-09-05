@@ -3,6 +3,7 @@ import { calculateCacheReadRate, formatCompactTokenValue } from '@/utils/usage'
 import { resolveCredentialSubscriptionBadge, type SubscriptionBadgeModel } from './credentialSubscription'
 
 export const CREDENTIALS_PAGE_SIZE = 10
+export const CREDENTIAL_PAGE_SIZE_OPTIONS = [5, 10, 20, 50] as const
 const FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60
 const WEEKLY_WINDOW_SECONDS = 7 * 24 * 60 * 60
 const THIRTY_DAY_WINDOW_SECONDS = 30 * 24 * 60 * 60

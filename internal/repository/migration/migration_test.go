@@ -86,6 +86,7 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260822_rebuild_quota_history",
 		"20260824_add_auth_session_alias",
 		"20260827_reset_quota_history",
+		"20260902_repair_usage_event_quota_window_index",
 	}
 	assertStringSlicesEqual(t, want, got)
 }

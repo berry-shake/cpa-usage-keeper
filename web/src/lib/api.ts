@@ -577,7 +577,8 @@ export async function exportUsageEvents(request: UsageRangeRequest, format: Usag
   }
 }
 
-export type UsageIdentityPageSort = 'priority' | 'total_requests' | 'total_tokens' | 'last_used_at'
+export const USAGE_IDENTITY_PAGE_SORTS = ['priority', 'total_requests', 'total_tokens', 'last_used_at'] as const
+export type UsageIdentityPageSort = typeof USAGE_IDENTITY_PAGE_SORTS[number]
 
 export interface FetchUsageIdentitiesPageOptions {
   authType?: UsageIdentityAuthType

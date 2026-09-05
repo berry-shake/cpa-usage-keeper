@@ -90,6 +90,8 @@ const (
 	migrationAddAuthSessionAlias = "20260824_add_auth_session_alias"
 	// migrationResetQuotaHistory 在新来源判定生效后清空无法证明 provenance 的旧额度历史。
 	migrationResetQuotaHistory = "20260827_reset_quota_history"
+	// migrationRepairUsageEventQuotaWindowIndex 修复旧 migration 记录与物理索引不一致的数据库。
+	migrationRepairUsageEventQuotaWindowIndex = "20260902_repair_usage_event_quota_window_index"
 )
 
 type schemaMigration struct {
@@ -231,6 +233,8 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationAddAuthSessionAlias, run: addAuthSessionAliasMigration},
 		// 清表前必须先在事务外完成通用数据库备份；DELETE 与版本标记仍使用默认单事务。
 		{version: migrationResetQuotaHistory, run: resetQuotaHistoryMigration, destructive: true},
+		// 历史 migration 不会重跑；用新版本幂等补齐额度历史查询强制依赖的索引。
+		{version: migrationRepairUsageEventQuotaWindowIndex, run: repairUsageEventQuotaWindowIndexMigration},
 	}
 }
 

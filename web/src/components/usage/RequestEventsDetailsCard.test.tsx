@@ -199,8 +199,9 @@ describe('RequestEventsDetailsCard pagination', () => {
 
     expect(html.indexOf('>Tokens</th>')).toBeLessThan(html.indexOf('>Cache</th>'));
     expect(html).toContain('>25.00%</span>');
-    expect(html).toContain('>Read</span> 25</span>');
-    expect(html).toContain('>Write</span> 0</span>');
+    expect(html).toContain('data-cache-operation="read"');
+    expect(html).toContain('data-cache-operation="write"');
+    expect(html).not.toContain('data-cache-rate-tone=');
   });
 
   it('keeps cache rate based on normalized input for all providers', () => {
@@ -222,8 +223,8 @@ describe('RequestEventsDetailsCard pagination', () => {
     });
 
     expect(html).toContain('>Cache</th>');
-    expect(html).toContain('>Read</span> 25</span>');
-    expect(html).toContain('>Write</span> 0</span>');
+    expect(html).toContain('data-cache-operation="read"');
+    expect(html).toContain('data-cache-operation="write"');
   });
 
   it('stacks source value above source tags', () => {

@@ -22,6 +22,17 @@ describe('CredentialRequestEventsList compact table styles', () => {
     expect(styles).toMatch(/\.subDataLabel\s*\{[\s\S]*?color:\s*var\(--text-secondary\);/)
   })
 
+  it('uses the Request Event Log token and cache metric treatment in credential details', () => {
+    expect(styles).toMatch(/\.requestEventsTokenMetricRow\s*,\s*\.requestEventsCacheMetrics\s*\{[\s\S]*?display:\s*flex;/)
+    expect(styles).toMatch(/\.requestEventsTokenMetricInput\s*\{[\s\S]*?color:\s*#0284c7;/)
+    expect(styles).toMatch(/\.requestEventsTokenMetricOutput\s*\{[\s\S]*?color:\s*#16a34a;/)
+    expect(styles).toMatch(/\.requestEventsTokenMetricReasoning\s*\{[\s\S]*?color:\s*#8b5cf6;/)
+    expect(styles).toMatch(/\.requestEventsCacheMetricRead\s*\{[\s\S]*?color:\s*#d97706;/)
+    expect(styles).toMatch(/\.requestEventsCacheMetricWrite\s*\{[\s\S]*?color:\s*#db2777;/)
+    expect(styles).toMatch(/\.requestEventsMetricIconSlot\s*\{[\s\S]*?width:\s*16px;[\s\S]*?height:\s*16px;/)
+    expect(styles).toMatch(/\.requestEventsMetricCell\s*\{[\s\S]*?cursor:\s*default;[\s\S]*?&:\s*focus-visible\s*\{[\s\S]*?outline:\s*2px solid var\(--primary-color\);/)
+  })
+
   it('uses the spare client-context row for a two-line User Agent value', () => {
     expect(styles).toMatch(/\.detailUserAgentValue\s*\{[\s\S]*?display:\s*-webkit-box;[\s\S]*?-webkit-line-clamp:\s*2;[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;/)
   })

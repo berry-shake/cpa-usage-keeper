@@ -268,8 +268,8 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).toContain('customRange={activeCustomRange}')
     expect(usagePageSource).toContain("maxCustomDayRangeDays={activeTab === 'events' ? REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS : undefined}")
     expect(usagePageSource).toContain('onChange={handleTimeRangeChange}')
-    expect(usagePageSource).toContain('fetchAnalysis(usageRangeQuery, controller.signal, selectedApiKeyId)')
-    expect(usagePageSource).toContain('fetchAnalysisLatency(usageRangeQuery, controller.signal, selectedApiKeyId)')
+    expect(usagePageSource).toContain('fetchAnalysis(usageRangeQuery, controller.signal, requestApiKeyId)')
+    expect(usagePageSource).toContain('fetchAnalysisLatency(usageRangeQuery, controller.signal, requestApiKeyId)')
     expect(usagePageSource).toContain('fetchUsageEvents(usageRangeQuery, controller.signal, {')
     expect(usagePageSource).toContain('exportUsageEvents(usageRangeQuery, format, {')
 
@@ -1537,6 +1537,18 @@ describe('UsagePage toolbar styles', () => {
     ;['api_key', 'source', 'model'].forEach((columnId) => {
       expect(requestEventColumnDefinitionBlock(columnId)).not.toContain('styles.requestEventsNoWrapCell')
     })
+  })
+
+  it('normalizes Request Event Log metric icons on a shared slot', () => {
+    const iconSlotBlock = styleRuleBlock(usagePageStyles, '.requestEventsMetricIconSlot')
+    const cacheIconBlock = styleRuleBlock(usagePageStyles, '.requestEventsCacheIcon')
+
+    expect(iconSlotBlock).toMatch(/width:\s*16px;/)
+    expect(iconSlotBlock).toMatch(/height:\s*16px;/)
+    expect(iconSlotBlock).toContain('justify-content: center;')
+    expect(cacheIconBlock).toContain('transform: scale(0.9);')
+    expect(requestEventsSource).toContain('styles.requestEventsMetricIconSlot')
+    expect(requestEventsSource).toContain('styles.requestEventsCacheIcon')
   })
 
   it('provides reusable pill controls and global command actions for usage subpages', () => {

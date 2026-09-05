@@ -12,16 +12,25 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PortalTooltip, usePortalTooltip } from '@/components/ui/PortalTooltip'
-import { IconChevronDown, IconChevronRight } from '@/components/ui/icons'
+import {
+  IconArrowDownToLine,
+  IconArrowUpFromLine,
+  IconBrain,
+  IconChevronDown,
+  IconChevronRight,
+  IconDatabaseArrowDown,
+  IconDatabaseArrowUp,
+} from '@/components/ui/icons'
 import { useScrollBoundaryContainment } from '@/hooks/useScrollBoundaryContainment'
 import type { UsageEvent } from '@/lib/types'
-import { calculateCacheReadRate, formatDurationMs, formatUsd } from '@/utils/usage'
+import { calculateCacheReadRate, formatCompactTokenValue, formatDurationMs, formatUsd } from '@/utils/usage'
 import { RequestEventResultBadge } from '@/components/usage/RequestEventResultBadge'
 import styles from './CredentialRequestEventsList.module.scss'
 
 const LOAD_MORE_THRESHOLD_PX = 320
 const VIRTUALIZATION_THRESHOLD = 50
-const VIRTUAL_ROW_HEIGHT = 70
+// 折叠行包含三行 Token/Cache 指标，基准高度取略高于实际 CSS 高度，避免离屏行缓存被低估。
+const VIRTUAL_ROW_HEIGHT = 80
 const VIRTUAL_OVERSCAN = 8
 const VIRTUAL_INITIAL_VIEWPORT_HEIGHT = 600
 const INTEGER_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 })
@@ -56,12 +65,18 @@ interface CredentialRequestEventRow {
   endpoint: string
   failed: boolean
   inputTokens: string
+  inputTokensFull: string
   outputTokens: string
+  outputTokensFull: string
   reasoningTokens: string
+  reasoningTokensFull: string
   cacheReadTokens: string
+  cacheReadTokensFull: string
   cacheCreationTokens: string
+  cacheCreationTokensFull: string
   cacheReadRate: string
   totalTokens: string
+  totalTokensFull: string
   latency: string
   ttft: string
   speed: string
@@ -150,6 +165,117 @@ function OverflowTooltipText({
   return <span ref={anchorRef} {...sharedProps}>{children}</span>
 }
 
+function CredentialRequestEventsTokenMetric({
+  direction,
+  label,
+  value,
+  accessibleValue = value,
+}: {
+  direction: 'input' | 'output'
+  label: string
+  value: string
+  accessibleValue?: string
+}) {
+  const Icon = direction === 'input' ? IconArrowUpFromLine : IconArrowDownToLine
+  return (
+    <span
+      className={`${styles.requestEventsTokenMetric} ${direction === 'input' ? styles.requestEventsTokenMetricInput : styles.requestEventsTokenMetricOutput}`}
+      role="img"
+      aria-label={`${label}: ${accessibleValue}`}
+      data-token-direction={direction}
+      data-token-flow={direction === 'input' ? 'upload' : 'download'}
+    >
+      <span className={styles.requestEventsMetricIconSlot} aria-hidden="true">
+        <Icon size={14} aria-hidden="true" />
+      </span>
+      <span>{value}</span>
+    </span>
+  )
+}
+
+function CredentialRequestEventsReasoningMetric({ label, value, accessibleValue = value }: { label: string; value: string; accessibleValue?: string }) {
+  return (
+    <span
+      className={`${styles.requestEventsTokenMetric} ${styles.requestEventsTokenMetricReasoning}`}
+      role="img"
+      aria-label={`${label}: ${accessibleValue}`}
+      data-token-direction="reasoning"
+    >
+      <span className={styles.requestEventsMetricIconSlot} aria-hidden="true">
+        <IconBrain size={12} aria-hidden="true" />
+      </span>
+      <span>{value}</span>
+    </span>
+  )
+}
+
+function CredentialRequestEventsCacheMetric({
+  operation,
+  label,
+  value,
+  accessibleValue = value,
+}: {
+  operation: 'read' | 'write'
+  label: string
+  value: string
+  accessibleValue?: string
+}) {
+  const Icon = operation === 'read' ? IconDatabaseArrowUp : IconDatabaseArrowDown
+  return (
+    <span
+      className={`${styles.requestEventsCacheMetric} ${operation === 'read' ? styles.requestEventsCacheMetricRead : styles.requestEventsCacheMetricWrite}`}
+      role="img"
+      aria-label={`${label}: ${accessibleValue}`}
+      data-cache-operation={operation}
+      data-cache-flow={operation === 'read' ? 'upload' : 'download'}
+    >
+      <span className={styles.requestEventsMetricIconSlot} aria-hidden="true">
+        <Icon className={styles.requestEventsCacheIcon} size={14} aria-hidden="true" />
+      </span>
+      <span>{value}</span>
+    </span>
+  )
+}
+
+function CredentialRequestEventsMetricCell({
+  className,
+  tooltipLines,
+  tooltipActions,
+  children,
+}: {
+  className: string
+  tooltipLines: string[]
+  tooltipActions: OverflowTooltipActions
+  children: ReactNode
+}) {
+  const cellRef = useRef<HTMLTableCellElement | null>(null)
+
+  useEffect(() => {
+    const cell = cellRef.current
+    return () => {
+      if (!cell) return
+      // 虚拟行卸载时同步清理整格指标 Tooltip，避免浮层保留已不存在的锚点。
+      tooltipActions.hideOnMouseLeave(cell)
+      tooltipActions.hideOnBlur(cell)
+    }
+  }, [tooltipActions])
+
+  return (
+    <td
+      ref={cellRef}
+      className={className}
+      tabIndex={0}
+      aria-label={tooltipLines.join('; ')}
+      onMouseEnter={(event) => tooltipActions.showOnMouseEnter(tooltipLines, event.currentTarget)}
+      onMouseLeave={(event) => tooltipActions.hideOnMouseLeave(event.currentTarget)}
+      onFocus={(event) => tooltipActions.showOnFocus(tooltipLines, event.currentTarget)}
+      onBlur={(event) => tooltipActions.hideOnBlur(event.currentTarget)}
+    >
+      {children}
+    </td>
+  )
+}
+
 const SPEED_MODE_LABEL_KEYS: Record<string, string> = {
   auto: 'usage_stats.speed_mode_auto',
   default: 'usage_stats.speed_mode_standard',
@@ -189,6 +315,31 @@ const formatCacheRate = (inputTokens: number, cacheReadTokens: number): string =
   const rate = calculateCacheReadRate({ inputTokens, cacheReadTokens })
   return rate === null ? '-' : `${rate.toFixed(2)}%`
 }
+
+const formatCredentialRequestMetricTooltipLine = (
+  label: string,
+  value: string,
+  t: (key: string, options?: Record<string, string>) => string,
+): string => t('usage_stats.request_events_metric_tooltip_line', { label, value })
+
+const buildCredentialRequestTokenTooltipLines = (
+  row: CredentialRequestEventRow,
+  t: (key: string, options?: Record<string, string>) => string,
+): string[] => [
+  formatCredentialRequestMetricTooltipLine(t('usage_stats.total_tokens'), row.totalTokensFull, t),
+  formatCredentialRequestMetricTooltipLine(t('usage_stats.input_tokens'), row.inputTokensFull, t),
+  formatCredentialRequestMetricTooltipLine(t('usage_stats.output_tokens'), row.outputTokensFull, t),
+  formatCredentialRequestMetricTooltipLine(t('usage_stats.reasoning_tokens'), row.reasoningTokensFull, t),
+]
+
+const buildCredentialRequestCacheTooltipLines = (
+  row: CredentialRequestEventRow,
+  t: (key: string, options?: Record<string, string>) => string,
+): string[] => [
+  formatCredentialRequestMetricTooltipLine(t('usage_stats.cache_rate'), row.cacheReadRate, t),
+  formatCredentialRequestMetricTooltipLine(t('usage_stats.cache_read_tokens'), row.cacheReadTokensFull, t),
+  formatCredentialRequestMetricTooltipLine(t('usage_stats.cache_creation_tokens'), row.cacheCreationTokensFull, t),
+]
 
 const optionalText = (value: unknown): string => String(value ?? '').trim() || '-'
 
@@ -249,13 +400,19 @@ const buildRow = (
     requestType: endpoint.requestType,
     endpoint: endpoint.endpoint,
     failed: event.failed === true,
-    inputTokens: INTEGER_FORMATTER.format(inputTokens),
-    outputTokens: INTEGER_FORMATTER.format(toNumber(event.tokens?.output_tokens)),
-    reasoningTokens: INTEGER_FORMATTER.format(toNumber(event.tokens?.reasoning_tokens)),
-    cacheReadTokens: INTEGER_FORMATTER.format(cacheReadTokens),
-    cacheCreationTokens: INTEGER_FORMATTER.format(toNumber(event.tokens?.cache_creation_tokens)),
+    inputTokens: formatCompactTokenValue(inputTokens),
+    inputTokensFull: INTEGER_FORMATTER.format(inputTokens),
+    outputTokens: formatCompactTokenValue(toNumber(event.tokens?.output_tokens)),
+    outputTokensFull: INTEGER_FORMATTER.format(toNumber(event.tokens?.output_tokens)),
+    reasoningTokens: formatCompactTokenValue(toNumber(event.tokens?.reasoning_tokens)),
+    reasoningTokensFull: INTEGER_FORMATTER.format(toNumber(event.tokens?.reasoning_tokens)),
+    cacheReadTokens: formatCompactTokenValue(cacheReadTokens),
+    cacheReadTokensFull: INTEGER_FORMATTER.format(cacheReadTokens),
+    cacheCreationTokens: formatCompactTokenValue(toNumber(event.tokens?.cache_creation_tokens)),
+    cacheCreationTokensFull: INTEGER_FORMATTER.format(toNumber(event.tokens?.cache_creation_tokens)),
     cacheReadRate: formatCacheRate(inputTokens, cacheReadTokens),
-    totalTokens: INTEGER_FORMATTER.format(toNumber(event.tokens?.total_tokens)),
+    totalTokens: formatCompactTokenValue(toNumber(event.tokens?.total_tokens)),
+    totalTokensFull: INTEGER_FORMATTER.format(toNumber(event.tokens?.total_tokens)),
     latency: formatDurationMs(latencyMs),
     ttft: ttftMs && ttftMs > 0 ? formatDurationMs(ttftMs) : '-',
     speed: formatSpeed(event.speed_tps),
@@ -429,6 +586,8 @@ export function CredentialRequestEventsList({
     const canOpenLog = Boolean(requestLogAccessEnabled && row.requestId && onRequestLogOpen)
     const logLoading = requestLogLoadingEventId === row.id
     const expanded = expandedRowId === row.id
+    const tokenTooltipLines = buildCredentialRequestTokenTooltipLines(row, t)
+    const cacheTooltipLines = buildCredentialRequestCacheTooltipLines(row, t)
     return (
       <tbody
         key={row.id}
@@ -501,19 +660,55 @@ export function CredentialRequestEventsList({
               size="compact"
             />
           </td>
-          <td className={`${styles.stackedCell} ${styles.tokens}`.trim()}>
-            {renderOverflowText('strong', row.totalTokens)}
-            {renderLabeledOverflowText(t('usage_stats.input_tokens'), row.inputTokens)}
-            {renderLabeledOverflowText(
-              t('usage_stats.output_tokens'),
-              `${row.outputTokens} (${t('usage_stats.reasoning_tokens')} ${row.reasoningTokens})`,
-            )}
-          </td>
-          <td className={`${styles.stackedCell} ${styles.cache}`.trim()}>
-            {renderOverflowText('strong', row.cacheReadRate)}
-            {renderLabeledOverflowText(t('usage_stats.credentials_detail_cache_read'), row.cacheReadTokens)}
-            {renderLabeledOverflowText(t('usage_stats.credentials_detail_cache_write'), row.cacheCreationTokens)}
-          </td>
+          <CredentialRequestEventsMetricCell
+            className={`${styles.stackedCell} ${styles.tokens} ${styles.requestEventsMetricCell}`.trim()}
+            tooltipLines={tokenTooltipLines}
+            tooltipActions={tooltipActions}
+          >
+            <strong>{row.totalTokens}</strong>
+            <div className={styles.requestEventsTokenMetricRow}>
+              <CredentialRequestEventsTokenMetric
+                direction="input"
+                label={t('usage_stats.input_tokens')}
+                value={row.inputTokens}
+                accessibleValue={row.inputTokensFull}
+              />
+            </div>
+            <div className={styles.requestEventsTokenMetricRow}>
+              <CredentialRequestEventsTokenMetric
+                direction="output"
+                label={t('usage_stats.output_tokens')}
+                value={row.outputTokens}
+                accessibleValue={row.outputTokensFull}
+              />
+              <CredentialRequestEventsReasoningMetric
+                label={t('usage_stats.reasoning_tokens')}
+                value={row.reasoningTokens}
+                accessibleValue={row.reasoningTokensFull}
+              />
+            </div>
+          </CredentialRequestEventsMetricCell>
+          <CredentialRequestEventsMetricCell
+            className={`${styles.stackedCell} ${styles.cache} ${styles.requestEventsMetricCell}`.trim()}
+            tooltipLines={cacheTooltipLines}
+            tooltipActions={tooltipActions}
+          >
+            <span className={styles.requestEventsCacheRate}>{row.cacheReadRate}</span>
+            <div className={styles.requestEventsCacheMetrics}>
+              <CredentialRequestEventsCacheMetric
+                operation="read"
+                label={t('usage_stats.cache_read_tokens')}
+                value={row.cacheReadTokens}
+                accessibleValue={row.cacheReadTokensFull}
+              />
+              <CredentialRequestEventsCacheMetric
+                operation="write"
+                label={t('usage_stats.cache_creation_tokens')}
+                value={row.cacheCreationTokens}
+                accessibleValue={row.cacheCreationTokensFull}
+              />
+            </div>
+          </CredentialRequestEventsMetricCell>
           <td className={`${styles.stackedCell} ${styles.performance}`.trim()}>
             {renderOverflowText('strong', row.latency)}
             {renderLabeledOverflowText(t('usage_stats.ttft'), row.ttft)}
