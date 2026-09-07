@@ -682,6 +682,7 @@ func (s *Service) mergeUsageHeaderQuotaCache(authIndex string, response CheckRes
 	defer s.refreshMu.Unlock()
 	// 读取当前 auth_index 已有任务或 cache，用于防覆盖和合并。
 	existing, ok := s.refreshTasks[authIndex]
+	var upstreamResponses []UpstreamResponse
 	// 有旧记录时先确认当前 header 仍然有资格写入。
 	if ok {
 		// active 任务可能在前置检查后出现，二次检查避免竞态覆盖。
@@ -696,18 +697,21 @@ func (s *Service) mergeUsageHeaderQuotaCache(authIndex string, response CheckRes
 		if existing.Quota != nil {
 			response = mergeUsageHeaderQuotaResponse(*existing.Quota, response)
 		}
+		// Header 快照没有 management api-call；保留最近一次主动刷新响应，直到下一次主动刷新整体覆盖任务。
+		upstreamResponses = cloneUpstreamResponses(existing.UpstreamResponses)
 	}
 	// 写入一条 completed refresh task，让前端 quota cache API 可以直接读取。
 	s.refreshTasks[authIndex] = &RefreshTaskRecord{
-		AuthIndex:   authIndex,
-		Name:        helper.UsageIdentityDisplayName(identity),
-		Type:        identity.Type,
-		FileName:    identity.FileName,
-		Status:      RefreshTaskStatusCompleted,
-		Quota:       &response,
-		Source:      RefreshSourceUsageHeader,
-		CreatedAt:   observedAt,
-		RefreshedAt: observedAt,
+		AuthIndex:         authIndex,
+		Name:              helper.UsageIdentityDisplayName(identity),
+		Type:              identity.Type,
+		FileName:          identity.FileName,
+		Status:            RefreshTaskStatusCompleted,
+		Quota:             &response,
+		Source:            RefreshSourceUsageHeader,
+		CreatedAt:         observedAt,
+		RefreshedAt:       observedAt,
+		UpstreamResponses: upstreamResponses,
 	}
 	// 返回 true 表示本次 header snapshot 已经成功写入 cache。
 	return true

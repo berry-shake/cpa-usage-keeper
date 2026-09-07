@@ -95,8 +95,8 @@ describe('RequestEventsDetailsCard pagination', () => {
     expect(html.indexOf('>Speed Mode</th>')).toBeLessThan(html.indexOf('>Result</th>'));
     expect(html.indexOf('>Result</th>')).toBeLessThan(html.indexOf('>Request</th>'));
     expect(html.indexOf('>Request</th>')).toBeLessThan(html.indexOf('>Latency</th>'));
-    expect(html.indexOf('>Latency</th>')).toBeLessThan(html.indexOf('title="Average output tokens per second after TTFT">Speed</th>'));
-    expect(html.indexOf('title="Average output tokens per second after TTFT">Speed</th>')).toBeLessThan(html.indexOf('>Tokens</th>'));
+    expect(html.indexOf('>Latency</th>')).toBeLessThan(html.indexOf('title="Average output tokens per second over total latency">Speed</th>'));
+    expect(html.indexOf('title="Average output tokens per second over total latency">Speed</th>')).toBeLessThan(html.indexOf('>Tokens</th>'));
     expect(html.indexOf('>Tokens</th>')).toBeLessThan(html.indexOf('>Cache</th>'));
     expect(html.indexOf('>Cache</th>')).toBeLessThan(html.indexOf('>Cost</th>'));
     expect(html.indexOf('>Cost</th>')).toBeLessThan(html.indexOf('>Executor</th>'));
@@ -149,7 +149,7 @@ describe('RequestEventsDetailsCard pagination', () => {
 
   it('keeps TTFT visible inside Latency when TTFT is missing', () => {
     const html = renderCard({
-      events: [{ ...events[0], ttft_ms: undefined, speed_tps: undefined }],
+      events: [{ ...events[0], ttft_ms: undefined }],
     });
 
     expect(html).toContain('>Latency</th>');
@@ -162,14 +162,14 @@ describe('RequestEventsDetailsCard pagination', () => {
       events: [{ ...events[0], latency_ms: undefined, speed_tps: undefined }],
     });
 
-    expect(html.indexOf('>Latency</th>')).toBeLessThan(html.indexOf('title="Average output tokens per second after TTFT">Speed</th>'));
+    expect(html.indexOf('>Latency</th>')).toBeLessThan(html.indexOf('title="Average output tokens per second over total latency">Speed</th>'));
     expect(html).toContain('>--</span>');
     expect(html).toContain('>TTFT</span> 45ms</span>');
   });
 
   it('shows a dash for zero TTFT values', () => {
     const html = renderCard({
-      events: [{ ...events[0], ttft_ms: 0, speed_tps: undefined }],
+      events: [{ ...events[0], ttft_ms: 0 }],
     });
 
     expect(html).toContain('>TTFT</span> -</span>');
@@ -254,7 +254,7 @@ describe('RequestEventsDetailsCard pagination', () => {
   it('uses backend model and source options instead of current page grouping', () => {
     const html = renderCard({ modelFilter: 'claude-opus', sourceFilter: 'source-b' });
 
-    expect(html).toContain('aria-label="Model"><span class="_triggerText_c80422 ">claude-opus</span>');
+    expect(html).toMatch(/<input[^>]*role="combobox"[^>]*aria-label="Model"[^>]*value="claude-opus"/);
     expect(html).toContain('aria-label="Source"><span class="_triggerText_c80422 ">Provider B</span>');
   });
 

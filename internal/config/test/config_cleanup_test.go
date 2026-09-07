@@ -17,7 +17,7 @@ var isolatedConfigEnvKeys = []string{
 	"BACKUP_ENABLED", "BACKUP_INTERVAL", "BACKUP_RETENTION_DAYS",
 	"REQUEST_TIMEOUT", "LOG_LEVEL", "LOG_FILE_ENABLED", "LOG_DIR", "LOG_RETENTION_DAYS",
 	"AUTH_ENABLED", "LOGIN_PASSWORD", "AUTH_SESSION_TTL", "TRUSTED_PROXY_CIDRS", "TZ", "TLS_ENABLED", "TLS_CERT_FILE", "TLS_KEY_FILE",
-	"TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT",
+	"TLS_SKIP_VERIFY", "QUOTA_REFRESH_WORKER_LIMIT", "QUOTA_UPSTREAM_RESPONSES_ENABLED",
 }
 
 func TestLoadFromEnvDefaultsCPARequestLogAccessDisabled(t *testing.T) {
@@ -48,6 +48,35 @@ func TestLoadFromEnvReadsCPARequestLogAccessFlag(t *testing.T) {
 
 	if !cfg.CPARequestLogAccessEnabled {
 		t.Fatal("expected CPA request log access to be enabled")
+	}
+}
+
+func TestLoadFromEnvDefaultsQuotaUpstreamResponsesDisabled(t *testing.T) {
+	isolateConfigEnv(t)
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	if cfg.QuotaUpstreamResponsesEnabled {
+		t.Fatal("expected quota upstream responses to be disabled by default")
+	}
+}
+
+func TestLoadFromEnvReadsQuotaUpstreamResponsesFlag(t *testing.T) {
+	isolateConfigEnv(t)
+	t.Setenv("CPA_BASE_URL", "http://127.0.0.1:"+cpa.ManagementRedisDefaultPort)
+	t.Setenv("CPA_MANAGEMENT_KEY", "secret")
+	t.Setenv("QUOTA_UPSTREAM_RESPONSES_ENABLED", "true")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv returned error: %v", err)
+	}
+	if !cfg.QuotaUpstreamResponsesEnabled {
+		t.Fatal("expected quota upstream responses to be enabled")
 	}
 }
 

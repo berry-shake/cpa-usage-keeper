@@ -122,7 +122,7 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 		}
 	}
 	for _, indexName := range []string{
-		"idx_usage_events_api_group_key",
+		"idx_usage_events_api_group_key_timestamp",
 		"idx_usage_events_auth_index",
 		"idx_usage_events_model",
 		"idx_usage_events_auth_type_auth_index_id",
@@ -144,6 +144,7 @@ func TestOpenDatabaseCreatesFreshDatabaseFromCurrentSchemaWithoutRunningMigratio
 		assertSQLiteIndexExists(t, db, indexName)
 	}
 	for _, indexName := range []string{
+		"idx_usage_events_api_group_key",
 		"idx_usage_events_api_group_key_timestamp_id",
 		"idx_usage_events_event_key",
 		"idx_usage_events_failed",
@@ -184,8 +185,16 @@ func TestOpenDatabaseConfiguresSQLiteRuntime(t *testing.T) {
 	if err := db.Raw("PRAGMA busy_timeout").Scan(&busyTimeout).Error; err != nil {
 		t.Fatalf("read busy timeout: %v", err)
 	}
-	if busyTimeout < 5000 {
-		t.Fatalf("expected busy timeout at least 5000ms, got %d", busyTimeout)
+	if busyTimeout != 15000 {
+		t.Fatalf("expected busy timeout 15000ms, got %d", busyTimeout)
+	}
+
+	var synchronous int
+	if err := db.Raw("PRAGMA synchronous").Scan(&synchronous).Error; err != nil {
+		t.Fatalf("read synchronous mode: %v", err)
+	}
+	if synchronous != 1 {
+		t.Fatalf("expected NORMAL synchronous mode, got %d", synchronous)
 	}
 
 	var foreignKeys int
@@ -202,6 +211,17 @@ func TestOpenDatabaseConfiguresSQLiteRuntime(t *testing.T) {
 	}
 	if stats := sqlDB.Stats(); stats.MaxOpenConnections != 1 {
 		t.Fatalf("expected sqlite max open connections to be 1, got %+v", stats)
+	}
+	// 回收初始 writer，验证新物理连接也通过 pure-Go DSN 保持上游默认参数。
+	sqlDB.SetMaxIdleConns(0)
+	for pragma, expected := range map[string]int{"busy_timeout": 15000, "foreign_keys": 1, "synchronous": 1} {
+		var value int
+		if err := sqlDB.QueryRow("PRAGMA " + pragma).Scan(&value); err != nil {
+			t.Fatalf("read recycled writer %s: %v", pragma, err)
+		}
+		if value != expected {
+			t.Fatalf("expected recycled writer %s=%d, got %d", pragma, expected, value)
+		}
 	}
 }
 
@@ -300,6 +320,15 @@ func TestOpenReadDatabaseConfiguresBoundedReadOnlyPool(t *testing.T) {
 		}
 		if queryOnly != 1 {
 			t.Fatalf("expected connection %d to be query-only, got %d", index, queryOnly)
+		}
+		for pragma, expected := range map[string]int{"busy_timeout": 15000, "foreign_keys": 1, "synchronous": 1} {
+			var value int
+			if err := connection.QueryRowContext(context.Background(), "PRAGMA "+pragma).Scan(&value); err != nil {
+				t.Fatalf("read connection %d %s: %v", index, pragma, err)
+			}
+			if value != expected {
+				t.Fatalf("expected connection %d %s=%d, got %d", index, pragma, expected, value)
+			}
 		}
 	}
 	// 执行：归还全部连接，让 MaxIdleConns 保留已经预热的 reader。

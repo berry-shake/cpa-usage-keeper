@@ -19,6 +19,7 @@ import (
 
 type ServiceOptions struct {
 	RefreshWorkerLimit               int
+	QuotaUpstreamResponsesEnabled    bool
 	UsageHeaderSnapshotFlushInterval time.Duration
 	// CodexQuotaHistoryFlushInterval 覆盖独立历史 runner 固定批次边界前的一分钟等待，主要供定向测试缩短等待。
 	CodexQuotaHistoryFlushInterval time.Duration
@@ -33,6 +34,8 @@ type Service struct {
 	db       *gorm.DB
 	registry ProviderRegistry
 	pricing  *pricing.Catalog
+	// quotaUpstreamResponsesEnabled 控制刷新任务是否把 CPA 转发的完整上游响应写入最新限额缓存。
+	quotaUpstreamResponsesEnabled bool
 
 	refreshMu    sync.Mutex
 	refreshTasks map[string]*RefreshTaskRecord
@@ -129,6 +132,9 @@ func NewService(db *gorm.DB, caller ManagementAPICaller, pricingCatalog *pricing
 }
 
 func NewServiceWithOptions(db *gorm.DB, caller ManagementAPICaller, options ServiceOptions) *Service {
+	if options.QuotaUpstreamResponsesEnabled {
+		caller = upstreamResponseRecordingCaller{caller: caller}
+	}
 	return NewServiceWithRegistryAndOptions(db, NewDefaultProviderRegistry(caller, DefaultProviderConfigs()), options)
 }
 
@@ -172,6 +178,7 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 		db:                                 db,
 		registry:                           registry,
 		pricing:                            pricingCatalog,
+		quotaUpstreamResponsesEnabled:      options.QuotaUpstreamResponsesEnabled,
 		refreshTasks:                       make(map[string]*RefreshTaskRecord),
 		resetInFlight:                      make(map[string]struct{}),
 		refreshWorkerTokens:                make(chan struct{}, workerLimit),
@@ -282,6 +289,21 @@ func (s *Service) StopRefreshTasks() {
 }
 
 func (s *Service) Check(ctx context.Context, request CheckRequest) (CheckResponse, error) {
+	response, _, err := s.checkWithUpstreamResponses(ctx, request)
+	return response, err
+}
+
+func (s *Service) checkWithUpstreamResponses(ctx context.Context, request CheckRequest) (CheckResponse, []UpstreamResponse, error) {
+	if !s.quotaUpstreamResponsesEnabled {
+		response, err := s.check(ctx, request)
+		return response, nil, err
+	}
+	collectorContext, collector := withUpstreamResponseCollector(ctx)
+	response, err := s.check(collectorContext, request)
+	return response, collector.snapshot(), err
+}
+
+func (s *Service) check(ctx context.Context, request CheckRequest) (CheckResponse, error) {
 	// 单条查询以 auth_index 为唯一入口，前端不需要知道具体 provider 的 API 细节。
 	authIndex := strings.TrimSpace(request.AuthIndex)
 	if authIndex == "" {

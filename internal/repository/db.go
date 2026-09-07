@@ -126,7 +126,7 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 	if !sqliteDatabaseRequiresSinglePool(cfg.SQLitePath) && !strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
 		return nil, fmt.Errorf("enable sqlite WAL: journal mode is %q", journalMode)
 	}
-	if err := db.Exec("PRAGMA busy_timeout=5000").Error; err != nil {
+	if err := db.Exec("PRAGMA busy_timeout=15000").Error; err != nil {
 		return nil, fmt.Errorf("set sqlite busy timeout: %w", err)
 	}
 	if err := db.Exec("PRAGMA foreign_keys=ON").Error; err != nil {
@@ -218,7 +218,8 @@ func sqliteDSN(path string) string {
 	if strings.Contains(trimmed, "?") {
 		return trimmed
 	}
-	return trimmed + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	// pure-Go driver 不继承 CGO driver 的 NORMAL 默认值；连接重建后也必须保持上游运行参数。
+	return trimmed + "?_pragma=busy_timeout(15000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)"
 }
 
 // sqliteReadDSN 把文件路径规范化为 SQLite URI，并强制底层只读模式与连接级 query_only 保护。
@@ -236,8 +237,9 @@ func sqliteReadDSN(path string) (string, error) {
 	}
 	// 无自定义 query 时沿用 writer 的连接级默认值；pure-Go driver 通过重复 _pragma 应用到每条物理连接。
 	if !hasQuery {
-		query.Add("_pragma", "busy_timeout(5000)")
+		query.Add("_pragma", "busy_timeout(15000)")
 		query.Add("_pragma", "foreign_keys(1)")
+		query.Add("_pragma", "synchronous(NORMAL)")
 	}
 	// Set 会删除同名冲突值，保证调用方不能用参数顺序关闭 reader 的两层保护。
 	query.Set("mode", "ro")

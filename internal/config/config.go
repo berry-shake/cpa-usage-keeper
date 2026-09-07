@@ -79,6 +79,8 @@ type Config struct {
 	MetadataSyncInterval time.Duration
 	// QuotaRefreshWorkerLimit 是 Auth Files 限额刷新队列的最大并发数。
 	QuotaRefreshWorkerLimit int
+	// QuotaUpstreamResponsesEnabled 控制是否缓存并返回限额查询的原始上游响应。
+	QuotaUpstreamResponsesEnabled bool
 	// WorkDir 是应用工作目录，数据库、日志和备份默认从这里派生。
 	WorkDir string
 	// SQLitePath 是 SQLite 数据库文件路径。
@@ -187,6 +189,10 @@ func Load(options LoadOptions) (*Config, error) {
 	}
 	if quotaRefreshWorkerLimit > QuotaRefreshWorkerLimitMax {
 		return nil, fmt.Errorf("QUOTA_REFRESH_WORKER_LIMIT must be <= %d", QuotaRefreshWorkerLimitMax)
+	}
+	quotaUpstreamResponsesEnabled, err := getBool("QUOTA_UPSTREAM_RESPONSES_ENABLED", false)
+	if err != nil {
+		return nil, err
 	}
 
 	requestTimeout, err := getDuration("REQUEST_TIMEOUT", 30*time.Second)
@@ -300,6 +306,7 @@ func Load(options LoadOptions) (*Config, error) {
 		RedisIngestRecoveryInterval:     redisIngestRecoveryInterval,
 		MetadataSyncInterval:            MetadataSyncIntervalDefault,
 		QuotaRefreshWorkerLimit:         quotaRefreshWorkerLimit,
+		QuotaUpstreamResponsesEnabled:   quotaUpstreamResponsesEnabled,
 		WorkDir:                         workDir,
 		SQLitePath:                      filepath.Join(workDir, workDirDatabaseName),
 		BackupEnabled:                   backupEnabled,

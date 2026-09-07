@@ -339,7 +339,7 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		Source:              "sk-provider-key",
 		AuthIndex:           "2",
 		Failed:              false,
-		LatencyMS:           2045,
+		LatencyMS:           2000,
 		TTFTMS:              usageEventInt64Ptr(45),
 		InputTokens:         10,
 		OutputTokens:        61,
@@ -824,7 +824,7 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 		Provider:            "Provider Fallback",
 		AuthIndex:           "authidx-export-main",
 		Failed:              true,
-		LatencyMS:           2045,
+		LatencyMS:           2000,
 		TTFTMS:              usageEventInt64Ptr(45),
 		InputTokens:         10,
 		OutputTokens:        61,
@@ -1035,7 +1035,7 @@ func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 		Source:              "claude-code",
 		AuthIndex:           "auth-file-export",
 		Failed:              false,
-		LatencyMS:           300,
+		LatencyMS:           500,
 		InputTokens:         9,
 		OutputTokens:        5,
 		CacheReadTokens:     3,
@@ -1075,7 +1075,7 @@ func TestUsageEventsExportJSONIncludesAllExportFields(t *testing.T) {
 	if !contains(body, `"api_key":"Team <Ops> & Co"`) || contains(body, `\u003c`) || contains(body, `\u0026`) || contains(body, `\u003e`) {
 		t.Fatalf("expected json export to preserve plain text values without HTML escaping, got %s", body)
 	}
-	if !contains(body, `"cpa_api_key_id":"9"`) || !contains(body, `"source_type":""`) || !contains(body, `"reasoning_effort":""`) || !contains(body, `"ttft_ms":null`) || !contains(body, `"speed_tps":null`) {
+	if !contains(body, `"cpa_api_key_id":"9"`) || !contains(body, `"source_type":""`) || !contains(body, `"reasoning_effort":""`) || !contains(body, `"ttft_ms":null`) || !contains(body, `"speed_tps":10`) {
 		t.Fatalf("expected json export to keep a stable field set, got %s", body)
 	}
 	if !contains(body, `"service_tier":"auto"`) || !contains(body, `"response_service_tier":"default"`) {
@@ -1583,9 +1583,9 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 		want *float64
 	}{
 		{
-			name: "uses output tokens over generation duration",
+			name: "uses output tokens over total latency",
 			row: servicedto.UsageEventRecord{
-				LatencyMS:    2045,
+				LatencyMS:    2000,
 				TTFTMS:       usageEventInt64Ptr(45),
 				OutputTokens: 61,
 			},
@@ -1594,7 +1594,7 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 		{
 			name: "does not subtract reasoning tokens",
 			row: servicedto.UsageEventRecord{
-				LatencyMS:       2045,
+				LatencyMS:       2000,
 				TTFTMS:          usageEventInt64Ptr(45),
 				OutputTokens:    61,
 				ReasoningTokens: 2,
@@ -1602,24 +1602,26 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 			want: usageEventFloat64Ptr(30.5),
 		},
 		{
-			name: "omits speed without ttft",
+			name: "uses total latency without ttft",
 			row: servicedto.UsageEventRecord{
-				LatencyMS:    2045,
+				LatencyMS:    2000,
 				OutputTokens: 61,
 			},
+			want: usageEventFloat64Ptr(30.5),
 		},
 		{
-			name: "omits speed when latency does not exceed ttft",
+			name: "uses total latency when ttft equals latency",
 			row: servicedto.UsageEventRecord{
-				LatencyMS:    45,
-				TTFTMS:       usageEventInt64Ptr(45),
+				LatencyMS:    2000,
+				TTFTMS:       usageEventInt64Ptr(2000),
 				OutputTokens: 61,
 			},
+			want: usageEventFloat64Ptr(30.5),
 		},
 		{
 			name: "uses a single output token",
 			row: servicedto.UsageEventRecord{
-				LatencyMS:    2045,
+				LatencyMS:    2000,
 				TTFTMS:       usageEventInt64Ptr(45),
 				OutputTokens: 1,
 			},
@@ -1628,7 +1630,7 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 		{
 			name: "uses full output tokens when reasoning is present",
 			row: servicedto.UsageEventRecord{
-				LatencyMS:       2045,
+				LatencyMS:       2000,
 				TTFTMS:          usageEventInt64Ptr(45),
 				OutputTokens:    4,
 				ReasoningTokens: 3,
@@ -1638,9 +1640,41 @@ func TestUsageEventSpeedTPS(t *testing.T) {
 		{
 			name: "omits speed without output tokens",
 			row: servicedto.UsageEventRecord{
-				LatencyMS: 2045,
+				LatencyMS: 2000,
 				TTFTMS:    usageEventInt64Ptr(45),
 			},
+		},
+		{
+			name: "uses total latency with zero ttft",
+			row:  servicedto.UsageEventRecord{LatencyMS: 2000, TTFTMS: usageEventInt64Ptr(0), OutputTokens: 61},
+			want: usageEventFloat64Ptr(30.5),
+		},
+		{
+			name: "uses total latency with negative ttft",
+			row:  servicedto.UsageEventRecord{LatencyMS: 2000, TTFTMS: usageEventInt64Ptr(-45), OutputTokens: 61},
+			want: usageEventFloat64Ptr(30.5),
+		},
+		{
+			name: "uses total latency when ttft exceeds latency",
+			row:  servicedto.UsageEventRecord{LatencyMS: 2000, TTFTMS: usageEventInt64Ptr(3000), OutputTokens: 61},
+			want: usageEventFloat64Ptr(30.5),
+		},
+		{
+			name: "does not inflate speed when ttft nearly equals latency",
+			row:  servicedto.UsageEventRecord{LatencyMS: 2000, TTFTMS: usageEventInt64Ptr(1999), OutputTokens: 61},
+			want: usageEventFloat64Ptr(30.5),
+		},
+		{
+			name: "omits speed with zero latency",
+			row:  servicedto.UsageEventRecord{LatencyMS: 0, OutputTokens: 61},
+		},
+		{
+			name: "omits speed with negative latency",
+			row:  servicedto.UsageEventRecord{LatencyMS: -1, OutputTokens: 61},
+		},
+		{
+			name: "omits speed with negative output tokens",
+			row:  servicedto.UsageEventRecord{LatencyMS: 2000, OutputTokens: -1},
 		},
 	}
 

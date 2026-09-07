@@ -341,17 +341,21 @@ function QuotaSummaryMetric({
 }
 
 function calculateFullQuotaEstimate(cycle: CodexQuotaHistoryCycle): QuotaSummaryMetrics | null {
-  const remainingPercent = cycle.last_remaining_percent
-  if (remainingPercent == null || !Number.isFinite(remainingPercent)) return null
-  const usedPercent = 100 - Math.min(100, Math.max(0, remainingPercent))
-  if (usedPercent <= 0 || cycle.usage.requests <= 0 || cycle.usage.total_tokens <= 0) return null
-  // 与认证文件列表 Estimated 口径一致：当前用量除以已用比例，外推到 100% 额度。
-  const ratio = usedPercent / 100
+  // 只使用已经被相邻百分比观察夹住的事件；周期总量还包含首段前和尾段后的未结算用量。
+  const settled = cycle.transitions.reduce((total, transition) => ({
+    percentagePoints: total.percentagePoints + transition.percentage_points,
+    requests: total.requests + transition.usage.requests,
+    tokens: total.tokens + transition.usage.total_tokens,
+    cost: total.cost + transition.usage.total_cost_usd,
+    costAvailable: total.costAvailable && transition.cost_per_point_available,
+  }), { percentagePoints: 0, requests: 0, tokens: 0, cost: 0, costAvailable: true })
+  if (settled.percentagePoints <= 0 || settled.requests <= 0 || settled.tokens <= 0) return null
+  const ratio = 100 / settled.percentagePoints
   return {
-    requests: cycle.usage.requests / ratio,
-    tokens: cycle.usage.total_tokens / ratio,
-    cost: cycle.usage.total_cost_usd / ratio,
-    costAvailable: cycle.usage.cost_available,
+    requests: settled.requests * ratio,
+    tokens: settled.tokens * ratio,
+    cost: settled.cost * ratio,
+    costAvailable: settled.costAvailable,
   }
 }
 
