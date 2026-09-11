@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"cpa-usage-keeper/internal/quota"
@@ -18,6 +19,31 @@ const quotaResetErrorFailed = "quota_reset_failed"
 const quotaResetCreditsErrorFailed = "quota_reset_credits_failed"
 
 func registerQuotaRoutes(router gin.IRoutes, provider QuotaProvider) {
+	router.DELETE("/quota/history/:auth_index/cycles/:cycle_id", func(c *gin.Context) {
+		if provider == nil {
+			writeInternalError(c, "quota provider is not configured", nil)
+			return
+		}
+		authIndex := strings.TrimSpace(c.Param("auth_index"))
+		cycleID, err := strconv.ParseInt(c.Param("cycle_id"), 10, 64)
+		if authIndex == "" || err != nil || cycleID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "auth_index and positive cycle_id are required"})
+			return
+		}
+		if err := provider.DeleteCodexQuotaHistoryCycle(c.Request.Context(), authIndex, cycleID); err != nil {
+			switch {
+			case errors.Is(err, quota.ErrValidation), errors.Is(err, quota.ErrUnsupportedType):
+				c.JSON(http.StatusBadRequest, gin.H{"error": "codex quota cycle delete request is invalid"})
+			case errors.Is(err, quota.ErrNotFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": "quota cycle or auth identity not found"})
+			default:
+				writeInternalError(c, "codex quota cycle deletion failed", err)
+			}
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
+
 	router.GET("/quota/history/:auth_index", func(c *gin.Context) {
 		if provider == nil {
 			writeInternalError(c, "quota provider is not configured", nil)

@@ -11,7 +11,7 @@ import { useQuotaCache } from './useQuotaCache'
 import { useQuotaInspection } from './useQuotaInspection'
 import { ApiError, resetUsageQuota, updateUsageIdentityAlias, type UsageIdentityPageSort } from '@/lib/api'
 import i18n from '@/i18n'
-import type { UsageIdentityTypeCount, UsageQuotaCheckResponse, UsageQuotaInspectionStatusResponse } from '@/lib/types'
+import type { UsageIdentity, UsageIdentityTypeCount, UsageQuotaCheckResponse, UsageQuotaInspectionStatusResponse } from '@/lib/types'
 import { quotaRefreshDisplayError, useQuotaRefreshTasks, type QuotaState } from './useQuotaRefreshTasks'
 import type { CredentialProviderFilterKey } from './credentialProviderFilters'
 
@@ -68,6 +68,7 @@ export interface CredentialsTabData {
   aliasSavingId: string
   refresh: () => Promise<void>
   saveUsageIdentityAlias: (id: string, alias: string) => Promise<void>
+  resetUsageIdentityStats: (id: string) => Promise<UsageIdentity>
   refreshQuotaForCurrentAuthFilePage: () => Promise<void>
   refreshQuotaForAuthIndex: (authIndex: string) => Promise<void>
   resetQuotaForAuthIndex: (authIndex: string) => Promise<void>
@@ -205,6 +206,7 @@ export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, on
     aliasSavingId,
     refresh: refresh,
     saveUsageIdentityAlias,
+    resetUsageIdentityStats: credentialPages.resetStats,
     refreshQuotaForCurrentAuthFilePage: quotaRefreshTasks.refreshQuotaForCurrentAuthFilePage,
     refreshQuotaForAuthIndex: quotaRefreshTasks.refreshQuotaForAuthIndex,
     resetQuotaForAuthIndex,

@@ -171,7 +171,7 @@ func applyCodexMainQuotaObservation(tx *gorm.DB, observation repositorydto.Codex
 	}
 	// 正常连续观察直接复用最近父行，只保留原来的一次查询。
 	cycle := latestCycle
-	found := latestFound && latestCycle.WindowSeconds == observation.WindowSeconds && quotaResetTimesMatch(latestCycle.ResetAt, observation.ResetAt)
+	found := latestFound && quotaCycleMatchesObservation(latestCycle, observation)
 	if latestFound && !found {
 		// 只有窗口绕行或 reset 变化时才回查旧父行；Weekly 经 5h 绕行后由这里复用原周期。
 		cycle, found, err = loadMatchingQuotaCycle(tx, observation.AuthIndex, quotaKey, observation.WindowSeconds, observation.ResetAt)
@@ -288,26 +288,33 @@ func loadMatchingQuotaCycle(tx *gorm.DB, authIndex string, quotaKey string, wind
 	if err != nil {
 		return entities.QuotaCycle{}, false, fmt.Errorf("load matching quota cycle: %w", err)
 	}
-	if len(candidates) == 0 {
-		return entities.QuotaCycle{}, false, nil
-	}
+	selected, found := closestMatchingQuotaCycle(candidates, windowSeconds, resetAt)
+	return selected, found, nil
+}
+
+func quotaCycleMatchesObservation(cycle entities.QuotaCycle, observation repositorydto.CodexMainQuotaObservation) bool {
+	return cycle.WindowSeconds == observation.WindowSeconds && quotaResetTimesMatch(cycle.ResetAt, observation.ResetAt)
+}
+
+// closestMatchingQuotaCycle 的输入按观察时间、ID 倒序排列，等距离时继续优先最新行。
+func closestMatchingQuotaCycle(candidates []entities.QuotaCycle, windowSeconds int64, resetAt time.Time) (entities.QuotaCycle, bool) {
 	// 正常只有一个候选；若历史抖动曾产生多个父行，则复用 reset 距离本次事实最近的一行。
-	selected := candidates[0]
-	selectedDistance := selected.ResetAt.Sub(resetAt)
-	if selectedDistance < 0 {
-		selectedDistance = -selectedDistance
-	}
-	for _, candidate := range candidates[1:] {
+	var selected entities.QuotaCycle
+	var selectedDistance time.Duration
+	for _, candidate := range candidates {
+		if candidate.WindowSeconds != windowSeconds || !quotaResetTimesMatch(candidate.ResetAt, resetAt) {
+			continue
+		}
 		distance := candidate.ResetAt.Sub(resetAt)
 		if distance < 0 {
 			distance = -distance
 		}
-		if distance < selectedDistance {
+		if selected.ID == 0 || distance < selectedDistance {
 			selected = candidate
 			selectedDistance = distance
 		}
 	}
-	return selected, true, nil
+	return selected, selected.ID != 0
 }
 
 func correctQuotaPercentTail(tx *gorm.DB, cycle entities.QuotaCycle, observation repositorydto.CodexMainQuotaObservation) error {

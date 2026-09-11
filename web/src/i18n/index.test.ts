@@ -317,11 +317,8 @@ describe('i18n resources', () => {
   it('labels Analysis cost metrics', () => {
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_per_million_tokens')).toBe('Cost / 1M Tokens');
     expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_blended_rate')).toBe('Blended Rate');
-    expect(i18n.getResource('en', 'translation', 'usage_stats.analysis_cost_share')).toBe('Cost Share');
     expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_blended_rate')).toBe('混合费率');
-    expect(i18n.getResource('zh', 'translation', 'usage_stats.analysis_cost_share')).toBe('成本占比');
     expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_blended_rate')).toBe('混合費率');
-    expect(i18n.getResource('zh-TW', 'translation', 'usage_stats.analysis_cost_share')).toBe('成本占比');
   });
 
   it('removes obsolete Analysis API and model stats labels', () => {

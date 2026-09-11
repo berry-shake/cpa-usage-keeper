@@ -2,13 +2,14 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import type { ChartData, ChartOptions } from 'chart.js'
+import { BasicPlatform, Chart as ChartJS, type ChartData, type ChartOptions } from 'chart.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodexQuotaHistoryResponse } from '@/lib/types'
 import { useThemeStore } from '@/stores'
 import { CodexQuotaHistoryPanel } from '../CodexQuotaHistoryPanel'
 
 const fetchCodexQuotaHistory = vi.fn()
+const deleteCodexQuotaHistoryCycle = vi.fn()
 type QuotaEfficiencyChartType = 'bar' | 'line'
 type QuotaEfficiencyChartData = ChartData<QuotaEfficiencyChartType, Array<number | null>, string>
 type QuotaEfficiencyChartOptions = ChartOptions<QuotaEfficiencyChartType>
@@ -21,6 +22,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
   return {
     ...actual,
     fetchCodexQuotaHistory: (...args: unknown[]) => fetchCodexQuotaHistory(...args),
+    deleteCodexQuotaHistoryCycle: (...args: unknown[]) => deleteCodexQuotaHistoryCycle(...args),
   }
 })
 
@@ -150,6 +152,8 @@ describe('CodexQuotaHistoryPanel', () => {
     latestChartData = null
     latestChartOptions = null
     fetchCodexQuotaHistory.mockReset()
+    deleteCodexQuotaHistoryCycle.mockReset()
+    deleteCodexQuotaHistoryCycle.mockResolvedValue(undefined)
     fetchCodexQuotaHistory.mockResolvedValue(response)
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -160,6 +164,165 @@ describe('CodexQuotaHistoryPanel', () => {
     await act(async () => root.unmount())
     container.remove()
     vi.restoreAllMocks()
+  })
+
+  const openDelete = async (cycleId = 2) => {
+    await act(async () => (container.querySelector(`[data-codex-quota-cycle-id="${cycleId}"] button[aria-label="usage_stats.credentials_quota_history_delete_title"]`) as HTMLButtonElement).click())
+  }
+  const modalButton = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent === label)!
+
+  const createLayoutChart = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 840
+    canvas.height = 286
+    const context = {
+      canvas,
+      measureText: (text: string) => ({ width: text.length * 5 }),
+      save() {}, restore() {}, resetTransform() {}, setTransform() {}, clearRect() {},
+      createLinearGradient: () => ({ addColorStop() {} }),
+    } as unknown as CanvasRenderingContext2D
+    vi.spyOn(canvas, 'getContext').mockReturnValue(context)
+    // 使用真实 Chart.js 刻度生成和缩放流程，只省略 Canvas 绘制。
+    return new ChartJS(canvas, {
+      type: 'bar',
+      data: latestChartData!,
+      options: { ...latestChartOptions!, responsive: false },
+      platform: BasicPlatform,
+      plugins: [{ id: 'layout-only', beforeDraw: () => false }],
+    })
+  }
+
+  it('keeps both percentage endpoints while reducing ticks on resize without dropping chart data', async () => {
+    const next = cloneResponse()
+    next.cycles[0].last_remaining_percent = 5
+    next.cycles[0].transitions = [{
+      ...next.cycles[0].transitions[0], from_remaining_percent: 100, to_remaining_percent: 5, percentage_points: 95, is_direct: false,
+    }]
+    fetchCodexQuotaHistory.mockResolvedValueOnce(next)
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    const chart = createLayoutChart()
+    try {
+      for (const [width, count] of [[840, 8], [340, 4], [254, 3], [840, 8]]) {
+        chart.resize(width, 286)
+        const ticks = chart.scales.x.ticks
+        expect(ticks).toHaveLength(count)
+        expect(ticks[0].label).toBe('100% → 99%')
+        expect(ticks.at(-1)?.label).toBe('6% → 5%')
+        expect(chart.getDatasetMeta(0).data).toHaveLength(95)
+      }
+    } finally {
+      chart.destroy()
+    }
+  })
+
+  it.each([1, 2, 3, 4])('shows every tick when only %s percentage samples exist', async (count) => {
+    const next = cloneResponse()
+    next.cycles[0].transitions = [{
+      ...next.cycles[0].transitions[0], from_remaining_percent: 76, to_remaining_percent: 76 - count, percentage_points: count,
+    }]
+    fetchCodexQuotaHistory.mockResolvedValueOnce(next)
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    const chart = createLayoutChart()
+    try {
+      expect(chart.scales.x.ticks.map((tick) => tick.label)).toEqual(latestChartData?.labels)
+    } finally {
+      chart.destroy()
+    }
+  })
+
+  it.each([
+    [100, 'ok'], [50, 'ok'], [49, 'warning'], [20, 'warning'], [19, 'danger'], [0, 'danger'], [null, 'unknown'],
+  ] as const)('shows the latest remaining percentage %s with quota status %s in the header', async (percent, status) => {
+    const next = cloneResponse()
+    next.cycles[0].last_remaining_percent = percent
+    fetchCodexQuotaHistory.mockResolvedValueOnce(next)
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+
+    const remaining = container.querySelector('[data-codex-quota-current-cycle] header dl')
+    expect(remaining?.querySelector('dt')?.textContent).toBe('usage_stats.credentials_quota_history_current_remaining')
+    expect(remaining?.querySelector('dd')?.textContent).toBe(percent === null ? '—' : `${percent}%`)
+    expect(remaining?.getAttribute('data-status')).toBe(status)
+  })
+
+  it('does not present completed-cycle percentages as current', async () => {
+    const next = cloneResponse()
+    next.cycles = [next.cycles[1]]
+    fetchCodexQuotaHistory.mockResolvedValueOnce(next)
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    expect(container.querySelector('[data-codex-quota-current-cycle] header dl')).toBeNull()
+  })
+
+  it('confirms deletion of a current cycle and reloads history with the selected window', async () => {
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    await openDelete()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('usage_stats.credentials_quota_history_delete_description')
+    expect(deleteCodexQuotaHistoryCycle).not.toHaveBeenCalled()
+    const next = cloneResponse()
+    next.cycles = [{ ...next.cycles[1], status: 'current' }]
+    fetchCodexQuotaHistory.mockResolvedValueOnce(next)
+    await act(async () => modalButton('common.delete').click())
+    expect(deleteCodexQuotaHistoryCycle).toHaveBeenCalledWith('auth-1', 2, expect.any(AbortSignal))
+    expect(fetchCodexQuotaHistory).toHaveBeenLastCalledWith('auth-1', { windowRole: 'primary' }, expect.any(AbortSignal))
+    expect(container.querySelector('[data-codex-quota-cycle-id="2"]')).toBeNull()
+    expect(container.querySelector('[data-codex-quota-cycle-id="1"]')?.getAttribute('data-codex-quota-cycle-status')).toBe('current')
+  })
+
+  it('distinguishes roles whose remaining histories have the same window title', async () => {
+    const sameKind = cloneResponse()
+    sameKind.windows[1] = { ...sameKind.windows[0], window_role: 'secondary' }
+    fetchCodexQuotaHistory.mockResolvedValueOnce(sameKind)
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    const labels = Array.from(container.querySelectorAll('button[aria-pressed]'), (button) => button.textContent)
+    expect(labels[0]).not.toBe(labels[1])
+    expect(labels[0]).toContain('Primary')
+    expect(labels[1]).toContain('Secondary')
+  })
+
+  it('can cancel deletion of a completed cycle', async () => {
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    await openDelete(1)
+    await act(async () => modalButton('common.cancel').click())
+    expect(deleteCodexQuotaHistoryCycle).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-codex-quota-cycle-id="1"]')).not.toBeNull()
+  })
+
+  it('selects a remaining window after deleting the last cycle of the selected role', async () => {
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    await act(async () => (container.querySelector('button[aria-pressed="true"]') as HTMLButtonElement).click())
+    await openDelete()
+    const remaining = cloneResponse()
+    remaining.windows = [remaining.windows[1]]
+    remaining.selected_window = remaining.windows[0]
+    remaining.cycles = [{ ...remaining.cycles[0], id: 3, window_seconds: 18000 }]
+    fetchCodexQuotaHistory.mockResolvedValueOnce({ ...remaining, selected_window: null, cycles: [] })
+      .mockResolvedValueOnce(remaining)
+    await act(async () => modalButton('common.delete').click())
+    expect(fetchCodexQuotaHistory).toHaveBeenLastCalledWith('auth-1', {}, expect.any(AbortSignal))
+    expect(container.querySelector('[data-codex-quota-cycle-id="3"]')).not.toBeNull()
+  })
+
+  it('preserves the cycle and allows retry after a delete failure', async () => {
+    deleteCodexQuotaHistoryCycle.mockRejectedValueOnce(new Error('delete failed'))
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    await openDelete()
+    await act(async () => modalButton('common.delete').click())
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe('delete failed')
+    expect(container.querySelector('[data-codex-quota-cycle-id="2"]')).not.toBeNull()
+    expect(modalButton('common.delete').disabled).toBe(false)
+  })
+
+  it('ignores completion of a delete after switching accounts', async () => {
+    let finish!: () => void
+    deleteCodexQuotaHistoryCycle.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-1" />))
+    await openDelete()
+    await act(async () => modalButton('common.delete').click())
+    expect(modalButton('common.delete').disabled).toBe(true)
+    await act(async () => root.render(<CodexQuotaHistoryPanel authIndex="auth-2" />))
+    const calls = fetchCodexQuotaHistory.mock.calls.length
+    await act(async () => finish())
+    expect(fetchCodexQuotaHistory.mock.calls).toHaveLength(calls)
+    expect(deleteCodexQuotaHistoryCycle.mock.calls[0][2].aborted).toBe(true)
   })
 
   it('expands crossed intervals and estimates full quota only from settled percentage points', async () => {
@@ -216,7 +379,7 @@ describe('CodexQuotaHistoryPanel', () => {
       pointHoverRadius: 3,
       tension: 0,
     })
-    expect(latestChartOptions?.scales?.x?.ticks).toMatchObject({ autoSkip: true, maxTicksLimit: 8, maxRotation: 0 })
+    expect(latestChartOptions?.scales?.x?.ticks).toMatchObject({ maxRotation: 0 })
     expect(latestChartOptions?.scales?.tokens?.ticks).toMatchObject({ maxTicksLimit: 5 })
     expect(latestChartOptions?.scales?.cost?.ticks).toMatchObject({ maxTicksLimit: 5 })
     expect(latestChartOptions?.scales?.remaining).toMatchObject({ display: true, position: 'right', min: 0, max: 100 })
@@ -381,6 +544,7 @@ describe('CodexQuotaHistoryPanel', () => {
     expect(currentRecord?.textContent).toContain('usage_stats.credentials_quota_history_cycle_expected_reset')
     expect(document.body.textContent).toContain('usage_stats.credentials_quota_history_no_transition')
     expect(document.body.querySelector('[data-codex-quota-efficiency-chart]')).toBeNull()
+    expect(container.querySelector('[data-codex-quota-current-cycle] header dd')?.textContent).toBe('76%')
     const chartSummary = document.body.querySelector('[data-codex-quota-current-cycle="true"] [data-codex-quota-chart-summary]')
     expect(chartSummary?.querySelector('[data-codex-quota-summary="median"]')?.textContent).toContain('—')
     expect(chartSummary?.querySelector('[data-codex-quota-summary="used"] [data-codex-quota-summary-metric="tokens"]')?.textContent).toBe('5.00K')
@@ -521,6 +685,10 @@ describe('CodexQuotaHistoryPanel', () => {
   })
 
   it('queries only the newly selected real window series', async () => {
+    const secondary = cloneResponse()
+    secondary.selected_window = secondary.windows[1]
+    secondary.cycles[0].last_remaining_percent = 19
+    fetchCodexQuotaHistory.mockResolvedValueOnce(response).mockResolvedValueOnce(secondary)
     await act(async () => {
       root.render(<CodexQuotaHistoryPanel authIndex="codex-auth" />)
       await Promise.resolve()
@@ -538,6 +706,9 @@ describe('CodexQuotaHistoryPanel', () => {
       { windowRole: 'secondary' },
       expect.any(AbortSignal),
     )
+    const remaining = container.querySelector('[data-codex-quota-current-cycle] header dl')
+    expect(remaining?.querySelector('dd')?.textContent).toBe('19%')
+    expect(remaining?.getAttribute('data-status')).toBe('danger')
   })
 
   it('retries the real window that failed instead of falling back to the default window', async () => {
@@ -597,7 +768,7 @@ describe('CodexQuotaHistoryPanel', () => {
       await Promise.resolve()
     })
     const warning = document.body.querySelector('[data-codex-quota-cost-warning]')
-    expect(warning?.parentElement?.tagName).toBe('HEADER')
+    expect(warning?.closest('header')).toBe(container.querySelector('[data-codex-quota-current-cycle] header'))
     expect(warning?.textContent).toBe('usage_stats.credentials_quota_history_cost_unavailable')
     expect(document.body.querySelector('[data-codex-quota-summary="median"]')?.textContent).toContain(
       'usage_stats.credentials_quota_history_cost_missing',

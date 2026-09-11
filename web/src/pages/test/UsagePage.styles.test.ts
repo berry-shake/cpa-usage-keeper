@@ -11,6 +11,9 @@ const keyOverviewPageStyles = readSource(new URL('../../features/key-viewer/KeyV
 const keyOverviewPageSource = readSource(new URL('../KeyOverviewPage.tsx', import.meta.url))
 const keyAnalysisPageSource = readSource(new URL('../KeyAnalysisPage.tsx', import.meta.url))
 const keyViewerShellSource = readSource(new URL('../../features/key-viewer/KeyViewerShell.tsx', import.meta.url))
+const dashboardHeaderStyles = readSource(new URL('../../components/dashboard/DashboardHeader.module.scss', import.meta.url))
+const dashboardHeaderSource = readSource(new URL('../../components/dashboard/DashboardHeader.tsx', import.meta.url))
+const dashboardToolbarSource = readSource(new URL('../../components/dashboard/DashboardToolbar.tsx', import.meta.url))
 const requestEventsSource = readSource(new URL('../../components/usage/RequestEventsDetailsCard.tsx', import.meta.url))
 const requestEventLogSource = readSource(new URL('../../components/usage/RequestEventLogModal.tsx', import.meta.url))
 const requestEventsColumnSettingsSource = readSource(new URL('../../components/usage/RequestEventsColumnSettingsModal.tsx', import.meta.url))
@@ -21,7 +24,6 @@ const priceRulesStyles = readSource(new URL('../../components/usage/pricing/Pric
 const questionMarkHelpSource = readSource(new URL('../../components/ui/QuestionMarkHelp.tsx', import.meta.url))
 const credentialStyles = readSource(new URL('../../components/usage/credentials/CredentialSections.module.scss', import.meta.url))
 const quotaHistoryStyles = readSource(new URL('../../components/usage/credentials/CodexQuotaHistoryPanel.module.scss', import.meta.url))
-const selectSource = readSource(new URL('../../components/ui/Select.tsx', import.meta.url))
 const apiIndexSource = readSource(new URL('../../components/usage/index.ts', import.meta.url))
 const apiClientSource = readSource(new URL('../../lib/api.ts', import.meta.url))
 const usageNavigationSource = readSource(new URL('../../lib/usageNavigation.ts', import.meta.url))
@@ -89,17 +91,14 @@ const relativeLuminance = (hex: string) => {
 }
 
 describe('UsagePage toolbar styles', () => {
-  it('renders every authenticated page header logo at 20px without pill chrome', () => {
-    for (const pageStyles of [usagePageStyles, keyOverviewPageStyles]) {
-      const logo = styleRuleBlock(pageStyles, '.eyebrow')
-
-      expect(logo).toMatch(/padding:\s*0;/)
-      expect(logo).toMatch(/border-radius:\s*0;/)
-      expect(logo).toMatch(/border:\s*0;/)
-      expect(logo).toMatch(/background:\s*transparent;/)
-      expect(logo).toMatch(/font-size:\s*20px;/)
-      expect(logo).not.toContain('box-shadow')
-    }
+  it('renders the shared authenticated header logo without pill chrome', () => {
+    const logo = dashboardHeaderStyles.match(/\.brand\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(logo).toContain('font-size: 18px;')
+    expect(logo).toContain('padding: 0;')
+    expect(logo).toContain('border: 0;')
+    expect(logo).toContain('background: transparent;')
+    expect(usagePageSource).toContain('<DashboardHeader')
+    expect(keyViewerShellSource).toContain('<DashboardHeader')
   })
 
   it('routes Settings and Request Event Log headings through the global Card contract', () => {
@@ -137,7 +136,7 @@ describe('UsagePage toolbar styles', () => {
   it('routes Analysis and Activity cards through the global surface and heading contract', () => {
     const analysisChartSurface = styleRuleBlock(analysisPanelStyles, '\n.analysisChartSurface {')
 
-    expect(analysisPanelSource.match(/keeper-card-surface/g)).toHaveLength(7)
+    expect(analysisPanelSource.match(/keeper-card-surface/g)).toHaveLength(6)
     expect(analysisPanelSource).toContain('keeper-card-title-track')
     expect(analysisPanelSource).toContain('keeper-card-title')
     expect(analysisPanelSource).toContain('keeper-card-subtitle')
@@ -163,8 +162,8 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageSource).not.toContain('RANKING_PREVIEW_ENABLED')
     expect(usagePageSource).toContain("import { MainActionButton } from '@/components/ui/MainActionButton'")
     expect(usagePageSource).toContain('<MainActionButton')
-    expect(keyOverviewPageSource).toContain("import { MainActionButton } from '@/components/ui/MainActionButton'")
-    expect(keyOverviewPageSource).toContain('<MainActionButton')
+    expect(keyOverviewPageSource).toContain('onRefresh={() => void handleManualRefresh()}')
+    expect(keyViewerShellSource).toContain('<DashboardToolbar')
   })
 
   it('patches the local ranking cache by Key ID after a settings alias save', () => {
@@ -232,13 +231,11 @@ describe('UsagePage toolbar styles', () => {
 
   it('uses shell density variables for dashboard spacing without root zoom', () => {
     expect(usagePageStyles).toMatch(/\.pageShell\s*\{[\s\S]*?padding:\s*var\(--keeper-page-padding-top, 28px\) var\(--keeper-page-padding-x, 20px\) var\(--keeper-page-padding-bottom, 48px\);/)
-    expect(keyOverviewPageStyles).toMatch(/\.pageShell\s*\{[\s\S]*?padding:\s*var\(--keeper-page-padding-top, 28px\) var\(--keeper-page-padding-x, 20px\) var\(--keeper-page-padding-bottom, 48px\);/)
+    expect(keyOverviewPageStyles).toMatch(/\.pageShell\s*\{[\s\S]*?padding:\s*var\(--keeper-page-padding-top, 21px\) var\(--keeper-page-padding-x, 24px\) var\(--keeper-page-padding-bottom, 48px\);/)
     expect(usagePageStyles).toMatch(/\.pageFrame\s*\{[\s\S]*?gap:\s*var\(--keeper-page-frame-gap, 18px\);/)
-    expect(keyOverviewPageStyles).toMatch(/\.pageFrame\s*\{[\s\S]*?gap:\s*var\(--keeper-page-frame-gap, 18px\);/)
+    expect(keyOverviewPageStyles).toMatch(/\.pageFrame\s*\{[\s\S]*?gap:\s*var\(--keeper-page-frame-gap, 12px\);/)
     expect(usagePageStyles).toMatch(/\.topBar\s*\{[\s\S]*?padding:\s*var\(--keeper-top-bar-padding-y, 18px\) var\(--keeper-top-bar-padding-x, 20px\);/)
-    expect(keyOverviewPageStyles).toMatch(/\.topBar\s*\{[\s\S]*?padding:\s*var\(--keeper-top-bar-padding-y, 18px\) var\(--keeper-top-bar-padding-x, 20px\);/)
     expect(usagePageStyles).toMatch(/\.eyebrow\s*\{[\s\S]*?min-height:\s*var\(--keeper-toolbar-control-height, 42px\);/)
-    expect(keyOverviewPageStyles).toMatch(/\.eyebrow\s*\{[\s\S]*?min-height:\s*var\(--keeper-toolbar-control-height, 42px\);/)
   })
 
   it('pins top notices to the viewport instead of the scrolled page body', () => {
@@ -667,8 +664,7 @@ describe('UsagePage toolbar styles', () => {
     expect(realtimeCard).toContain('padding: var(--keeper-card-padding);')
     expect(realtimeCard).not.toMatch(/(?:background|border|border-radius|box-shadow):/)
     expect(realtimeCompactCard).not.toContain('padding:')
-    expect(usagePageStyles).not.toMatch(/\.overviewRealtimeSection\s*\{[\s\S]*?border-top:/)
-    expect(usagePageStyles).not.toMatch(/\.overviewRealtimeSection\s*\{[\s\S]*?padding-top:/)
+    expect(styleRuleBlock(usagePageStyles, '.overviewRealtimeSection')).not.toMatch(/(?:border-top|padding-top):/)
     expect(usagePageSource).toContain("value === '15m' || value === '30m' || value === '60m'")
     expect(keyOverviewPageSource).toContain("value === '15m' || value === '30m' || value === '60m'")
     expect(usagePageSource).not.toContain("value === '5m'")
@@ -842,19 +838,11 @@ describe('UsagePage toolbar styles', () => {
     expect(usageNavigationSource).toMatch(/USAGE_TAB_OPTIONS = \[\s*'overview',\s*'analysis',\s*'ranking',\s*'events',\s*'auth-files',\s*'ai-provider',\s*'settings',\s*\] as const/)
   })
 
-  it('keeps Sign out as the rightmost shared main action after Check Updates', () => {
-    expect(usagePageSource).toContain('logout')
-    expect(usagePageSource).toContain('fetchUpdateCheck')
-    expect(usagePageSource.indexOf("t('usage_stats.check_updates')")).toBeLessThan(usagePageSource.indexOf("t('common.logout')"))
-    expect(usagePageSource.match(/<MainActionButton/g)).toHaveLength(2)
-    expect(keyOverviewPageSource.match(/<MainActionButton/g)).toHaveLength(1)
-    expect(keyViewerShellSource.match(/<MainActionButton/g)).toHaveLength(1)
-    expect(usagePageSource).toContain("aria-label={t('common.logout')}")
-    expect(keyViewerShellSource).toContain("aria-label={t('common.logout')}")
-    expect(usagePageSource).not.toContain('styles.signOutPill')
-    expect(keyOverviewPageSource).not.toContain('styles.logoutPill')
-    expect(usagePageStyles).not.toContain('.signOutPill')
-    expect(keyOverviewPageStyles).not.toContain('.logoutPill')
+  it('keeps update checks and Sign out in the shared header menu', () => {
+    expect(usagePageSource).toContain('onLogout={handleRequestLogout}')
+    expect(usagePageSource).toContain('onCheckUpdates={shouldShowUpdateCheckButton(versionInfo)')
+    expect(keyViewerShellSource).toContain('onLogout={() => void handleLogout()}')
+    expect(dashboardHeaderSource.indexOf("'usage_stats.check_updates'")).toBeLessThan(dashboardHeaderSource.indexOf("'common.logout'"))
   })
 
   it('uses only a theme-tuned top highlight for the connected shell outline', () => {
@@ -930,11 +918,12 @@ describe('UsagePage toolbar styles', () => {
     expect(connectedActiveTab).not.toContain('border-color:')
   })
 
-  it('keeps the connected shell out of CPAMC embed while sharing it with Key Overview', () => {
-    expect(usagePageSource).toContain("${!isEmbeddedInCPAMC ? styles.tabBarConnected : ''}")
-    expect(keyViewerShellSource).toContain('styles.tabBarConnected')
+  it('shares the glass toolbar across standalone dashboards and preserves the embed branch', () => {
+    expect(usagePageSource).toContain('{isEmbeddedInCPAMC ? <div className={styles.toolbarRow}>')
+    expect(usagePageSource).toContain(': <DashboardToolbar')
+    expect(keyViewerShellSource).toContain('<DashboardToolbar')
     expect(keyOverviewPageSource).toContain('KeyViewerShell')
-    expect(keyOverviewPageStyles).toContain('.tabBarConnected')
+    expect(dashboardToolbarSource).toContain('lang={i18n.resolvedLanguage || i18n.language}')
   })
 
   it('lets API Key Settings content scroll inside the card instead of being clipped', () => {
@@ -1198,7 +1187,6 @@ describe('UsagePage toolbar styles', () => {
   it('keeps the Analysis chart presentation aligned with the redesigned Analysis dashboard', () => {
     expect(analysisPanelSource).toContain("t('usage_stats.analysis_token_usage_title')")
     expect(analysisPanelSource).toContain("t('usage_stats.analysis_token_usage_subtitle')")
-    expect(analysisPanelSource).toContain("t('usage_stats.analysis_cost_breakdown_title')")
     expect(analysisPanelSource).toContain("t('usage_stats.analysis_model_efficiency_title')")
     expect(analysisPanelSource).toContain("t('usage_stats.analysis_composition_title')")
     expect(analysisPanelSource).toContain("t('usage_stats.analysis_composition_token_percent')")
@@ -1213,7 +1201,7 @@ describe('UsagePage toolbar styles', () => {
     expect(analysisPanelSource).toContain('<Bar data={chartData} options={chartOptions} plugins={[drawRequestsLineOnTopPlugin, drawTokenAverageLinePlugin]} />')
     expect(analysisPanelSource).toContain("id: 'analysis-token-average-line'")
     expect(analysisPanelSource).toContain("const activeContentKey = `${activeTab?.id ?? 'empty'}:${items.map((item) => item.key).join('|')}`")
-    expect(analysisPanelSource).toContain('<Doughnut key={`chart-${activeContentKey}`} data={chartData} options={chartOptions} />')
+    expect(analysisPanelSource).toContain('<Doughnut key={chartKey} data={chartData} options={chartOptions} plugins={[labelsPlugin]} />')
     expect(analysisPanelSource).toContain('hoverOffset: COMPOSITION_DONUT_HOVER_OFFSET')
     expect(analysisPanelSource).toContain("position: 'analysisCompositionCursor'")
     expect(analysisPanelSource).toContain('analysisCompositionCursor')
@@ -1223,11 +1211,9 @@ describe('UsagePage toolbar styles', () => {
     expect(analysisPanelSource).toContain('ticks: { color: chartTheme.textSecondary')
     expect(analysisPanelSource).toContain('analysis_cost_per_million_tokens')
     expect(analysisPanelSource).toContain('analysis_blended_rate')
-    expect(analysisPanelSource).toContain('styles.costStackFloatingTooltip')
-    expect(analysisPanelSource).toContain('onMouseEnter={(event) => showCostTooltip(tooltipLines, event)}')
     expect(analysisPanelSource).toContain('createLinearGradient')
     expect(analysisPanelSource).not.toContain('createRadialGradient')
-    expect(analysisPanelSource).toContain('className={styles.costRateMetric}')
+    expect(analysisPanelSource).toContain('className={styles.analysisSummary}')
     expect(analysisPanelSource).toContain("yAxisID: 'cost'")
     expect(analysisPanelSource).toContain('buildAnalysisTokenChartOptions')
     expect(analysisPanelSource).toContain('buildCompositionChartData')
@@ -1235,7 +1221,7 @@ describe('UsagePage toolbar styles', () => {
     expect(analysisPanelSource).toContain('className={styles.compositionUsageList}')
     expect(analysisPanelSource).toContain('className={styles.compositionUsageMetaPill}')
     expect(analysisPanelSource).not.toContain('className={styles.compositionTable}')
-    expect(analysisPanelSource).toContain('CostBreakdownCard')
+    expect(analysisPanelSource).not.toContain('CostBreakdownCard')
     expect(analysisPanelSource).toContain('ModelEfficiencyCard')
     expect(analysisPanelSource).toContain('CompositionPanel')
     expect(analysisPanelSource).toContain('heatmapTooltip')
@@ -1256,50 +1242,12 @@ describe('UsagePage toolbar styles', () => {
     expect(analysisPanelSource).not.toContain("from 'recharts'")
     expect(analysisPanelStyles).toMatch(/\.insightGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/)
     expect(analysisPanelStyles).toMatch(/\.insightGrid\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*1fr;/)
-    expect(analysisPanelStyles).toMatch(/\.costRatePanel\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/)
-    expect(analysisPanelStyles).toMatch(/\.costRatePanel\s*\{[\s\S]*?gap:\s*0;/)
-    expect(analysisPanelStyles).toMatch(/\.costRateMetric \+ \.costRateMetric\s*\{[\s\S]*?border-left:\s*1px solid var\(--border-color\);/)
-    expect(analysisPanelSource).not.toContain('costRateSparkline')
-    expect(analysisPanelStyles).not.toContain('.costRateSparkline')
-    expect(analysisPanelStyles).toMatch(/\.costRateMetric\s*\{[\s\S]*?justify-content:\s*flex-start;/)
-    const costMetricGridBlock = styleRuleBlock(analysisPanelStyles, '.costMetricGrid')
-    expect(costMetricGridBlock).toContain('grid-template-columns: repeat(4, minmax(0, 1fr));')
-    expect(costMetricGridBlock).toMatch(/@include tablet\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/)
-    expect(costMetricGridBlock).toMatch(/@include mobile\s*\{[\s\S]*?grid-template-columns:\s*1fr;/)
-    expect(analysisPanelStyles).toMatch(/\.costStackSegment\s*\{[\s\S]*?background:\s*linear-gradient\(90deg, color-mix\(in srgb, var\(--cost-segment-color\) 72%, var\(--bg-secondary\)\), var\(--cost-segment-color\)\);/)
-    expect(analysisPanelStyles).toMatch(/\.costStackFloatingTooltip\s*\{[\s\S]*?position:\s*fixed;/)
-    expect(analysisPanelStyles).toMatch(/\.insightGrid\s*\{[\s\S]*?align-items:\s*stretch;/)
     expect(analysisPanelStyles).toMatch(/\.efficiencyChartFrame\s*\{[\s\S]*?height:\s*300px;/)
     expect(analysisPanelStyles).not.toContain('.efficiencyList')
     expect(analysisPanelStyles).not.toContain('.efficiencyRow')
-    expect(analysisPanelStyles).toMatch(/\.compositionLayout\s*\{[\s\S]*?grid-template-columns:\s*minmax\(220px, 0\.72fr\) minmax\(0, 1\.28fr\);/)
-    const compositionLayoutBlock = styleRuleBlock(analysisPanelStyles, '.compositionLayout')
-    expect(compositionLayoutBlock).toContain('min-height: 340px;')
-    expect(analysisPanelStyles).toMatch(/\.compositionLayout\s*\{[\s\S]*?@include mobile\s*\{[\s\S]*?grid-template-columns:\s*1fr;/)
     expect(analysisPanelStyles).toMatch(/\.compositionUsageItem\s*\{[\s\S]*?border-bottom:\s*1px solid var\(--border-color\);/)
     expect(analysisPanelStyles).toMatch(/\.compositionUsageTrack\s*\{[\s\S]*?height:\s*5px;/)
     expect(analysisPanelStyles).toMatch(/\.compositionUsageBar\s*\{[\s\S]*?background:\s*linear-gradient\(90deg, color-mix\(in srgb, var\(--composition-bar-color\) 70%, var\(--bg-secondary\)\), var\(--composition-bar-color\)\);/)
-    expect(analysisPanelStyles).toMatch(/\.compositionUsageMetaPill\s*\{[\s\S]*?border-radius:\s*999px;/)
-    const compositionUsageListBlock = styleRuleBlock(analysisPanelStyles, '.compositionUsageList')
-    expect(compositionUsageListBlock).toContain('justify-content: center;')
-    expect(compositionUsageListBlock).toContain('min-height: 340px;')
-    const donutChartFrameBlock = styleRuleBlock(analysisPanelStyles, '.donutChartFrame')
-    expect(donutChartFrameBlock).toContain('align-self: center;')
-    expect(donutChartFrameBlock).toContain('display: flex;')
-    expect(donutChartFrameBlock).toContain('align-items: center;')
-    expect(donutChartFrameBlock).toContain('justify-content: center;')
-    expect(donutChartFrameBlock).toContain('min-height: 340px;')
-    expect(donutChartFrameBlock).toMatch(/@include mobile\s*\{[\s\S]*?min-height:\s*0;/)
-    expect(donutChartFrameBlock).not.toContain('height: 260px;')
-    const donutCanvasBoxBlock = styleRuleBlock(analysisPanelStyles, '.donutCanvasBox')
-    expect(donutCanvasBoxBlock).toContain('position: relative;')
-    expect(donutCanvasBoxBlock).toContain('width: min(100%, 340px);')
-    expect(donutCanvasBoxBlock).toContain('height: auto;')
-    expect(donutCanvasBoxBlock).toContain('aspect-ratio: 1;')
-    expect(donutCanvasBoxBlock).toContain('flex: 0 1 340px;')
-    expect(donutCanvasBoxBlock).toContain('max-width: 100%;')
-    expect(donutCanvasBoxBlock).toMatch(/@include mobile\s*\{[\s\S]*?width:\s*min\(100%, 260px\);/)
-    expect(donutCanvasBoxBlock).toMatch(/@include mobile\s*\{[\s\S]*?height:\s*auto;/)
     const compositionUsageMetaPillBlock = styleRuleBlock(analysisPanelStyles, '.compositionUsageMetaPill')
     expect(compositionUsageMetaPillBlock).toContain('max-width: 100%;')
     expect(compositionUsageMetaPillBlock).toContain('min-width: 0;')
@@ -1346,12 +1294,6 @@ describe('UsagePage toolbar styles', () => {
     expect(analysisPanelStyles).not.toContain('.compositionGrid')
     expect(analysisPanelStyles).not.toContain('.heatmapCellRequestValue')
     expect(analysisPanelStyles).not.toContain('rgb(250, 244, 230)')
-  })
-
-  it('widens only the API key dropdown menu without changing the trigger width', () => {
-    expect(selectSource).toContain('dropdownMinWidth?: number')
-    expect(selectSource).toContain('rect.left - (width - rect.width) / 2')
-    expect(usagePageSource).toContain('dropdownMinWidth={180}')
   })
 
   it('preserves the API Key sizing while removing the legacy range select and Custom UI', () => {
@@ -1586,7 +1528,7 @@ describe('UsagePage toolbar styles', () => {
     expect(usagePageStyles).not.toContain('.requestEventsExportButton:global(.btn)')
     expect(componentsStyles).toMatch(/\.main-action-button-shell\s*\{[\s\S]*?min-height:\s*42px;/)
     expect(componentsStyles).toMatch(/\.btn\.btn-action\.main-action-button\s*\{[\s\S]*?min-height:\s*32px;/)
-    expect(exportDropdownBlock).toMatch(/top:\s*calc\(100% \+ 6px\);/)
+    expect(exportDropdownBlock).toMatch(/top:\s*calc\(100% \+ 8px\);/)
     expect(clearFilterSlotBlock).toMatch(/display:\s*flex;/)
     expect(clearFilterSlotBlock).toMatch(/align-items:\s*center;/)
     expect(clearFilterSlotBlock).toMatch(/align-self:\s*flex-end;/)

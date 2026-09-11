@@ -18,6 +18,10 @@ type quotaAutoRefreshSettingsProviderStub struct {
 	updateErr     error
 }
 
+func (s *quotaAutoRefreshSettingsProviderStub) DeleteCodexQuotaHistoryCycle(context.Context, string, int64) error {
+	return nil
+}
+
 func (s *quotaAutoRefreshSettingsProviderStub) GetCodexQuotaHistory(context.Context, quota.CodexQuotaHistoryRequest) (quota.CodexQuotaHistoryResponse, error) {
 	return quota.CodexQuotaHistoryResponse{}, nil
 }

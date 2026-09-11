@@ -10,7 +10,9 @@ describe('RequestEventsDetailsCard model search', () => {
   let container: HTMLDivElement;
   let root: Root;
   const onModelFilterChange = vi.fn();
+  const onSourceFilterChange = vi.fn();
   const modelOptions = ['claude-sonnet-4', 'gpt-5', 'gpt-5-mini', 'gemini-2.5-pro'];
+  const sortedModelOptions = ['gpt-5', 'gpt-5-mini', 'claude-sonnet-4', 'gemini-2.5-pro'];
 
   beforeEach(async () => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,20 +22,21 @@ describe('RequestEventsDetailsCard model search', () => {
     root = createRoot(container);
     function TestCard() {
       const [modelFilter, setModelFilter] = React.useState('claude-sonnet-4');
+      const [sourceFilter, setSourceFilter] = React.useState('__all__');
       return <RequestEventsDetailsCard
         events={[]}
         loading={false}
         totalCount={0}
         modelOptions={modelOptions}
-        sourceOptions={[]}
+        sourceOptions={[{ value: 'auth-1', label: 'fallback-1', displayName: 'Team source' }, { value: 'auth-2', label: 'Other source' }]}
         modelFilter={modelFilter}
-        sourceFilter="__all__"
+        sourceFilter={sourceFilter}
         resultFilter="__all__"
         onModelFilterChange={(model) => {
           onModelFilterChange(model);
           setModelFilter(model);
         }}
-        onSourceFilterChange={() => undefined}
+        onSourceFilterChange={(source) => { onSourceFilterChange(source); setSourceFilter(source); }}
         onResultFilterChange={() => undefined}
       />;
     }
@@ -68,7 +71,7 @@ describe('RequestEventsDetailsCard model search', () => {
     await openInput();
     expect(document.activeElement).toBe(input());
     expect(document.querySelector('[role="listbox"] input')).toBeNull();
-    expect(document.querySelectorAll('input[role="combobox"]')).toHaveLength(1);
+    expect(document.querySelectorAll('input[role="combobox"]')).toHaveLength(2);
     await typeQuery(' GPT-5 ');
     expect(options()).toEqual(['gpt-5', 'gpt-5-mini']);
     expect(onModelFilterChange).not.toHaveBeenCalled();
@@ -96,15 +99,15 @@ describe('RequestEventsDetailsCard model search', () => {
     expect(input().getAttribute('aria-expanded')).toBe('false');
     await openInput();
     expect(input().value).toBe('');
-    expect(options()).toEqual(['All', ...modelOptions]);
+    expect(options()).toEqual(['All', ...sortedModelOptions]);
     expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe('claude-sonnet-4');
     await act(async () => document.querySelector<HTMLButtonElement>('[role="option"]')!.click());
     expect(onModelFilterChange).toHaveBeenCalledExactlyOnceWith('__all__');
     expect(input().value).toBe('All');
   });
 
-  it('keeps the source and result dropdowns without a search input', async () => {
-    for (const label of ['Source', 'Result']) {
+  it('keeps the status dropdown without a search input', async () => {
+    for (const label of ['Status']) {
       const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
       await act(async () => button.click());
       expect(document.querySelector('[role="listbox"]')).not.toBeNull();
@@ -114,7 +117,44 @@ describe('RequestEventsDetailsCard model search', () => {
     }
   });
 
-  it.each(['Model', 'Source', 'Result'])('does not open %s from its caption or surrounding space', async (label) => {
+  it.each([
+    ['Source', ' TEAM ', 'Team source', 'auth-1', onSourceFilterChange],
+  ] as const)('searches %s display names locally and commits the option ID', async (label, query, displayName, value, onChange) => {
+    const control = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    await act(async () => control.click());
+    const type = async (text: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(control, text);
+        control.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    await type('missing-option');
+    expect(options()).toEqual([]);
+    expect(document.body.textContent).toContain('No matching sources');
+    await type(query);
+    expect(options()).toEqual([displayName]);
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => control.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })));
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => control.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(value);
+    expect(control.value).toBe(displayName);
+    await act(async () => control.click());
+    expect(control.value).toBe('');
+    expect(options()).toHaveLength(3);
+    await type('draft');
+    await act(async () => control.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(control.value).toBe(displayName);
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('only offers Model, Source and Status filters', () => {
+    expect(Array.from(container.querySelectorAll('[aria-expanded][aria-label]'))
+      .filter((node) => ['Model', 'API Key', 'Source', 'Status'].includes(node.getAttribute('aria-label')!))
+      .map((node) => node.getAttribute('aria-label'))).toEqual(['Model', 'Source', 'Status']);
+  });
+
+  it.each(['Model', 'Source', 'Status'])('does not open %s from its caption or surrounding space', async (label) => {
     const control = container.querySelector<HTMLInputElement | HTMLButtonElement>(`[aria-label="${label}"][aria-expanded]`)!;
     const caption = Array.from(container.querySelectorAll('span')).find((node) => node.textContent === label)!;
 
@@ -173,7 +213,7 @@ describe('RequestEventsDetailsCard model search', () => {
   it('restores the selected model on outside click or blur without committing draft text', async () => {
     await openInput();
     await typeQuery('gemini');
-    const source = container.querySelector<HTMLButtonElement>('button[aria-label="Source"]')!;
+    const source = container.querySelector<HTMLInputElement>('input[aria-label="Source"]')!;
     await act(async () => {
       source.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       source.focus();
@@ -186,7 +226,7 @@ describe('RequestEventsDetailsCard model search', () => {
     await openInput();
     await typeQuery('gpt');
     await typeQuery('');
-    expect(options()).toEqual(['All', ...modelOptions]);
+    expect(options()).toEqual(['All', ...sortedModelOptions]);
     await act(async () => input().blur());
     expect(input().getAttribute('aria-expanded')).toBe('false');
     expect(input().value).toBe('claude-sonnet-4');

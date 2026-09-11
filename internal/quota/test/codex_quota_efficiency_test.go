@@ -29,8 +29,8 @@ func TestGetCodexQuotaHistorySelectsCurrentRealWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCodexQuotaHistory returned error: %v", err)
 	}
-	if len(response.Windows) != 1 || response.SelectedWindow == nil {
-		t.Fatalf("expected only the role present in the latest response, got %+v", response)
+	if len(response.Windows) != 2 || response.SelectedWindow == nil {
+		t.Fatalf("expected both current and historical roles to remain selectable, got %+v", response)
 	}
 	if response.SelectedWindow.WindowRole != "primary" || response.SelectedWindow.WindowSeconds != int64((7*24*time.Hour)/time.Second) {
 		t.Fatalf("expected current Primary Weekly selection, got %+v", response.SelectedWindow)

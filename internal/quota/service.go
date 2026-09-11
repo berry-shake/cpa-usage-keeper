@@ -90,6 +90,8 @@ type Service struct {
 	codexQuotaHistoryTrustedQueue chan codexQuotaHistoryInput
 	// codexQuotaHistoryTrustedWake 让可信来源跳过 Header 一分钟窗口并立即触发 runner。
 	codexQuotaHistoryTrustedWake chan struct{}
+	// 删除命令与采样共用唯一 runner，避免事务提交后旧缓存继续写回。
+	codexQuotaHistoryDelete chan codexQuotaHistoryDeleteRequest
 	// codexQuotaHistoryStopCh 只表达 runner 停止；队列不关闭以避免并发发送 panic。
 	codexQuotaHistoryStopCh chan struct{}
 	// codexQuotaHistoryDoneCh 在 shutdown best-effort flush 完成后关闭。
@@ -197,6 +199,7 @@ func NewServiceWithRegistryAndOptions(db *gorm.DB, registry ProviderRegistry, op
 		codexQuotaHistoryHeaderWake:        make(chan struct{}, 1),
 		codexQuotaHistoryTrustedQueue:      make(chan codexQuotaHistoryInput, codexHistoryQueueSize),
 		codexQuotaHistoryTrustedWake:       make(chan struct{}, 1),
+		codexQuotaHistoryDelete:            make(chan codexQuotaHistoryDeleteRequest),
 		codexQuotaHistoryStopCh:            make(chan struct{}),
 		codexQuotaHistoryDoneCh:            make(chan struct{}),
 		codexQuotaHistoryFlushInterval:     codexHistoryFlushInterval,

@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, fetchKeyOverview, fetchKeyOverviewRealtime, isUsageRangeBoundsConflict } from '@/lib/api';
 import type { AuthSessionAPIKeySummary, OverviewRealtimeBlock, OverviewRealtimeWindow, UsageCustomRange, UsageOverviewResponse, UsageTimeRange } from '@/lib/types';
-import { MainActionButton } from '@/components/ui/MainActionButton';
-import { IconRefreshCw } from '@/components/ui/icons';
 import { KeyViewerShell } from '@/features/key-viewer/KeyViewerShell';
 import type { KeyViewerPath } from '@/features/key-viewer/navigation';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -351,45 +349,16 @@ export function KeyOverviewPage({ apiKey, onNavigate, onAuthRequired }: KeyOverv
     ? t('usage_stats.overview_realtime_load_failed')
     : '';
 
-  const toolbar = (
-    <>
-      <div className={styles.usageFilterBar}>
-        <TimeRangeControl
-          value={timeRange}
-          customRange={customRange}
-          timeZone={rangeTimeZone}
-          onChange={handleTimeRangeChange}
-          ariaLabel={t('usage_stats.range_filter')}
-        />
-      </div>
-      <div className={styles.usageRefreshSlot}>
-        <div className={styles.usageFilterActions}>
-          <MainActionButton
-            type="button"
-            shellClassName={styles.refreshMainActionShell}
-            className={styles.refreshMainActionButton}
-            onClick={() => void handleManualRefresh()}
-            disabled={refreshDisabled}
-            loading={manualRefreshLoading}
-          >
-            {manualRefreshLoading ? t('common.loading') : (
-              <>
-                <IconRefreshCw size={14} />
-                <span>{t('usage_stats.refresh')}</span>
-              </>
-            )}
-          </MainActionButton>
-        </div>
-      </div>
-    </>
-  );
 
   return (
     <KeyViewerShell
       activePage="overview"
       apiKey={apiKey}
       loading={loading && !usage}
-      toolbar={toolbar}
+      filters={[<TimeRangeControl key="range" value={timeRange} customRange={customRange} timeZone={rangeTimeZone} onChange={handleTimeRangeChange} ariaLabel={t('usage_stats.range_filter')} labelInsideTrigger />]}
+      onRefresh={() => void handleManualRefresh()}
+      refreshing={manualRefreshLoading}
+      refreshDisabled={refreshDisabled}
       onNavigate={onNavigate}
       onAuthRequired={onAuthRequired}
     >

@@ -22,8 +22,8 @@ vi.mock('@/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('@/features/key-viewer/KeyViewerShell', () => ({
-  KeyViewerShell: ({ children, toolbar }: { children: React.ReactNode; toolbar: React.ReactNode }) => (
-    <div>{toolbar}{children}</div>
+  KeyViewerShell: ({ children, filters, onRefresh, refreshing }: { children: React.ReactNode; filters: React.ReactNode[]; onRefresh: () => void; refreshing: boolean }) => (
+    <div>{filters}<button type="button" onClick={onRefresh} disabled={refreshing}>usage_stats.refresh</button>{children}</div>
   ),
 }));
 

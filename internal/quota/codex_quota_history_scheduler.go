@@ -54,6 +54,8 @@ func (s *Service) runCodexQuotaHistoryRunner() {
 
 	for {
 		select {
+		case request := <-s.codexQuotaHistoryDelete:
+			s.deleteCodexQuotaHistoryCycle(&state, request)
 		case <-s.codexQuotaHistoryHeaderWake:
 			// 队列和 wake 必须在生产者同一把短锁下观察，避免把并发新数据误判为空通知。
 			s.codexQuotaHistoryMu.Lock()
@@ -64,20 +66,28 @@ func (s *Service) runCodexQuotaHistoryRunner() {
 			}
 			// 第一条 Header 固定开启一分钟窗口，后续 Header 只进入同一个有界队列。
 			timerC, stopTimer := s.codexQuotaHistoryNewTimer(s.codexQuotaHistoryFlushInterval)
-			select {
-			case <-timerC:
-				stopTimer()
-				// 一分钟到点后固定本批输入，后续 Header 自然进入下一批。
-				s.processPreferredCodexQuotaHistoryInputs(&state, false)
-			case <-s.codexQuotaHistoryTrustedWake:
-				stopTimer()
-				// 可信查询跳过 Header 等待，并覆盖同账号角色的待处理 Header。
-				s.processPreferredCodexQuotaHistoryInputs(&state, false)
-			case <-s.codexQuotaHistoryStopCh:
-				stopTimer()
-				// shutdown 只尽力处理已经接收的数据，不等待剩余的一分钟窗口。
-				s.processPreferredCodexQuotaHistoryInputs(&state, true)
-				return
+		waitForHeader:
+			for {
+				select {
+				case request := <-s.codexQuotaHistoryDelete:
+					// 删除只清匹配数据，保留其他 Header 原有的一分钟等待窗口。
+					s.deleteCodexQuotaHistoryCycle(&state, request)
+				case <-timerC:
+					stopTimer()
+					// 一分钟到点后固定本批输入，后续 Header 自然进入下一批。
+					s.processPreferredCodexQuotaHistoryInputs(&state, false)
+					break waitForHeader
+				case <-s.codexQuotaHistoryTrustedWake:
+					stopTimer()
+					// 可信查询跳过 Header 等待，并覆盖同账号角色的待处理 Header。
+					s.processPreferredCodexQuotaHistoryInputs(&state, false)
+					break waitForHeader
+				case <-s.codexQuotaHistoryStopCh:
+					stopTimer()
+					// shutdown 只尽力处理已经接收的数据，不等待剩余的一分钟窗口。
+					s.processPreferredCodexQuotaHistoryInputs(&state, true)
+					return
+				}
 			}
 		case <-s.codexQuotaHistoryTrustedWake:
 			// 空闲 runner 收到可信事实时立即处理，不创建 Header timer。

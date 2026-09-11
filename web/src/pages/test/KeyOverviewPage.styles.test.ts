@@ -1,28 +1,20 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(new URL('./KeyOverviewPage.tsx', import.meta.url), 'utf8')
-const styles = readFileSync(new URL('../features/key-viewer/KeyViewerShell.module.scss', import.meta.url), 'utf8')
-const shellSource = readFileSync(new URL('../features/key-viewer/KeyViewerShell.tsx', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../KeyOverviewPage.tsx', import.meta.url), 'utf8')
+const styles = readFileSync(new URL('../../features/key-viewer/KeyViewerShell.module.scss', import.meta.url), 'utf8')
+const shellSource = readFileSync(new URL('../../features/key-viewer/KeyViewerShell.tsx', import.meta.url), 'utf8')
 
 describe('KeyOverviewPage layout', () => {
-  it('keeps the viewer page data-specific while matching the admin overview toolbar structure', () => {
+  it('keeps viewer data and time storage separate while sharing dashboard controls', () => {
     expect(source).not.toContain('UsagePage.module.scss')
-    expect(source).toContain("import { KeyViewerShell } from '@/features/key-viewer/KeyViewerShell';")
-    expect(shellSource).toContain('className={styles.themeSwitcher}')
-    expect(source.match(/<MainActionButton/g)).toHaveLength(1)
-    expect(shellSource.match(/<MainActionButton/g)).toHaveLength(1)
-    expect(shellSource).toContain("aria-label={t('common.logout')}")
-    expect(shellSource).not.toContain('styles.logoutSwitcher')
-    expect(shellSource).not.toContain('styles.logoutPill')
-    expect(source).not.toContain('check_updates')
-    expect(shellSource).toContain('styles.tabBarConnected')
-    expect(shellSource).toContain('className={styles.toolbarActionsRight}')
+    expect(source).toContain('<KeyViewerShell')
+    expect(shellSource).toContain('<DashboardHeader identity={identityLabel}')
+    expect(shellSource).toContain('<DashboardToolbar')
     expect(source).toContain('<TimeRangeControl')
     expect(source).toContain('loadKeyViewerTimeRange')
-    expect(source).not.toContain('className={styles.timeRangeGroup}')
-    expect(source).toContain('className={styles.usageRefreshSlot}')
-    expect(source).not.toContain('className={styles.toolbarMetaRow}')
+    expect(source).toContain('onRefresh={() => void handleManualRefresh()}')
+    expect(source).not.toContain('check_updates')
   })
 
   it('does not reload overview data just because language changes', () => {
@@ -72,23 +64,11 @@ describe('KeyOverviewPage layout', () => {
     expect(source).not.toContain('showEyebrow')
   })
 
-  it('copies the relevant admin toolbar class contracts into its own module', () => {
-    expect(styles).toMatch(/\.toolbarRow\s*\{[\s\S]*?flex-direction:\s*column;/)
-    expect(styles).toMatch(/\.toolbarActionsRight\s*\{[\s\S]*?justify-content:\s*flex-end;/)
-    expect(styles).not.toContain('.timeRangeGroup')
+  it('keeps viewer shell styles focused on page layout and loading', () => {
+    expect(styles).toContain('.loadingOverlay')
+    expect(styles).toContain('.pageFrame')
+    expect(styles).not.toContain('.tabBarConnected')
+    expect(styles).not.toContain('.themeSwitcher')
     expect(styles).not.toContain('.rangeSelectControl')
-    expect(styles).not.toMatch(/\.(toolbarMetaRow|lastRefreshed)\s*\{/)
-  })
-
-  it('uses the same soft active tab shadow as the admin usage tabs', () => {
-    const activeTabBlock = styles.slice(
-      styles.indexOf('.tabPillActive {'),
-      styles.indexOf('.toolbarActionsRight')
-    )
-
-    expect(activeTabBlock).toMatch(/border-color:\s*rgba\(\$primary-color, 0\.45\);/)
-    expect(activeTabBlock).toContain('0 0 0 1px rgba($primary-color, 0.08) inset,')
-    expect(activeTabBlock).toContain('0 4px 12px rgba($primary-color, 0.14);')
-    expect(activeTabBlock).not.toContain('box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);')
   })
 })

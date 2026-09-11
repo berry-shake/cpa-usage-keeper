@@ -21,11 +21,13 @@ vi.mock('@/features/ranking/api', async (importOriginal) => ({
 }));
 
 vi.mock('@/features/key-viewer/KeyViewerShell', () => ({
-  KeyViewerShell: ({ children, toolbar, activePage }: {
+  KeyViewerShell: ({ children, filters, activePage, onRefresh, refreshing }: {
     children: React.ReactNode;
-    toolbar: React.ReactNode;
+    filters: React.ReactNode[];
     activePage: string;
-  }) => <div data-active-page={activePage}>{toolbar}{children}</div>,
+    onRefresh: () => void;
+    refreshing: boolean;
+  }) => <div data-active-page={activePage}>{filters}<button type="button" onClick={onRefresh} disabled={refreshing}>usage_stats.refresh</button>{children}</div>,
 }));
 
 vi.mock('@/features/ranking/components/RankingScopeSwitch', () => ({

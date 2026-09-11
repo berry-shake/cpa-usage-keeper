@@ -175,8 +175,8 @@ func TestBuildCodexQuotaEfficiencyHistoryUsesLatestWindowPerRoleAndCutsOverlappi
 	if err != nil {
 		t.Fatalf("BuildCodexQuotaEfficiencyHistory returned error: %v", err)
 	}
-	if len(result.Windows) != 1 || result.SelectedWindow == nil {
-		t.Fatalf("expected only the role present in the latest response, got %+v", result.Windows)
+	if len(result.Windows) != 2 || result.SelectedWindow == nil {
+		t.Fatalf("expected both current and historical roles to remain selectable, got %+v", result.Windows)
 	}
 	if result.SelectedWindow.WindowRole != "primary" || result.SelectedWindow.WindowSeconds != int64((7*24*time.Hour)/time.Second) || !result.SelectedWindow.HasCurrentCycle {
 		t.Fatalf("expected current Primary Weekly selection, got %+v", result.SelectedWindow)
@@ -430,11 +430,11 @@ type codexQuotaEfficiencySegmentSeed struct {
 	last      time.Time
 }
 
-func seedCodexQuotaEfficiencyCycle(t *testing.T, db *gorm.DB, authIndex string, start, reset time.Time, segments []codexQuotaEfficiencySegmentSeed) entities.QuotaCycle {
+func seedCodexQuotaEfficiencyCycle(t testing.TB, db *gorm.DB, authIndex string, start, reset time.Time, segments []codexQuotaEfficiencySegmentSeed) entities.QuotaCycle {
 	return seedCodexQuotaEfficiencyRoleCycle(t, db, authIndex, entities.CodexQuotaWindowRolePrimary, start, reset, segments)
 }
 
-func seedCodexQuotaEfficiencyRoleCycle(t *testing.T, db *gorm.DB, authIndex string, role entities.CodexQuotaWindowRole, start, reset time.Time, segments []codexQuotaEfficiencySegmentSeed) entities.QuotaCycle {
+func seedCodexQuotaEfficiencyRoleCycle(t testing.TB, db *gorm.DB, authIndex string, role entities.CodexQuotaWindowRole, start, reset time.Time, segments []codexQuotaEfficiencySegmentSeed) entities.QuotaCycle {
 	t.Helper()
 	quotaKey := "rate_limit.primary_window"
 	if role == entities.CodexQuotaWindowRoleSecondary {
@@ -486,18 +486,18 @@ func usageEventForQuotaEfficiency(key, authType, authIndex string, timestamp tim
 	}
 }
 
-func seedCodexQuotaEfficiencyUsage(t *testing.T, db *gorm.DB, events ...entities.UsageEvent) {
+func seedCodexQuotaEfficiencyUsage(t testing.TB, db *gorm.DB, events ...entities.UsageEvent) {
 	t.Helper()
 	if err := db.Create(&events).Error; err != nil {
 		t.Fatalf("seed quota efficiency usage events: %v", err)
 	}
 }
 
-func codexQuotaEfficiencyPricingResolver(t *testing.T) pricing.Resolver {
+func codexQuotaEfficiencyPricingResolver(t testing.TB) pricing.Resolver {
 	return codexQuotaEfficiencyPricingResolverWithRules(t, nil)
 }
 
-func codexQuotaEfficiencyPricingResolverWithRules(t *testing.T, rules []pricing.RuleConfig) pricing.Resolver {
+func codexQuotaEfficiencyPricingResolverWithRules(t testing.TB, rules []pricing.RuleConfig) pricing.Resolver {
 	t.Helper()
 	multiplier := 1.0
 	snapshot, err := pricing.CompileSnapshot([]pricing.ModelConfig{{

@@ -84,6 +84,7 @@ describe('AuthFileCredentialsSection title', () => {
   it('renders the 5h cache rate in health mode', () => {
     const storage = new Map<string, string>([['cpa.credentials.authFiles.displayMode', 'health']])
     vi.stubGlobal('window', {
+      matchMedia: () => ({ matches: false }),
       localStorage: {
         getItem: (key: string) => storage.get(key) ?? null,
         setItem: (key: string, value: string) => storage.set(key, value),

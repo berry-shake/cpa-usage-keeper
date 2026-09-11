@@ -18,6 +18,7 @@ import type {
   PricingRule,
   PricingSaveResult,
   PricingStyle,
+  PricingSyncSource,
   PricingSyncPreviewResponse,
   ReplacePricingRuleInput,
 } from '@/lib/types';
@@ -52,7 +53,7 @@ export interface UsePricingDataReturn {
   loadPricingRules: (model: string) => Promise<PricingRule[] | null>;
   savePricingRules: (model: string, rules: ReplacePricingRuleInput[]) => Promise<PricingRule[] | null>;
   syncModelPrices: (prices: Record<string, ModelPrice>) => Promise<PricingSaveResult>;
-  previewPricingSync: () => Promise<PricingSyncPreviewResponse>;
+  previewPricingSync: (source: PricingSyncSource, signal?: AbortSignal) => Promise<PricingSyncPreviewResponse>;
 }
 
 const normalizePricingStyle = (style: PricingStyle | string | undefined): PricingStyle =>
@@ -356,9 +357,9 @@ export function usePricingData(options: UsePricingDataOptions = {}): UsePricingD
     return result;
   }, []);
 
-  const previewPricingSync = useCallback(async () => {
+  const previewPricingSync = useCallback(async (source: PricingSyncSource, signal?: AbortSignal) => {
     try {
-      return await fetchPricingSyncPreview();
+      return await fetchPricingSyncPreview(source, signal);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequiredRef.current?.();

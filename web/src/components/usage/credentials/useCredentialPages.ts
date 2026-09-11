@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, fetchUsageIdentitiesPage, type UsageIdentityPageSort } from '@/lib/api'
+import { ApiError, fetchUsageIdentitiesPage, resetUsageIdentityStats, type UsageIdentityPageSort } from '@/lib/api'
 import type { UsageIdentity, UsageIdentityTypeCount } from '@/lib/types'
 import { credentialProviderFilterTypes, type CredentialProviderFilterKey } from './credentialProviderFilters'
 import { loadCredentialListPreferences, persistCredentialListPreferences } from './credentialListPreferences'
@@ -68,6 +68,7 @@ export interface CredentialPagesState {
   setAuthFileSort: (sort: UsageIdentityPageSort) => void
   setAiProviderSort: (sort: UsageIdentityPageSort) => void
   replaceUsageIdentity: (identity: UsageIdentity) => void
+  resetStats: (id: string) => Promise<UsageIdentity>
   loading: boolean
   error: string
   refresh: () => Promise<void>
@@ -242,6 +243,33 @@ export function useCredentialPages({ enabledAuthFiles, enabledAiProviders, onAut
     await Promise.all(tasks)
   }, [enabledAiProviders, enabledAuthFiles, refreshAiProviders, refreshAuthFiles])
 
+  const resetStats = useCallback(async (id: string) => {
+    let updated: UsageIdentity
+    try {
+      updated = await resetUsageIdentityStats(id)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onAuthRequired?.()
+      throw error
+    }
+    // 旧列表请求可能仍在返回中，先使其失效再应用重置结果，随后重新获取服务端排序。
+    const controllerRef = updated.auth_type === 1 ? authFilesRequestControllerRef : aiProvidersRequestControllerRef
+    controllerRef.current?.abort()
+    controllerRef.current = null
+    const replace = (items: UsageIdentity[]) => items.map((item) => item.id === updated.id
+      ? { ...updated, credential_health: item.credential_health }
+      : item)
+    if (updated.auth_type === 1) {
+      setAuthFileIdentities(replace)
+      setAuthFilesLoading(false)
+      void refreshAuthFiles()
+    } else {
+      setAiProviderIdentities(replace)
+      setAiProvidersLoading(false)
+      void refreshAiProviders()
+    }
+    return updated
+  }, [onAuthRequired, refreshAuthFiles, refreshAiProviders])
+
   useEffect(() => {
     if (!enabledAuthFiles) {
       authFilesRequestControllerRef.current?.abort()
@@ -308,6 +336,7 @@ export function useCredentialPages({ enabledAuthFiles, enabledAiProviders, onAut
     setAuthFileSort,
     setAiProviderSort,
     replaceUsageIdentity,
+    resetStats,
     loading: (enabledAuthFiles && authFilesLoading) || (enabledAiProviders && aiProvidersLoading),
     error: enabledAuthFiles ? authFilesError : enabledAiProviders ? aiProvidersError : '',
     refresh,

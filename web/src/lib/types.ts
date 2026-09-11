@@ -419,6 +419,15 @@ export interface UsageSubscriptionInfo {
   tierName?: string
 }
 
+export interface UsageIdentityPeriodStats {
+  total_requests: number
+  success_count: number
+  failure_count: number
+  input_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+}
+
 export interface UsageIdentity {
   id: string
   name: string
@@ -450,6 +459,8 @@ export interface UsageIdentity {
   first_used_at?: string
   last_used_at?: string
   stats_updated_at?: string
+  stats_reset_at?: string
+  period_stats?: UsageIdentityPeriodStats
   credential_health?: UsageCredentialHealth
   is_deleted: boolean
   created_at: string
@@ -925,7 +936,10 @@ export interface PricingSyncMatch {
 	cache_write_price_per_1m: number
 }
 
+export type PricingSyncSource = 'models-dev' | 'litellm'
+
 export interface PricingSyncPreviewResponse {
+  source_id: PricingSyncSource
   source: string
   source_url: string
   metadata_models: number

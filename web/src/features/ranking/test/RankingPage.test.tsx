@@ -546,6 +546,22 @@ describe('RankingPage', () => {
     expect(document.querySelector('input[name="ranking-display-name"]')).toBeNull();
   });
 
+  it('shows a permanent ban distinctly from voluntary exit and uses the ban error message', async () => {
+    const status = { status: 'deleted', banned: true, display_name: 'Keeper_01', avatar_id: 7 } as RankingStatusResponse;
+    await renderPage({ status });
+    expect(container.querySelector('[data-ranking-profile-action]')?.textContent).toBe('ranking.status_banned');
+    await openProfileModal();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.querySelector('.modal-title')?.textContent).toBe('ranking.banned_title');
+    expect(dialog?.textContent).toContain('ranking.banned_description');
+    expect(dialog?.textContent).not.toContain('ranking.deleted_description');
+    expect(document.querySelector('[data-ranking-join]')).toBeNull();
+    expect(document.querySelector('[data-ranking-resume]')).toBeNull();
+
+    await renderPage({ status, actionError: new RankingApiError('ranking_participant_deleted', 410) });
+    expect(document.querySelector('[data-ranking-action-feedback="error"]')?.textContent).toBe('ranking.error_banned');
+  });
+
   it('requires a second confirmation before permanent exit', async () => {
     const onExit = vi.fn(async () => null);
     await renderPage({ status: { status: 'active', display_name: 'Keeper_01', avatar_id: 7 }, onExit });

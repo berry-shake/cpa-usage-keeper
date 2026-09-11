@@ -20,6 +20,7 @@ interface TimeRangeControlProps {
   customRange?: UsageCustomRange;
   onChange: (value: UsageTimeRange, customRange?: UsageCustomRange) => void;
   ariaLabel: string;
+  labelInsideTrigger?: boolean;
   timeZone?: string;
   maxCustomDayRangeDays?: number;
 }
@@ -73,6 +74,30 @@ describe('TimeRangeControl', () => {
     expect(desktopShell?.querySelector('[data-time-range-trigger="desktop"]')).not.toBeNull();
     expect(mobileShell?.textContent).toContain('Range');
     expect(mobileShell?.querySelector('[data-time-range-trigger="mobile"]')).not.toBeNull();
+  });
+
+  it('opens the existing range dialog when the inline toolbar title is clicked', async () => {
+    const TimeRangeControl = await loadTimeRangeControl();
+    expect(TimeRangeControl).not.toBeNull();
+    if (!TimeRangeControl) return;
+    await act(async () => root.render(<TimeRangeControl value="today" onChange={vi.fn()} ariaLabel="Range" timeZone="Asia/Shanghai" labelInsideTrigger />));
+    const title = container.querySelector<HTMLElement>('[data-time-range-trigger="desktop"] [data-dashboard-filter-caption]');
+    expect(title?.textContent).toBe('Range');
+    await act(async () => title!.click());
+    expect(document.querySelector('[role="dialog"][aria-label="Range"]')).not.toBeNull();
+  });
+
+  it('keeps an open desktop panel attached when the trigger moves to another toolbar row', async () => {
+    await renderControl('today');
+    const trigger = container.querySelector<HTMLButtonElement>('[data-time-range-trigger="desktop"]')!;
+    const bounds = vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(new DOMRect(801, 87, 99, 44));
+    await act(async () => trigger.click());
+    const panel = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Range"]')!;
+    expect(panel.style.top).toBe('139px');
+    bounds.mockReturnValue(new DOMRect(103, 140, 144, 44));
+    await act(async () => { await new Promise(requestAnimationFrame); });
+    expect(panel.style.left).toBe('12px');
+    expect(panel.style.top).toBe('192px');
   });
 
   it('includes the applied range in both trigger accessible names', async () => {

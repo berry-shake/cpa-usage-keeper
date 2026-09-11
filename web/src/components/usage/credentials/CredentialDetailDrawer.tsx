@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '@/components/ui/Modal'
+import { Button } from '@/components/ui/Button'
 import { IconRefreshCw } from '@/components/ui/icons'
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon'
 import { RequestEventLogModal } from '@/components/usage/RequestEventLogModal'
@@ -13,7 +14,7 @@ import { CredentialPriorityBadge, cacheReadRateTone, credentialToneClassName, fo
 import { CredentialSubscriptionBadge } from './CredentialSubscriptionBadge'
 import { CredentialRequestEventsList } from './CredentialRequestEventsList'
 import { CodexQuotaHistoryPanel } from './CodexQuotaHistoryPanel'
-import type { CredentialDetailSelection } from './credentialViewModels'
+import { formatCredentialTimestamp, type CredentialDetailSelection } from './credentialViewModels'
 import styles from './CredentialDetailDrawer.module.scss'
 import credentialStyles from './CredentialSections.module.scss'
 
@@ -26,6 +27,7 @@ interface CredentialDetailDrawerProps {
   open: boolean
   selection: CredentialDetailSelection | null
   onAuthRequired?: () => void
+  onResetStats?: (id: string) => Promise<void>
   requestLogAccessEnabled?: boolean
   onRequestLogOpen?: (event: UsageEvent) => void
   requestLogLoadingEventId?: string | null
@@ -71,6 +73,7 @@ export function CredentialDetailDrawer({
   open,
   selection,
   onAuthRequired,
+  onResetStats,
   requestLogAccessEnabled = false,
   onRequestLogOpen,
   requestLogLoadingEventId = null,
@@ -95,6 +98,10 @@ export function CredentialDetailDrawer({
   const requestsTabRef = useRef<HTMLButtonElement | null>(null)
   const errorsTabRef = useRef<HTMLButtonElement | null>(null)
   const [activeTab, setActiveTab] = useState<CredentialDetailTab>('overview')
+  const [resetTarget, setResetTarget] = useState<{ id: string; name: string } | null>(null)
+  const [resettingStats, setResettingStats] = useState(false)
+  const [statsResetError, setStatsResetError] = useState('')
+  const statsResetInFlight = useRef(false)
   const [events, setEvents] = useState<UsageEvent[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsLoadingMore, setEventsLoadingMore] = useState(false)
@@ -118,6 +125,21 @@ export function CredentialDetailDrawer({
   const sourceFilter = identity?.identity?.trim() ?? ''
   const authTypeFilter = identity?.auth_type
   const identityId = String(identity?.id ?? '').trim()
+  const confirmStatsReset = async () => {
+    if (!resetTarget || !onResetStats || statsResetInFlight.current) return
+    statsResetInFlight.current = true
+    setResettingStats(true)
+    setStatsResetError('')
+    try {
+      await onResetStats(resetTarget.id)
+      setResetTarget(null)
+    } catch {
+      setStatsResetError(t('usage_stats.credentials_stats_reset_failed'))
+    } finally {
+      statsResetInFlight.current = false
+      setResettingStats(false)
+    }
+  }
   const hasCodexQuotaHistory = selection?.kind === 'auth-file' && identity?.type?.trim().toLowerCase() === 'codex'
   const availableTabs = useMemo<CredentialDetailTab[]>(() => hasCodexQuotaHistory
     ? ['overview', 'quota-history', 'requests', 'errors']
@@ -411,7 +433,7 @@ export function CredentialDetailDrawer({
 
   return (
     <>
-      <Modal open={open} title={title} variant="drawer" width={920} className={styles.drawer} onClose={onClose}>
+      <Modal open={open} title={title} variant="drawer" width={920} className={styles.drawer} onClose={onClose} closeDisabled={resettingStats}>
         <div className={styles.tabBar} data-credential-detail-tab-bar>
           <div className={styles.tabs} role="tablist" aria-label={t('usage_stats.credentials_detail_tabs')}>
             <button
@@ -493,6 +515,20 @@ export function CredentialDetailDrawer({
 
         {activeTab === 'overview' ? (
           <section id={overviewPanelId} role="tabpanel" aria-labelledby={overviewTabId} className={styles.overviewPanel}>
+          <div className={styles.summaryToolbar}>
+            <span>{identity.stats_reset_at
+              ? t('usage_stats.credentials_stats_since', { time: formatCredentialTimestamp(identity.stats_reset_at) ?? identity.stats_reset_at })
+              : t('usage_stats.credentials_stats_lifetime')}</span>
+            {onResetStats ? (
+              <Button type="button" variant="danger" size="sm" appearance="action" className={styles.statsResetButton} disabled={resettingStats} onClick={() => {
+                setStatsResetError('')
+                setResetTarget({ id: identityId, name: row.displayName })
+              }}>
+                <IconRefreshCw size={13} />
+                {t('usage_stats.credentials_stats_reset')}
+              </Button>
+            ) : null}
+          </div>
           <div className={styles.summaryGrid}>
             <DetailMetric
               label={t('usage_stats.total_requests')}
@@ -573,6 +609,20 @@ export function CredentialDetailDrawer({
             )}
           </section>
         )}
+      </Modal>
+      <Modal
+        open={open && resetTarget?.id === identityId}
+        title={t('usage_stats.credentials_stats_reset')}
+        onClose={() => setResetTarget(null)}
+        closeDisabled={resettingStats}
+        width={440}
+        footer={<>
+          <Button type="button" variant="secondary" appearance="action" disabled={resettingStats} onClick={() => setResetTarget(null)}>{t('common.cancel')}</Button>
+          <Button type="button" variant="danger" appearance="action" loading={resettingStats} onClick={() => void confirmStatsReset()}>{t('usage_stats.credentials_stats_reset_confirm')}</Button>
+        </>}
+      >
+        <p>{t('usage_stats.credentials_stats_reset_body', { name: resetTarget?.name ?? '' })}</p>
+        {statsResetError ? <p className={styles.statsResetError} role="alert">{statsResetError}</p> : null}
       </Modal>
       {open ? (
         <RequestEventLogModal

@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCpaApiKeyOptions, fetchCpaApiKeySettings, fetchStatus, fetchUpdateCheck, fetchUsageCredentials, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentity, fetchVersion, isUsageRangeBoundsConflict, logout, revokeAuthSession, updateAuthSessionAlias, updateCpaApiKeyAlias, type UsageEventsExportFormat } from '@/lib/api';
 import type { AnalysisLatencyDiagnostics, AnalysisResponse, AuthManagedSessionItem, CpaApiKeyOption, CpaApiKeySettingsItem, OverviewRealtimeWindow, StatusResponse, UsageCredentialsResponse, UsageCustomRange, UsageEvent, UsageEventRequestLogResponse, UsageSourceFilterOption, UsageTimeRange, VersionResponse } from '@/lib/types';
 import { DEFAULT_USAGE_TAB, getUsageTabPath, handleUsageTabKeyActivation, resolveInitialUsageTab, shouldHandleUsageNavigation, USAGE_TAB_OPTIONS, type UsageTab } from '@/lib/usageNavigation';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/Button';
 import { MainActionButton } from '@/components/ui/MainActionButton';
 import { Modal } from '@/components/ui/Modal';
 import { IconRefreshCw } from '@/components/ui/icons';
+import { updateCredentialDetailStats } from '@/components/usage/credentials/credentialViewModels';
+import { CREDENTIAL_PAGES_REFRESH_INTERVAL_MS } from '@/components/usage/credentials/useCredentialPages';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useThemeStore } from '@/stores';
@@ -48,6 +50,8 @@ import { buildUsageRangeQuery } from '@/utils/usage/rangeQuery';
 import { getDailyAverageCardUsage, isDailyAverageRange } from '@/utils/usage/overview';
 import type { Theme } from '@/types';
 import { BrandLink } from '@/components/BrandLink';
+import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
+import { DashboardToolbar } from '@/components/dashboard/DashboardToolbar';
 import { cpamcEmbedSearch, isCPAMCEmbed } from '@/embed/cpamcEmbed';
 import { RankingPage } from '@/features/ranking/RankingPage';
 import { RankingScopeSwitch } from '@/features/ranking/components/RankingScopeSwitch';
@@ -328,8 +332,9 @@ const normalizeRequestEventResultFilter = (value: unknown): string => (
   value === 'success' || value === 'failed' ? value : ALL_REQUEST_EVENTS_FILTER
 );
 
-const normalizeRequestEventPreferenceFilters = (value: unknown): RequestEventFilterState => {
+const normalizeRequestEventPreferenceFilters = (value: unknown): RequestEventsPreferences['filters'] => {
   const filters = isRecord(value) ? value : {};
+  // 只恢复仍支持的列表筛选；旧 apiKeyId 不再参与查询，也不覆盖顶部选择。
   return {
     model: normalizeRequestEventFilterValue(filters.model),
     source: normalizeRequestEventFilterValue(filters.source),
@@ -922,6 +927,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const [eventsFilterOptionsLoaded, setEventsFilterOptionsLoaded] = useState(false);
   const [credentialDetailSelection, setCredentialDetailSelection] = useState<CredentialDetailSelection | null>(null);
   const [credentialDetailOpen, setCredentialDetailOpen] = useState(false);
+  const credentialDetailRequestRef = useRef<{ id: string; controller: AbortController } | null>(null);
   const [requestLogResponse, setRequestLogResponse] = useState<UsageEventRequestLogResponse | null>(null);
   const [requestLogError, setRequestLogError] = useState('');
   const [requestLogLoadingEventId, setRequestLogLoadingEventId] = useState<string | null>(null);
@@ -1385,10 +1391,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   }, [eventsColumnOrder, eventsModelFilter, eventsResultFilter, eventsSourceFilter, eventsVisibleColumnIds]);
 
   useEffect(() => {
-    setEventsPage(1);
-  }, [selectedApiKeyId, usageRangeQuery]);
-
-  useEffect(() => {
     // Credentials 列表、quota cache 和 task polling 都跟页面可见性绑定，隐藏页不保持刷新或轮询。
     const syncPageVisible = () => setPageVisible(isUsagePageVisible());
     syncPageVisible();
@@ -1600,6 +1602,10 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setEventsPage(1);
   }, []);
 
+  useEffect(() => {
+    // 顶部 Key 和时间范围共同限定列表；切换时立即丢弃旧游标，查询 effect 负责取消旧请求。
+    resetEventsPage();
+  }, [resetEventsPage, selectedApiKeyId, usageRangeQuery]);
 
   const handleEventsModelFilterChange = useCallback((model: string) => {
     setEventsModelFilter(model);
@@ -1702,6 +1708,58 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     setCredentialDetailOpen(true);
   }, []);
 
+  const credentialDetailID = credentialDetailSelection?.row.identity.id;
+  const refreshCredentialDetail = useCallback(async () => {
+    if (!credentialDetailOpen || !credentialDetailID) return;
+    credentialDetailRequestRef.current?.controller.abort();
+    const request = { id: credentialDetailID, controller: new AbortController() };
+    credentialDetailRequestRef.current = request;
+    try {
+      const updated = await fetchUsageIdentity(request.id, request.controller.signal);
+      if (credentialDetailRequestRef.current !== request) return;
+      setCredentialDetailSelection((current) => current?.row.identity.id === request.id ? updateCredentialDetailStats(current, updated) : current);
+    } catch (error) {
+      if (credentialDetailRequestRef.current !== request) return;
+      // 自动刷新失败保留最后一次成功的统计，下次轮询继续尝试。
+      if (error instanceof ApiError && error.status === 401) onAuthRequired?.();
+    } finally {
+      if (credentialDetailRequestRef.current === request) credentialDetailRequestRef.current = null;
+    }
+  }, [credentialDetailID, credentialDetailOpen, onAuthRequired]);
+
+  useEffect(() => {
+    if (!credentialDetailOpen) return;
+    // 详情按稳定 ID 独立刷新，凭证因重置移出当前分页后仍能观察新增用量。
+    void refreshCredentialDetail();
+    const interval = window.setInterval(() => { void refreshCredentialDetail(); }, CREDENTIAL_PAGES_REFRESH_INTERVAL_MS);
+    return () => {
+      window.clearInterval(interval);
+      credentialDetailRequestRef.current?.controller.abort();
+      credentialDetailRequestRef.current = null;
+    };
+  }, [credentialDetailOpen, refreshCredentialDetail]);
+
+  const handleCredentialStatsReset = useCallback(async (id: string) => {
+    const updated = await credentialsData.resetUsageIdentityStats(id);
+    // 重置结果应用前使旧详情请求失效，避免较晚返回的旧基线覆盖新周期。
+    if (credentialDetailRequestRef.current?.id === id) {
+      credentialDetailRequestRef.current.controller.abort();
+      credentialDetailRequestRef.current = null;
+    }
+    setCredentialDetailSelection((current) => current?.row.identity.id === id ? updateCredentialDetailStats(current, updated) : current);
+  }, [credentialsData]);
+
+  const currentCredentialDetailSelection = useMemo<CredentialDetailSelection | null>(() => {
+    if (!credentialDetailSelection) return null;
+    const id = credentialDetailSelection.row.identity.id;
+    if (credentialDetailSelection.kind === 'auth-file') {
+      const row = credentialsData.authFileRows.find((item) => item.identity.id === id);
+      return row ? updateCredentialDetailStats({ kind: 'auth-file', row }, credentialDetailSelection.row.identity) : credentialDetailSelection;
+    }
+    const row = credentialsData.aiProviderRows.find((item) => item.identity.id === id);
+    return row ? updateCredentialDetailStats({ kind: 'ai-provider', row }, credentialDetailSelection.row.identity) : credentialDetailSelection;
+  }, [credentialDetailSelection, credentialsData.authFileRows, credentialsData.aiProviderRows]);
+
   const handleRequestLogDownload = useCallback(async (eventId: string) => {
     if (!requestLogAccessEnabled) return;
     requestLogDownloadGenerationRef.current += 1;
@@ -1730,7 +1788,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       return;
     }
     if (credentialSectionVisibility.enabled) {
-      await Promise.all([refreshCredentials(), loadCredentialStats()]);
+      await Promise.all([refreshCredentials(), loadCredentialStats(), refreshCredentialDetail()]);
       return;
     }
     if (activeTab === 'analysis') {
@@ -1742,7 +1800,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       return;
     }
     await Promise.all([loadUsage(), loadActivity(), loadRealtime()]);
-  }, [activeTab, apiKeyFilterReady, credentialSectionVisibility.enabled, loadActivity, loadAnalysis, loadApiKeySettings, loadAuthSessions, loadCredentialStats, loadEventFilterOptions, loadEvents, loadPricing, loadRealtime, loadUsage, refreshCredentials, refreshRanking]);
+  }, [activeTab, apiKeyFilterReady, credentialSectionVisibility.enabled, loadActivity, loadAnalysis, loadApiKeySettings, loadAuthSessions, loadCredentialStats, loadEventFilterOptions, loadEvents, loadPricing, loadRealtime, loadUsage, refreshCredentialDetail, refreshCredentials, refreshRanking]);
 
   const refreshAutoRefreshTab = useCallback(async () => {
     if (!apiKeyFilterReady && shouldShowRangeControls(activeTab)) return;
@@ -1986,9 +2044,9 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   const dailyAverageCardUsage = getDailyAverageCardUsage(currentOverviewUsage, usage, reserveDailyAverageCard, loading);
 
   return (
-    <div className={styles.pageShell} data-keeper-page="usage">
+    <div className={`${styles.pageShell} ${!isEmbeddedInCPAMC ? styles.standalone : ''}`.trim()} data-keeper-page="usage">
       <div className={styles.pageFrame}>
-        <header className={styles.topBar}>
+        {isEmbeddedInCPAMC ? <header className={styles.topBar}>
           <div className={styles.brandBlock}>
             <BrandLink className={styles.eyebrow} />
           </div>
@@ -2045,7 +2103,14 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
               {loggingOut ? t('common.loading') : t('common.logout')}
             </MainActionButton>
           </div>
-        </header>
+        </header> : <DashboardHeader
+          backToCPA={cpaManagementURL || undefined}
+          onLogout={handleRequestLogout}
+          loggingOut={loggingOut}
+          onCheckUpdates={shouldShowUpdateCheckButton(versionInfo) ? () => void handleUpdateCheck() : undefined}
+          checkingUpdates={updateCheckLoading}
+          updateAvailable={hasNewVersion}
+        />}
 
         <main className={styles.contentColumn}>
           <div className={styles.container}>
@@ -2054,28 +2119,6 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 <div className={styles.loadingOverlayContent}>
                   <LoadingSpinner size={28} className={styles.loadingOverlaySpinner} />
                   <span className={styles.loadingOverlayText}>{t('common.loading')}</span>
-                </div>
-              </div>
-            )}
-
-            {(!isEmbeddedInCPAMC && cpaManagementURL) && (
-              <div className={styles.toolbarMetaRow}>
-                <div className={styles.toolbarMetaRight}>
-                  <a
-                    className={styles.backToCpaLink}
-                    href={cpaManagementURL}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={t('usage_stats.back_to_cpa_aria')}
-                  >
-                    <span>{t('usage_stats.back_to_cpa')}</span>
-                    <span className={styles.backToCpaIcon} aria-hidden="true">
-                      <svg viewBox="0 0 16 16" focusable="false">
-                        <path d="M6 4h6v6" />
-                        <path d="M12 4 5 11" />
-                      </svg>
-                    </span>
-                  </a>
                 </div>
               </div>
             )}
@@ -2103,7 +2146,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
               </div>
             )}
 
-            <div className={styles.toolbarRow}>
+            {isEmbeddedInCPAMC ? <div className={styles.toolbarRow}>
               <div
                 className={`${styles.tabBar} ${!isEmbeddedInCPAMC ? styles.tabBarConnected : ''}`.trim()}
                 role="tablist"
@@ -2197,6 +2240,27 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 </div>
               </div>
             </div>
+
+            : <DashboardToolbar
+              activeId={activeTab}
+              items={tabOptions.map((option) => ({ id: option.value, label: option.label, href: appPath(getUsageTabPath(option.value)) }))}
+              onNavigate={activateUsageTab}
+              filters={showRangeControls ? [
+                <Select
+                  key="api-key"
+                  value={selectedApiKeyId}
+                  options={apiKeySelectOptions}
+                  onChange={setSelectedApiKeyId}
+                  ariaLabel={`${t('usage_stats.api_key_filter')}: ${apiKeySelectOptions.find((option) => option.value === selectedApiKeyId)?.label ?? ''}`}
+                  fullWidth={false}
+                  dropdownMinWidth={180}
+                  renderValue={(option) => <><span data-dashboard-filter-caption>{t('usage_stats.api_key_filter')}</span><span data-dashboard-filter-value>{option?.label}</span></>}
+                />,
+                <TimeRangeControl key="range" value={timeRange} customRange={activeCustomRange} timeZone={rangeTimeZone} maxCustomDayRangeDays={activeTab === 'events' ? REQUEST_EVENTS_CUSTOM_DAY_RANGE_MAX_DAYS : undefined} onChange={handleTimeRangeChange} ariaLabel={t('usage_stats.range_filter')} labelInsideTrigger />,
+              ] : showRankingScopeControl ? [<RankingScopeSwitch key="ranking-scope" value={rankingScope} onChange={handleRankingScopeChange} />] : []}
+              onRefresh={() => void handleManualRefresh().catch(() => {})}
+              refreshing={manualRefreshLoading}
+            />}
 
             {activeTab === 'overview' && error && <div className={styles.errorBox}>{error === 'AUTH_REQUIRED' ? t('auth.session_expired') : error}</div>}
             {activeTab === 'settings' && pricingError && <div className={styles.errorBox}>{pricingError === 'AUTH_REQUIRED' ? t('auth.session_expired') : pricingError}</div>}
@@ -2436,7 +2500,8 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       </div>
       <CredentialDetailDrawer
         open={credentialDetailOpen}
-        selection={credentialDetailSelection}
+        selection={currentCredentialDetailSelection}
+        onResetStats={handleCredentialStatsReset}
         onAuthRequired={onAuthRequired}
         requestLogAccessEnabled={requestLogAccessEnabled}
         onRequestLogOpen={handleRequestLogOpen}

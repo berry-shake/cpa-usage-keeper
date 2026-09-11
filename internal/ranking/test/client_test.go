@@ -135,6 +135,45 @@ func TestCenterClientReportsAllMetricsAndMapsDeletedTombstone(t *testing.T) {
 	}
 }
 
+func TestCenterClientPreservesExplicitBanFeedback(t *testing.T) {
+	identity, err := ranking.GenerateIdentity(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials := ranking.Credentials{PublicKey: identity.PublicKey, PrivateKey: identity.PrivateKey, ParticipantID: "p_example"}
+	now := time.Now().UTC()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if request.Method == http.MethodGet {
+			_, _ = io.WriteString(w, `{"participant_id":"p_example","status":"deleted","banned":true}`)
+			return
+		}
+		if request.Method == http.MethodDelete {
+			_ = json.NewEncoder(w).Encode(map[string]any{"participant_id": "p_example", "sequence": 1, "deleted_at": now, "banned": true})
+			return
+		}
+		w.WriteHeader(http.StatusGone)
+		_, _ = io.WriteString(w, `{"error":"participant_deleted","banned":true}`)
+	}))
+	defer server.Close()
+	client, err := ranking.NewClientWithBaseURL(server.URL, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := client.Self(context.Background(), credentials, now)
+	if err != nil || self.Status != "deleted" || !self.Banned {
+		t.Fatalf("Self status=%s banned=%t error=%v", self.Status, self.Banned, err)
+	}
+	_, err = client.SubmitReport(context.Background(), ranking.ReportCommand{Credentials: credentials, Sequence: 1, IdempotencyKey: "ban_report", SnapshotAt: now, PeriodTimezone: "Asia/Shanghai", DayKey: "2026-09-11"})
+	if !errors.Is(err, ranking.ErrParticipantBanned) || !errors.Is(err, ranking.ErrParticipantDeleted) {
+		t.Fatalf("report did not preserve ban and legacy deletion: %v", err)
+	}
+	receipt, err := client.Delete(context.Background(), ranking.DeleteCommand{Credentials: credentials, Sequence: 1, IdempotencyKey: "ban_exit", RequestedAt: now})
+	if err != nil || !receipt.Banned {
+		t.Fatalf("Delete banned=%t error=%v", receipt.Banned, err)
+	}
+}
+
 func TestCenterClientDoesNotMapServerFailureToDeletedTombstone(t *testing.T) {
 	identity, err := ranking.GenerateIdentity(rand.Reader)
 	if err != nil {

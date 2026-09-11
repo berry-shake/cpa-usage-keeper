@@ -1,4 +1,4 @@
-import { type AnalysisLatencyDiagnostics, type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CodexQuotaHistoryResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type ErrorEventsResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingRulesResponse, type PricingSyncPreviewResponse, type PricingSyncResponse, type QuotaAutoRefreshSettings, type ReplacePricingRulesRequest, type StatusResponse, type UpdateCheckResponse, type UsageActivityRequest, type UsageActivityResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
+import { type AnalysisLatencyDiagnostics, type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CodexQuotaHistoryResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type ErrorEventsResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingRulesResponse, type PricingSyncPreviewResponse, type PricingSyncResponse, type PricingSyncSource, type QuotaAutoRefreshSettings, type ReplacePricingRulesRequest, type StatusResponse, type UpdateCheckResponse, type UsageActivityRequest, type UsageActivityResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
 import { isCPAMCEmbed } from '@/embed/cpamcEmbed'
 import { resolveUsageRequestRange } from '@/utils/usage/rangeQuery'
 
@@ -611,6 +611,14 @@ export async function fetchUsageCredentials(request: UsageRangeRequest, signal?:
   return response.json()
 }
 
+export async function fetchUsageIdentity(id: string, signal?: AbortSignal): Promise<UsageIdentity> {
+  const response = await apiFetch(apiPath(`/usage/identities/${encodeURIComponent(id)}`), { signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage identity: ${response.status}`)
+  }
+  return response.json()
+}
+
 export async function fetchUsageIdentitiesPage(signal?: AbortSignal, options?: FetchUsageIdentitiesPageOptions): Promise<UsageIdentitiesPageResponse> {
   // Credentials 两个分区共用分页接口，通过 auth_type 控制服务端过滤。
   const params = new URLSearchParams()
@@ -656,6 +664,14 @@ export async function updateUsageIdentityAlias(id: string, alias: string | null)
   return response.json()
 }
 
+export async function resetUsageIdentityStats(id: string): Promise<UsageIdentity> {
+  const response = await apiFetch(apiPath(`/usage/identities/${encodeURIComponent(id)}/stats/reset`), { method: 'POST' })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to reset usage identity stats: ${response.status}`)
+  }
+  return response.json()
+}
+
 export async function fetchUsageQuotaCache(authIndexes: string[], signal?: AbortSignal): Promise<UsageQuotaCacheResponse> {
   // cache 只读后端已有结果，不携带刷新 limit，避免把缓存读取误当队列提交。
   const response = await apiFetch(apiPath('/quota/cache'), {
@@ -689,6 +705,15 @@ export async function fetchCodexQuotaHistory(
     await parseApiError(response, `Failed to load Codex quota history: ${response.status}`)
   }
   return response.json()
+}
+
+export async function deleteCodexQuotaHistoryCycle(authIndex: string, cycleId: number, signal?: AbortSignal): Promise<void> {
+  const response = await apiFetch(apiPath(`/quota/history/${encodeURIComponent(authIndex)}/cycles/${cycleId}`), {
+    method: 'DELETE', signal,
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to delete Codex quota cycle: ${response.status}`)
+  }
 }
 
 export async function refreshUsageQuotas(authIndexes: string[], signal?: AbortSignal): Promise<UsageQuotaRefreshResponse> {
@@ -954,8 +979,8 @@ export async function replacePricingRules(
   return response.json()
 }
 
-export async function fetchPricingSyncPreview(signal?: AbortSignal): Promise<PricingSyncPreviewResponse> {
-  const response = await apiFetch(apiPath('/pricing/sync/preview'), { signal, cache: 'no-store' })
+export async function fetchPricingSyncPreview(source: PricingSyncSource = 'models-dev', signal?: AbortSignal): Promise<PricingSyncPreviewResponse> {
+  const response = await apiFetch(apiPath('/pricing/sync/preview') + '?source=' + encodeURIComponent(source), { signal, cache: 'no-store' })
   if (!response.ok) {
     await parseApiError(response, `Failed to preview pricing sync: ${response.status}`)
   }

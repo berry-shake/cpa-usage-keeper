@@ -35,8 +35,8 @@ const analysis: AnalysisResponse = {
   granularity: 'hourly',
   timezone: 'UTC',
   token_usage: [],
-  api_key_composition: [compositionItem],
-  model_composition: [compositionItem],
+  api_key_composition: [{ ...compositionItem, label: 'API Key usage' }],
+  model_composition: [{ ...compositionItem, label: 'Model usage' }],
   auth_files_composition: [compositionItem],
   ai_provider_composition: [compositionItem],
   cost_breakdown: {
@@ -63,20 +63,25 @@ describe('AnalysisPanel composition dimensions', () => {
     expect(markup).toContain('usage_stats.analysis_composition_ai_provider_tab');
   });
 
-  it('renders only explicitly selected viewer dimensions', () => {
+  it('shows the model dimension as selected immediately for the key viewer', () => {
     const markup = renderToStaticMarkup(
       <AnalysisPanel
         analysis={analysis}
         loading={false}
         isDark={false}
         isMobile={false}
-        compositionDimensions={['api_key', 'model']}
+        compositionDimensions={['model']}
       />,
     );
 
-    expect(markup).toContain('usage_stats.analysis_composition_api_key_tab');
+    expect(markup).not.toContain('usage_stats.analysis_composition_api_key_tab');
     expect(markup).toContain('usage_stats.analysis_composition_model_tab');
     expect(markup).not.toContain('usage_stats.analysis_composition_auth_files_tab');
     expect(markup).not.toContain('usage_stats.analysis_composition_ai_provider_tab');
+    expect(markup.match(/role="tab"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('Model usage');
+    expect(markup).not.toContain('API Key usage');
+    expect(markup).toContain('usage_stats.analysis_composition_single_dimension_subtitle');
   });
 });

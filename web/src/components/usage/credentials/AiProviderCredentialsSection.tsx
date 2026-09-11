@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import styles from './CredentialSections.module.scss'
-import type { AiProviderCredentialRow } from './credentialViewModels'
+import { formatCredentialTimestamp, type AiProviderCredentialRow } from './credentialViewModels'
 import type { UsageIdentityPageSort } from '@/lib/api'
 import { CredentialAliasEditor, isCredentialAliasEditorDisabled } from './CredentialAliasEditor'
 import { CredentialHealthPanel } from './CredentialHealthPanel'
@@ -95,7 +95,7 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
             onClick={() => onOpenDetails(row)}
           >
               <span className={styles.credentialDetailNameText}>{row.displayName}</span>
-              <span className={styles.credentialDetailNameArrow} aria-hidden="true">›</span>
+              <span className={styles.credentialDetailNameArrow} aria-hidden="true">‹</span>
             </button>
           ) : row.displayName}
           subtitle={row.priorityLabel ? (
@@ -104,6 +104,7 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
             </span>
           ) : undefined}
           badges={null}
+          metricsTitle={row.identity.stats_reset_at ? t('usage_stats.credentials_stats_since', { time: formatCredentialTimestamp(row.identity.stats_reset_at) ?? row.identity.stats_reset_at }) : undefined}
           metrics={(
             <>
               <MetricPill value={<RequestMetric total={row.totalRequests} success={row.successCount} failure={row.failureCount} />} />

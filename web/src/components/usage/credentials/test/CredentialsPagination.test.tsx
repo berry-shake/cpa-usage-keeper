@@ -56,7 +56,6 @@ describe('CredentialsPagination', () => {
     const sortTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="Order by: Priority"]')
     expect(sortTrigger?.textContent).toContain('Priority')
     act(() => sortTrigger?.click())
-    expect(document.querySelector('[role="listbox"]')?.className).toContain('credentialPaginationDropdown')
     const totalRequestsOption = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]'))
       .find((option) => option.textContent?.includes('Total Requests'))
     act(() => totalRequestsOption?.click())

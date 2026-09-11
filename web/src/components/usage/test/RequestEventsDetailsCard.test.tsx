@@ -8,7 +8,7 @@ import {
   shouldLoadMoreRequestEvents,
   toggleRequestEventColumnId,
   type RequestEventColumnId,
-} from './RequestEventsDetailsCard';
+} from '../RequestEventsDetailsCard';
 import type { UsageEvent } from '@/lib/types';
 
 const events: UsageEvent[] = [
@@ -248,20 +248,20 @@ describe('RequestEventsDetailsCard pagination', () => {
     });
 
     expect(countOccurrences(html, 'Team Prefix')).toBeGreaterThanOrEqual(1);
-    expect(html).toContain('aria-label="Source"><span class="_triggerText_c80422 ">Team Prefix</span>');
+    expect(html).toMatch(/<input[^>]*role="combobox"[^>]*aria-label="Source"[^>]*value="Team Prefix"/);
   });
 
   it('uses backend model and source options instead of current page grouping', () => {
     const html = renderCard({ modelFilter: 'claude-opus', sourceFilter: 'source-b' });
 
     expect(html).toMatch(/<input[^>]*role="combobox"[^>]*aria-label="Model"[^>]*value="claude-opus"/);
-    expect(html).toContain('aria-label="Source"><span class="_triggerText_c80422 ">Provider B</span>');
+    expect(html).toMatch(/<input[^>]*role="combobox"[^>]*aria-label="Source"[^>]*value="Provider B"/);
   });
 
-  it('renders a Result filter and no Credential filter control', () => {
+  it('renders a Status filter and no Credential filter control', () => {
     const html = renderCard({ resultFilter: 'failed' });
 
-    expect(html).toContain('aria-label="Result"');
+    expect(html).toContain('aria-label="Status"');
     expect(html).toContain('Failure');
     expect(html).not.toContain('aria-label="Credential"');
   });
@@ -396,9 +396,9 @@ describe('RequestEventsDetailsCard pagination', () => {
 
     expect(html).toContain('Clear Filters');
     expect(countOccurrences(html, '>Export<')).toBe(1);
-    expect(html.indexOf('aria-label="Result"')).toBeLessThan(html.indexOf('Clear Filters'));
+    expect(html.indexOf('aria-label="Status"')).toBeLessThan(html.indexOf('Clear Filters'));
     expect(html.indexOf('aria-label="Columns"')).toBeLessThan(html.indexOf('>Export<'));
-    expect(html.indexOf('>Export<')).toBeLessThan(html.indexOf('aria-label="Result"'));
+    expect(html.indexOf('>Export<')).toBeLessThan(html.indexOf('aria-label="Status"'));
     expect(html).toContain('aria-haspopup="menu"');
     expect(countOccurrences(html, 'class="main-action-button-shell')).toBe(2);
     expect(countOccurrences(html, 'btn btn-primary btn-action main-action-button')).toBe(2);
@@ -463,7 +463,7 @@ describe('RequestEventsDetailsCard pagination', () => {
 
     expect(html).toContain('data-request-events-column-settings-trigger="true"');
     expect(html.indexOf('data-request-events-column-settings-trigger="true"')).toBeLessThan(html.indexOf('>Export<'));
-    expect(html.indexOf('data-request-events-column-settings-trigger="true"')).toBeLessThan(html.indexOf('aria-label="Result"'));
+    expect(html.indexOf('data-request-events-column-settings-trigger="true"')).toBeLessThan(html.indexOf('aria-label="Status"'));
     expect(html).not.toContain('_requestEventsColumnTrigger_');
   });
 

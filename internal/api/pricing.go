@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
+	"cpa-usage-keeper/internal/pricingmetadata"
 	"cpa-usage-keeper/internal/service"
 	servicedto "cpa-usage-keeper/internal/service/dto"
 	"github.com/gin-gonic/gin"
@@ -142,18 +144,25 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 	})
 
 	router.GET("/pricing/sync/preview", func(c *gin.Context) {
+		source, err := pricingmetadata.SourceByID(c.Query("source"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		if pricingProvider == nil {
 			c.JSON(http.StatusOK, servicedto.PricingSyncPreview{
-				Source:          "Models.dev",
+				SourceID:        source.ID,
+				Source:          source.Name,
+				SourceURL:       source.URL,
 				Matches:         []servicedto.PricingSyncMatch{},
 				UnmatchedModels: []string{},
 			})
 			return
 		}
 
-		preview, err := pricingProvider.PreviewPricingSync(c.Request.Context())
+		preview, err := pricingProvider.PreviewPricingSync(c.Request.Context(), source.ID)
 		if err != nil {
-			writePricingSyncPreviewError(c, err)
+			writePricingSyncPreviewError(c, err, source.Name)
 			return
 		}
 		if preview.Matches == nil {
@@ -201,7 +210,7 @@ func registerPricingRoutes(router gin.IRoutes, pricingProvider service.PricingPr
 	})
 }
 
-func writePricingSyncPreviewError(c *gin.Context, err error) {
+func writePricingSyncPreviewError(c *gin.Context, err error, sourceName string) {
 	var networkError net.Error
 	if !errors.Is(err, context.DeadlineExceeded) &&
 		(!errors.As(err, &networkError) || !networkError.Timeout()) {
@@ -210,7 +219,7 @@ func writePricingSyncPreviewError(c *gin.Context, err error) {
 	}
 
 	logrus.WithError(err).Error("preview pricing sync failed")
-	c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Models.dev request timed out"})
+	c.JSON(http.StatusGatewayTimeout, gin.H{"error": fmt.Sprintf("%s request timed out", sourceName)})
 }
 
 func updatePricingBatch(c *gin.Context, pricingProvider service.PricingProvider) {

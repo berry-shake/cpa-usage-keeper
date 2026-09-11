@@ -33,6 +33,7 @@ type StatusProvider interface {
 
 type QuotaProvider interface {
 	GetCodexQuotaHistory(context.Context, quota.CodexQuotaHistoryRequest) (quota.CodexQuotaHistoryResponse, error)
+	DeleteCodexQuotaHistoryCycle(context.Context, string, int64) error
 	GetCachedQuota(context.Context, quota.CacheRequest) (quota.CacheResponse, error)
 	Refresh(context.Context, quota.RefreshRequest) (quota.RefreshResponse, error)
 	GetRefreshTaskByAuthIndex(context.Context, string) (quota.RefreshTaskResponse, error)
