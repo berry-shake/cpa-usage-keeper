@@ -214,7 +214,27 @@ export interface RealtimeCacheLevelPoint {
 	input_tokens: number
 }
 
+export interface RealtimeWindowSummary {
+  requests: number
+  failures: number
+  token_requests: number
+  cached_requests: number
+  total_tokens: number
+  input_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  cost: number | null
+}
+
+export interface RealtimeInsights {
+  summary: RealtimeWindowSummary
+  outcomes: Array<{ bucket: string; requests: number; failures: number }>
+}
+
 export interface OverviewRealtimeBlock {
+  insights?: RealtimeInsights
   window: OverviewRealtimeWindow
   timezone?: string
   bucket_seconds: number
@@ -228,7 +248,29 @@ export interface OverviewRealtimeBlock {
   cache_level: RealtimeCacheLevelPoint[]
 }
 
+export interface UsageComparisonItem {
+  key: string
+  label: string
+  requests: number
+  failures: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  reasoning_tokens: number
+  total_tokens: number
+  cost: number | null
+}
+
+export interface UsageOverviewComparisons {
+  models: UsageComparisonItem[]
+  api_keys?: UsageComparisonItem[]
+  auth_files?: UsageComparisonItem[]
+  ai_providers?: UsageComparisonItem[]
+}
+
 export interface UsageOverviewResponse {
+  comparisons?: UsageOverviewComparisons
   usage: UsageOverviewUsageSnapshot
   summary?: UsageOverviewSummary
   series?: UsageOverviewSeries
@@ -251,6 +293,7 @@ export interface UsageEvent {
   api_key?: string
   model: string
   model_alias?: string
+  response_model?: string
   reasoning_effort?: string
   service_tier?: string
   response_service_tier?: string
@@ -533,6 +576,7 @@ export interface UsageQuotaResetResponse {
   authIndex: string
   code?: string
   windowsReset?: number
+  recoveryFailed?: boolean
 }
 
 export interface UsageQuotaResetCredit {

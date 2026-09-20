@@ -11,11 +11,14 @@ type UsageEvent struct {
 	Endpoint            string    `gorm:"column:endpoint"`
 	AuthType            string    `gorm:"column:auth_type;index:idx_usage_events_auth_type_auth_index_id,priority:1"`
 	RequestID           string    `gorm:"column:request_id"`
+	SessionID           string    `gorm:"column:session_id"`
+	ParentSessionID     string    `gorm:"column:parent_session_id"`
 	ClientIP            *string   `gorm:"column:client_ip"`
 	XForwardedFor       *string   `gorm:"column:x_forwarded_for"`
 	UserAgent           *string   `gorm:"column:user_agent"`
 	Model               string    `gorm:"index:idx_usage_events_model"`
 	ModelAlias          *string   `gorm:"column:model_alias"`
+	ResponseModel       string    `gorm:"column:response_model;not null;default:''"`
 	ReasoningEffort     string    `gorm:"column:reasoning_effort;not null;default:''"`
 	ServiceTier         string    `gorm:"column:service_tier;not null;default:''"`
 	ResponseServiceTier string    `gorm:"column:response_service_tier;not null;default:''"`

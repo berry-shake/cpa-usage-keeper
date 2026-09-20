@@ -163,9 +163,10 @@ describe('AuthFileCredentialsSection title', () => {
     expect(html).toContain('1.23K')
     expect(html).toContain('97.24%')
     expect(html).toContain('data-provider-brand-icon="codex"')
-    expect(html.indexOf('data-provider-brand-icon="codex"')).toBeLessThan(html.indexOf('Very Long Auth File Name For Wrapping'))
-    expect(html).toContain('role="img"')
-    expect(html).toContain('aria-label="codex"')
+    expect(html.indexOf('data-provider-brand-icon="codex"')).toBeLessThan(html.lastIndexOf('Very Long Auth File Name For Wrapping'))
+    // 认证文件与 AI 供应商共用同一个开关组件，语义必须一致。
+    expect(html).toContain('data-credential-status-toggle="true"')
+    expect(html).toMatch(/aria-label="[^"]+Auth[^"]*"/)
     expect(html).not.toContain('>codex</span>')
   })
 

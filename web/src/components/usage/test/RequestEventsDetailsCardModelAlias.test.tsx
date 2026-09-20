@@ -76,7 +76,7 @@ describe('RequestEventsDetailsCard model stack', () => {
     expect(cells[modelHeaderIndex]).toBe('claude-sonnetsonnet-business');
   });
 
-  it('renders a dash when model alias is missing', () => {
+  it('hides the model alias when it is missing', () => {
     const html = renderCard({
       events: [{ ...events[0], model_alias: '' }],
     });
@@ -85,10 +85,10 @@ describe('RequestEventsDetailsCard model stack', () => {
     const modelHeaderIndex = headers.indexOf('Model');
 
     expect(modelHeaderIndex).toBeGreaterThanOrEqual(0);
-    expect(cells[modelHeaderIndex]).toBe('claude-sonnet-');
+    expect(cells[modelHeaderIndex]).toBe('claude-sonnet');
   });
 
-  it('renders a dash when model alias matches the model name', () => {
+  it('hides the model alias when it matches the model name', () => {
     const html = renderCard({
       events: [{ ...events[0], model_alias: 'claude-sonnet' }],
     });
@@ -97,7 +97,46 @@ describe('RequestEventsDetailsCard model stack', () => {
     const modelHeaderIndex = headers.indexOf('Model');
 
     expect(modelHeaderIndex).toBeGreaterThanOrEqual(0);
-    expect(cells[modelHeaderIndex]).toBe('claude-sonnet-');
+    expect(cells[modelHeaderIndex]).toBe('claude-sonnet');
+  });
+
+  it('places a distinct response model between model and alias', () => {
+    const html = renderCard({
+      events: [{ ...events[0], response_model: 'claude-sonnet-4-6' }],
+    });
+    const headers = extractTableHeaders(html);
+    const cells = extractFirstTableRowCells(html);
+    const modelHeaderIndex = headers.indexOf('Model');
+
+    expect(cells[modelHeaderIndex]).toBe('claude-sonnet↳ Upstream response: claude-sonnet-4-6sonnet-business');
+  });
+
+  it('hides a response model that matches the requested model ignoring case', () => {
+    const html = renderCard({
+      events: [{ ...events[0], response_model: ' CLAUDE-SONNET ' }],
+    });
+    const headers = extractTableHeaders(html);
+    const cells = extractFirstTableRowCells(html);
+    const modelHeaderIndex = headers.indexOf('Model');
+
+    expect(cells[modelHeaderIndex]).toBe('claude-sonnetsonnet-business');
+  });
+
+  it('keeps matching response and alias values in the whole-field tooltip', () => {
+    const html = renderCard({
+      events: [{
+        ...events[0],
+        response_model: 'claude-sonnet',
+        model_alias: 'CLAUDE-SONNET',
+      }],
+    });
+    const headers = extractTableHeaders(html);
+    const cells = extractFirstTableRowCells(html);
+    const modelHeaderIndex = headers.indexOf('Model');
+
+    expect(cells[modelHeaderIndex]).toBe('claude-sonnet');
+    expect(html).toContain('aria-label="Model: claude-sonnet; Upstream response: claude-sonnet; Model Alias: CLAUDE-SONNET"');
+    expect(html).not.toContain('title="Upstream response:');
   });
 });
 

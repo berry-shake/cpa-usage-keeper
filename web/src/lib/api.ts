@@ -1,4 +1,4 @@
-import { type AnalysisLatencyDiagnostics, type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CodexQuotaHistoryResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type ErrorEventsResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingRulesResponse, type PricingSyncPreviewResponse, type PricingSyncResponse, type PricingSyncSource, type QuotaAutoRefreshSettings, type ReplacePricingRulesRequest, type StatusResponse, type UpdateCheckResponse, type UsageActivityRequest, type UsageActivityResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
+import { type AnalysisLatencyDiagnostics, type AnalysisResponse, type AuthFilesManagementResponse, type AuthManagedSessionsResponse, type AuthSessionResponse, type CodexQuotaHistoryResponse, type CpaApiKeyDisplayItem, type CpaApiKeyOptionsResponse, type CpaApiKeySettingsResponse, type CpaApiKeysResponse, type ErrorEventsResponse, type OverviewRealtimeBlock, type OverviewRealtimeWindow, type PricingEntry, type PricingResponse, type PricingRulesResponse, type PricingSyncPreviewResponse, type PricingSyncResponse, type PricingSyncSource, type QuotaAutoRefreshSettings, type ReplacePricingRulesRequest, type StatusResponse, type UpdateCheckResponse, type UsageActivityRequest, type UsageActivityResponse, type UsageCredentialsResponse, type UsageEventModelFilterOptionsResponse, type UsageEventRequestLogResponse, type UsageEventSourceFilterOptionsResponse, type UsageRangeRequest, type UsedModelsResponse, type UsageIdentitiesPageResponse, type UsageIdentitiesResponse, type UsageEventsResponse, type UsageIdentity, type UsageIdentityAuthType, type UsageOverviewComparisons, type UsageOverviewResponse, type UsageQuotaCacheResponse, type UsageQuotaInspectionStatusResponse, type UsageQuotaRefreshResponse, type UsageQuotaRefreshTaskResponse, type UsageQuotaResetCreditsResponse, type UsageQuotaResetResponse, type VersionResponse } from './types'
 import { isCPAMCEmbed } from '@/embed/cpamcEmbed'
 import { resolveUsageRequestRange } from '@/utils/usage/rangeQuery'
 
@@ -57,6 +57,7 @@ function normalizeOverviewRealtimeBlock(
   const resolvedWindow = block.window ?? fallbackWindow ?? '15m'
   return {
     window: resolvedWindow,
+    insights: block.insights,
     timezone: block.timezone,
     bucket_seconds: block.bucket_seconds ?? realtimeBucketSecondsForWindow(resolvedWindow),
     window_start: block.window_start,
@@ -398,6 +399,19 @@ export async function fetchUsageOverview(request: UsageRangeRequest, signal?: Ab
   const response = await apiFetch(`${apiPath('/usage/overview')}${query ? `?${query}` : ''}`, { signal })
   if (!response.ok) {
     await parseApiError(response, `Failed to load usage overview: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchUsageOverviewComparisons(request: UsageRangeRequest, options: { signal?: AbortSignal; apiKeyId?: string; keyViewer?: boolean } = {}): Promise<UsageOverviewComparisons> {
+  const params = buildUsageRangeParams(request)
+  const selectedAPIKeyId = options.apiKeyId?.trim()
+  if (selectedAPIKeyId) params.set('api_key_id', selectedAPIKeyId)
+  const path = options.keyViewer ? '/key-overview/comparisons' : '/usage/overview/comparisons'
+  const query = params.toString()
+  const response = await apiFetch(`${apiPath(path)}${query ? `?${query}` : ''}`, { signal: options.signal })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to load usage overview comparisons: ${response.status}`)
   }
   return response.json()
 }
@@ -793,6 +807,33 @@ export async function setAuthFilesDisabled(names: string[], disabled: boolean): 
   })
   if (!response.ok) {
     await parseApiError(response, `Failed to update auth file status: ${response.status}`)
+  }
+  return response.json()
+}
+
+export type CredentialStatusKind = 'auth-file' | 'ai-provider'
+
+export interface CredentialStatusResponse {
+  auth_index: string
+  disabled: boolean
+}
+
+// 认证文件与 AI 供应商共用前端调用形状，由后端按 auth_index 翻译成各自的上游写操作。
+const credentialStatusPathByKind: Record<CredentialStatusKind, string> = {
+  'auth-file': '/auth-files',
+  'ai-provider': '/ai-providers',
+}
+
+export async function setCredentialDisabled(kind: CredentialStatusKind, authIndex: string, disabled: boolean): Promise<CredentialStatusResponse> {
+  const response = await apiFetch(apiPath(`${credentialStatusPathByKind[kind]}/${encodeURIComponent(authIndex)}/status`), {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ disabled }),
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update credential status: ${response.status}`)
   }
   return response.json()
 }

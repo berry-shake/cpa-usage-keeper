@@ -44,6 +44,43 @@ describe('DashboardHeader actions', () => {
     expect(more.getAttribute('aria-expanded')).toBe('false'); expect(document.activeElement).toBe(more);
   });
 
+  it('keeps Check Updates clickable when Safari blurs with no related target', async () => {
+    const logout = vi.fn(); const check = vi.fn();
+    await act(async () => root.render(<DashboardHeader onLogout={logout} onCheckUpdates={check} />));
+    const more = container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
+    await act(async () => more.click());
+    const checkButton = container.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
+    await act(async () => checkButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' })));
+    await act(async () => (document.activeElement as HTMLElement).blur());
+    expect(checkButton.isConnected).toBe(true);
+    await act(async () => checkButton.click());
+    expect(check).toHaveBeenCalledOnce();
+  });
+
+  it('keeps Sign out clickable when Safari blurs with no related target', async () => {
+    const logout = vi.fn();
+    await act(async () => root.render(<DashboardHeader onLogout={logout} />));
+    const more = container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
+    await act(async () => more.click());
+    const logoutButton = container.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
+    await act(async () => logoutButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' })));
+    await act(async () => (document.activeElement as HTMLElement).blur());
+    expect(logoutButton.isConnected).toBe(true);
+    await act(async () => logoutButton.click());
+    expect(logout).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('closes the menu for an actual outside pointerdown', async () => {
+    await act(async () => root.render(<DashboardHeader onLogout={vi.fn()} />));
+    const more = container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
+    await act(async () => more.click());
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    await act(async () => outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' })));
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+  });
+
   it('returns focus to More after cancelling the logout confirmation', async () => {
     vi.useFakeTimers();
     function LogoutConfirmation() {

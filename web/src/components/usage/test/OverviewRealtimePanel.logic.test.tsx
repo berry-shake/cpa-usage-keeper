@@ -31,7 +31,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import { OverviewRealtimePanel } from './OverviewRealtimePanel';
+import { OverviewRealtimePanel } from '../OverviewRealtimePanel';
 
 const realtime: OverviewRealtimeBlock = {
   window: '15m',
@@ -132,8 +132,8 @@ describe('OverviewRealtimePanel', () => {
     expect(html).toContain('usage_stats.overview_realtime_dimension_api_keys');
     expect(html).toContain('usage_stats.overview_realtime_dimension_auth_files');
     expect(html).toContain('gpt-5');
-    expect(chartCapture.lineCalls).toHaveLength(2);
-    expect(chartCapture.chartCalls).toHaveLength(2);
+    expect(chartCapture.lineCalls).toHaveLength(1);
+    expect(chartCapture.chartCalls).toHaveLength(3);
     expect(chartCapture.lineCalls[0].data.datasets).toMatchObject([
       {
         label: 'usage_stats.overview_realtime_tpm',
@@ -207,7 +207,7 @@ describe('OverviewRealtimePanel', () => {
       'usage_stats.overview_realtime_latency_average',
       'usage_stats.overview_realtime_latency_distribution',
     ]);
-    expect(chartCapture.lineCalls[1].data.datasets[0].data).toEqual([25, 50]);
+    expect(chartCapture.chartCalls[2].data.datasets[3].data).toEqual([25, 50]);
   });
 
   it('aligns throughput series by bucket when one response series has a missing point', () => {
@@ -231,6 +231,27 @@ describe('OverviewRealtimePanel', () => {
     expect(chartCapture.lineCalls[0].data.labels).toEqual(['11:55', '11:55:30']);
     expect(chartCapture.lineCalls[0].data.datasets[0].data).toEqual([120, 240]);
     expect(chartCapture.lineCalls[0].data.datasets[1].data).toEqual([null, 4]);
+  });
+
+  it('renders a continuous cache rate line across empty token buckets', () => {
+    renderToStaticMarkup(
+      <OverviewRealtimePanel
+        realtime={{
+          ...realtime,
+          cache_level: [
+            { bucket: '2026-06-09T11:55:00Z', cache_read_rate: 40, cache_read_tokens: 20, cache_creation_tokens: 5, input_tokens: 50 },
+            { bucket: '2026-06-09T11:55:30Z', cache_read_rate: null, cache_read_tokens: 0, cache_creation_tokens: 0, input_tokens: 0 },
+          ],
+        }}
+        loading={false}
+        window="15m"
+        onWindowChange={() => {}}
+        isDark={false}
+        isMobile={false}
+      />
+    );
+
+    expect(chartCapture.chartCalls[2].data.datasets[3].data).toEqual([40, 0]);
   });
 
   it('shows metric-specific empty states while keeping valid zero lines visible', () => {
@@ -275,8 +296,8 @@ describe('OverviewRealtimePanel', () => {
     expect(html).toContain('usage_stats.overview_realtime_latency_empty');
     expect(html).toContain('usage_stats.overview_realtime_cache_empty');
     expect(html).toContain('usage_stats.overview_realtime_usage_empty');
-    expect(chartCapture.lineCalls).toHaveLength(2);
-    expect(chartCapture.chartCalls).toHaveLength(2);
+    expect(chartCapture.lineCalls).toHaveLength(1);
+    expect(chartCapture.chartCalls).toHaveLength(3);
   });
 
   it('labels realtime metric chips as rolling values with localized tooltip text', () => {
@@ -329,7 +350,7 @@ describe('OverviewRealtimePanel', () => {
     expect(html).toContain('usage_stats.overview_realtime_ttft_distribution');
     expect(html).toContain('usage_stats.overview_realtime_latency_distribution');
     expect(html).not.toContain('usage_stats.overview_realtime_response_level</h3>');
-    expect(chartCapture.chartCalls).toHaveLength(2);
+    expect(chartCapture.chartCalls).toHaveLength(3);
     expect(chartCapture.chartCalls[0].data.datasets.map((dataset) => dataset.label)).toEqual([
       'usage_stats.overview_realtime_ttft_average',
       'usage_stats.overview_realtime_ttft_distribution',
@@ -524,8 +545,8 @@ describe('OverviewRealtimePanel', () => {
     );
 
     expect(html).toContain('Realtime failed');
-    expect(chartCapture.lineCalls).toHaveLength(2);
-    expect(chartCapture.chartCalls).toHaveLength(2);
+    expect(chartCapture.lineCalls).toHaveLength(1);
+    expect(chartCapture.chartCalls).toHaveLength(3);
   });
 
   it('shows a loading state before realtime data has loaded', () => {
@@ -718,7 +739,7 @@ describe('OverviewRealtimePanel', () => {
     );
 
     expect(chartCapture.lineCalls[0].options.spanGaps).toBeUndefined();
-    expect(chartCapture.lineCalls[1].options.spanGaps).toBeUndefined();
+    expect(chartCapture.chartCalls[2].options.spanGaps).toBeUndefined();
     expect(chartCapture.chartCalls[0].options.spanGaps).toBeUndefined();
     expect(chartCapture.chartCalls[1].options.spanGaps).toBeUndefined();
   });
@@ -736,7 +757,7 @@ describe('OverviewRealtimePanel', () => {
     );
 
     const responseYAxis = chartCapture.chartCalls[0].options.scales?.y as { type?: string; beginAtZero?: boolean; min?: number; ticks?: { maxTicksLimit?: number } };
-    const cacheYAxis = chartCapture.lineCalls[1].options.scales?.y as { ticks?: { maxTicksLimit?: number } };
+    const cacheYAxis = chartCapture.chartCalls[2].options.scales?.y as { ticks?: { maxTicksLimit?: number } };
 
     expect(responseYAxis.type).toBe('logarithmic');
     expect(responseYAxis.beginAtZero).toBeUndefined();

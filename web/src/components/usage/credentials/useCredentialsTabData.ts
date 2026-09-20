@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   buildAiProviderCredentialRows,
   buildAuthFileCredentialRows,
@@ -9,9 +9,9 @@ import {
 import { useCredentialPages } from './useCredentialPages'
 import { useQuotaCache } from './useQuotaCache'
 import { useQuotaInspection } from './useQuotaInspection'
-import { ApiError, resetUsageQuota, updateUsageIdentityAlias, type UsageIdentityPageSort } from '@/lib/api'
+import { ApiError, resetUsageQuota, setCredentialDisabled, updateUsageIdentityAlias, type CredentialStatusKind, type UsageIdentityPageSort } from '@/lib/api'
 import i18n from '@/i18n'
-import type { UsageIdentity, UsageIdentityTypeCount, UsageQuotaCheckResponse, UsageQuotaInspectionStatusResponse } from '@/lib/types'
+import type { UsageIdentity, UsageIdentityTypeCount, UsageQuotaCheckResponse, UsageQuotaInspectionStatusResponse, UsageQuotaResetResponse } from '@/lib/types'
 import { quotaRefreshDisplayError, useQuotaRefreshTasks, type QuotaState } from './useQuotaRefreshTasks'
 import type { CredentialProviderFilterKey } from './credentialProviderFilters'
 
@@ -19,6 +19,36 @@ type CredentialQuotaState = Pick<AuthFileCredentialRow, 'quotaLoading' | 'quotaE
 
 interface CredentialResetState {
   quotaResetting?: boolean
+}
+
+export interface CredentialStatusFailureHandling {
+  /** 401 需要页面重新登录，其它状态只提示。 */
+  authRequired: boolean
+  /** 顶层提示使用的 i18n key。 */
+  noticeKey: string
+  /** 只有列表确实过期（404）才值得重新拉取；409 是凭证本身不可单独操作。 */
+  refresh: boolean
+}
+
+/**
+ * 把凭证开关失败映射为提示与刷新决策。
+ * 409 分两种来源：认证文件的插件多账号子行，以及不支持启停的供应商类型。
+ */
+export function resolveCredentialStatusFailure(kind: CredentialStatusKind, error: unknown): CredentialStatusFailureHandling {
+  if (error instanceof ApiError && error.status === 401) {
+    return { authRequired: true, noticeKey: 'usage_stats.credentials_status_update_failed', refresh: false }
+  }
+  if (error instanceof ApiError && error.status === 404) {
+    return { authRequired: false, noticeKey: 'usage_stats.credentials_status_stale_target', refresh: true }
+  }
+  if (error instanceof ApiError && error.status === 409) {
+    return {
+      authRequired: false,
+      noticeKey: kind === 'auth-file' ? 'usage_stats.credentials_status_conflict_auth_file' : 'usage_stats.credentials_status_conflict_ai_provider',
+      refresh: false,
+    }
+  }
+  return { authRequired: false, noticeKey: 'usage_stats.credentials_status_update_failed', refresh: false }
 }
 
 interface UseCredentialsTabDataOptions {
@@ -66,6 +96,10 @@ export interface CredentialsTabData {
   quotaInspectionStarting: boolean
   quotaInspectionError: string
   aliasSavingId: string
+  /** 正在写入上游状态的 Keeper identity id 集合，两个列表共用同一份进行中状态。 */
+  credentialStatusPendingIdentityIds: ReadonlySet<string>
+  toggleAuthFileStatus: (identityId: string, authIndex: string, disabled: boolean) => void
+  toggleAiProviderStatus: (identityId: string, authIndex: string, disabled: boolean) => void
   refresh: () => Promise<void>
   saveUsageIdentityAlias: (id: string, alias: string) => Promise<void>
   resetUsageIdentityStats: (id: string) => Promise<UsageIdentity>
@@ -96,6 +130,7 @@ export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, on
   const { refreshQuotaForAuthIndex } = quotaRefreshTasks
   const [quotaResetStateByAuthIndex, setQuotaResetStateByAuthIndex] = useState<Record<string, CredentialResetState>>({})
   const [aliasSavingId, setAliasSavingId] = useState('')
+  const [credentialStatusPending, setCredentialStatusPending] = useState<Record<string, boolean>>({})
   const quotaInspection = useQuotaInspection({
     enabled: enabledAuthFiles,
     onAuthRequired,
@@ -117,9 +152,66 @@ export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, on
     [credentialPages.aiProviderIdentities],
   )
   const refreshCredentialPages = credentialPages.refresh
+  // 开关请求返回时页面参数可能已经变化，ref 始终指向最新 refresh，避免用旧页码或旧筛选覆盖用户当前视图。
+  const refreshCredentialPagesRef = useRef(refreshCredentialPages)
+  useEffect(() => {
+    refreshCredentialPagesRef.current = refreshCredentialPages
+  }, [refreshCredentialPages])
   const refresh = useCallback(async () => {
     await Promise.all([refreshCredentialPages(), refreshQuotaCache()])
   }, [refreshCredentialPages, refreshQuotaCache])
+
+  // 开关按钮改用 aria-disabled 后不再由浏览器拦截重复点击，这里用 ref 做与渲染时序无关的兜底。
+  const credentialStatusInFlightRef = useRef<Set<string>>(new Set())
+  const credentialStatusPendingIdentityIds = useMemo(
+    () => new Set(Object.keys(credentialStatusPending).filter((identityId) => credentialStatusPending[identityId])),
+    [credentialStatusPending],
+  )
+
+  const toggleCredentialStatus = useCallback(async (kind: CredentialStatusKind, identityId: string, authIndex: string, disabled: boolean) => {
+    // Keeper identity id 是全局唯一的本地主键；auth_index 只用于后端调用，不参与两个列表的 pending 隔离。
+    const pendingIdentityId = identityId || authIndex
+    if (credentialStatusInFlightRef.current.has(pendingIdentityId)) {
+      return
+    }
+    credentialStatusInFlightRef.current.add(pendingIdentityId)
+    setCredentialStatusPending((current) => ({ ...current, [pendingIdentityId]: true }))
+    try {
+      await setCredentialDisabled(kind, authIndex, disabled)
+      // 上游成功后刷新列表，让 enabled only 过滤与图标状态都来自后端结果。
+      await refreshCredentialPagesRef.current()
+      onNotice?.('success', i18n.t(disabled ? 'usage_stats.credentials_status_disable_success' : 'usage_stats.credentials_status_enable_success'))
+    } catch (error) {
+      const failure = resolveCredentialStatusFailure(kind, error)
+      if (failure.authRequired) {
+        onAuthRequired?.()
+      }
+      onNotice?.('error', i18n.t(failure.noticeKey))
+      // 404 说明本地列表已经过期，用最新筛选与页码重新拉取，让用户看到真实状态。
+      if (failure.refresh) {
+        await refreshCredentialPagesRef.current()
+      }
+    } finally {
+      credentialStatusInFlightRef.current.delete(pendingIdentityId)
+      setCredentialStatusPending((current) => {
+        if (!current[pendingIdentityId]) {
+          return current
+        }
+        const next = { ...current }
+        delete next[pendingIdentityId]
+        return next
+      })
+    }
+    // 刷新只经由 refreshCredentialPagesRef，避免把点击时的旧闭包固化进依赖列表。
+  }, [onAuthRequired, onNotice])
+
+  const toggleAuthFileStatus = useCallback((identityId: string, authIndex: string, disabled: boolean) => {
+    void toggleCredentialStatus('auth-file', identityId, authIndex, disabled)
+  }, [toggleCredentialStatus])
+
+  const toggleAiProviderStatus = useCallback((identityId: string, authIndex: string, disabled: boolean) => {
+    void toggleCredentialStatus('ai-provider', identityId, authIndex, disabled)
+  }, [toggleCredentialStatus])
 
   const saveUsageIdentityAlias = useCallback(async (id: string, alias: string) => {
     setAliasSavingId(id)
@@ -156,6 +248,8 @@ export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, on
       }))
       if (outcome.kind === 'error') {
         onNotice?.('error', outcome.message)
+      } else if (outcome.kind === 'warning') {
+        onNotice?.('info', outcome.message)
       }
     } catch {
       setQuotaResetStateByAuthIndex((current) => ({
@@ -204,6 +298,9 @@ export function useCredentialsTabData({ enabledAuthFiles, enabledAiProviders, on
     quotaInspectionStarting: quotaInspection.quotaInspectionStarting,
     quotaInspectionError: quotaInspection.quotaInspectionError,
     aliasSavingId,
+    credentialStatusPendingIdentityIds,
+    toggleAuthFileStatus,
+    toggleAiProviderStatus,
     refresh: refresh,
     saveUsageIdentityAlias,
     resetUsageIdentityStats: credentialPages.resetStats,
@@ -219,18 +316,20 @@ export { quotaRefreshDisplayError }
 
 export type QuotaResetOutcome =
   | { kind: 'success' }
+  | { kind: 'warning'; message: string }
   | { kind: 'error'; message: string }
 
 export async function runQuotaResetForAuthIndex(
   authIndex: string,
   deps: {
-    resetUsageQuota: (authIndex: string) => Promise<unknown>
+    resetUsageQuota: (authIndex: string) => Promise<UsageQuotaResetResponse>
     refreshQuotaForAuthIndex: (authIndex: string) => Promise<void>
   },
 ): Promise<QuotaResetOutcome> {
+  let result: UsageQuotaResetResponse
   try {
-    // reset 只负责消费官方次数；失败时不写行内限额缓存，也不触发刷新任务。
-    await deps.resetUsageQuota(authIndex)
+    // 后端在官方重置后恢复 CPA 路由；只有官方重置失败才中止额度刷新。
+    result = await deps.resetUsageQuota(authIndex)
   } catch {
     return {
       kind: 'error',
@@ -243,6 +342,9 @@ export async function runQuotaResetForAuthIndex(
     await deps.refreshQuotaForAuthIndex(authIndex)
   } catch {
     // reset 已成功消费官方次数，后续刷新失败不影响本次 reset 的成功提示。
+  }
+  if (result.recoveryFailed) {
+    return { kind: 'warning', message: i18n.t('usage_stats.credentials_quota_reset_recovery_failed') }
   }
   return { kind: 'success' }
 }

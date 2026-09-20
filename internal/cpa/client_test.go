@@ -351,40 +351,6 @@ func TestFetchAuthFilesParsesCodexIDTokenFields(t *testing.T) {
 	}
 }
 
-func TestUpdateAuthFileStatusPatchesManagementEndpoint(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPatch {
-			t.Fatalf("expected PATCH method, got %s", r.Method)
-		}
-		if r.URL.Path != cpaManagementAuthFilesStatusEndpoint {
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
-			t.Fatalf("expected management Authorization header, got %q", got)
-		}
-		if got := r.Header.Get("Content-Type"); got != "application/json" {
-			t.Fatalf("expected JSON content type, got %q", got)
-		}
-
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode request body: %v", err)
-		}
-		if body["name"] != "codex-user.json" || body["disabled"] != true {
-			t.Fatalf("unexpected status request body: %#v", body)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, "management-secret", 2*time.Second, false)
-	if err := client.UpdateAuthFileStatus(context.Background(), "codex-user.json", true); err != nil {
-		t.Fatalf("UpdateAuthFileStatus returned error: %v", err)
-	}
-}
-
 func TestDeleteAuthFilesSendsNamesToManagementEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {

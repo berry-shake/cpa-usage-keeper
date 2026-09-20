@@ -132,6 +132,9 @@ describe('Credential section styles', () => {
     const filterIconFrameStyles = cssBlock('.credentialProviderFilterIconFrame')
     const identityBlockStyles = cssBlock('.credentialIdentityBlock')
     const identityContentStyles = cssBlock('.credentialIdentityContent')
+    // occurrence 0 落在 .credentialStatusToggleWrap 上，开关自身的规则是第 1 次命中。
+    const toggleStyles = scssRule(credentialStyles, '.credentialStatusToggle', 1)
+    const tooltipStyles = scssRule(credentialStyles, '.credentialStatusToggleTooltip')
 
     expect(credentialStyles).toMatch(/\$credential-provider-icon-size:\s*30px;/)
     expect(filterIconFrameStyles).toContain('width: $credential-provider-icon-size;')
@@ -142,8 +145,14 @@ describe('Credential section styles', () => {
     expect(filterIconFrameStyles).not.toContain('overflow: hidden;')
     expect(filterIconFrameStyles).toMatch(/> svg\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*100%;/)
     expect(providerFilterSource).toMatch(/<ProviderBrandIcon providerType=\{option\.knownKey \?\? option\.key\} size="100%" \/>/)
-    expect(authFileSectionSource).toMatch(/<ProviderBrandIcon providerType=\{row\.identity\.type\} size=\{30\} ariaLabel=\{row\.typeLabel\} \/>/)
-    expect(aiProviderSectionSource).toMatch(/<ProviderBrandIcon providerType=\{row\.identity\.type\} size=\{30\} ariaLabel=\{row\.typeLabel\} \/>/)
+    // 行首图标槽位与开关槽位必须共用同一个 30px 共享常量，开关行与静态图标行才对得齐。
+    // 开关自身的挂载与参数接线由 test/AuthFileCredentialsSection.statusToggle.test.tsx、
+    // test/AiProviderCredentialsSection.statusToggle.test.tsx 与 test/CredentialStatusToggle.interaction.test.tsx 做行为断言。
+    expect(toggleStyles).toContain('width: $credential-provider-icon-size;')
+    expect(toggleStyles).toContain('height: $credential-provider-icon-size;')
+    // 说明节点常驻 DOM，显隐完全交给这两条 reveal 规则，因此它们不能再是死规则。
+    expect(tooltipStyles).toContain('opacity: 0;')
+    expect(credentialStyles).toMatch(/\.credentialStatusToggleWrap:hover \.credentialStatusToggleTooltip,[\s\S]*?\.credentialStatusToggleWrap:focus-within \.credentialStatusToggleTooltip\s*\{[\s\S]*?opacity: 1;/)
     expect(authFileSectionSource).toMatch(/<ProviderBrandIcon providerType=\{result\.type\} size=\{20\} \/>/)
     expect(identityBlockStyles).toContain('display: flex;')
     expect(identityBlockStyles).toContain('align-items: center;')

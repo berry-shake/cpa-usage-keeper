@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +25,7 @@ type authFilesManagementStatusCall struct {
 	disabled bool
 }
 
-func (s *authFilesManagementClientStub) UpdateAuthFileStatus(ctx context.Context, name string, disabled bool) error {
+func (s *authFilesManagementClientStub) UpdateAuthFileStatus(ctx context.Context, name string, authIndex string, disabled bool) (int, error) {
 	s.mu.Lock()
 	s.statusCalls = append(s.statusCalls, authFilesManagementStatusCall{name: name, disabled: disabled})
 	s.active++
@@ -41,7 +42,7 @@ func (s *authFilesManagementClientStub) UpdateAuthFileStatus(ctx context.Context
 	s.active--
 	err := s.statusErrByName[name]
 	s.mu.Unlock()
-	return err
+	return http.StatusOK, err
 }
 
 func (s *authFilesManagementClientStub) DeleteAuthFiles(ctx context.Context, names []string) error {

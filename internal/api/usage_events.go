@@ -47,6 +47,7 @@ type usageEventPayload struct {
 	APIKey              string                 `json:"api_key,omitempty"`
 	Model               string                 `json:"model"`
 	ModelAlias          string                 `json:"model_alias,omitempty"`
+	ResponseModel       string                 `json:"response_model,omitempty"`
 	ReasoningEffort     string                 `json:"reasoning_effort,omitempty"`
 	ServiceTier         string                 `json:"service_tier,omitempty"`
 	ResponseServiceTier string                 `json:"response_service_tier,omitempty"`
@@ -111,6 +112,7 @@ type usageEventExportPayload struct {
 	IsIdentityDeleted   bool     `json:"is_identity_deleted"`
 	Model               string   `json:"model"`
 	ModelAlias          string   `json:"model_alias"`
+	ResponseModel       string   `json:"response_model"`
 	ReasoningEffort     string   `json:"reasoning_effort"`
 	ServiceTier         string   `json:"service_tier"`
 	ResponseServiceTier string   `json:"response_service_tier"`
@@ -431,6 +433,7 @@ func buildUsageEventsPayload(rows []servicedto.UsageEventRecord, resolver usageI
 			APIKey:              usageEventAPIKeyLabel(row.APIGroupKey, apiKeyInfos),
 			Model:               row.Model,
 			ModelAlias:          strings.TrimSpace(row.ModelAlias),
+			ResponseModel:       strings.TrimSpace(row.ResponseModel),
 			ReasoningEffort:     strings.TrimSpace(row.ReasoningEffort),
 			ServiceTier:         strings.TrimSpace(row.ServiceTier),
 			ResponseServiceTier: strings.TrimSpace(row.ResponseServiceTier),
@@ -523,6 +526,7 @@ func buildUsageEventExportPayload(row servicedto.UsageEventRecord, resolver usag
 		IsIdentityDeleted:   isIdentityDeleted,
 		Model:               row.Model,
 		ModelAlias:          strings.TrimSpace(row.ModelAlias),
+		ResponseModel:       strings.TrimSpace(row.ResponseModel),
 		ReasoningEffort:     strings.TrimSpace(row.ReasoningEffort),
 		ServiceTier:         strings.TrimSpace(row.ServiceTier),
 		ResponseServiceTier: strings.TrimSpace(row.ResponseServiceTier),
@@ -574,6 +578,7 @@ var usageEventsExportCSVHeader = []string{
 	"is_identity_deleted",
 	"model",
 	"model_alias",
+	"response_model",
 	"reasoning_effort",
 	"service_tier",
 	"response_service_tier",
@@ -771,6 +776,7 @@ func usageEventExportCSVRecord(event usageEventExportPayload) []string {
 		strconv.FormatBool(event.IsIdentityDeleted),
 		event.Model,
 		event.ModelAlias,
+		event.ResponseModel,
 		event.ReasoningEffort,
 		event.ServiceTier,
 		event.ResponseServiceTier,

@@ -5,7 +5,7 @@ import type { UsageIdentityPageSort } from '@/lib/api'
 import { CredentialAliasEditor, isCredentialAliasEditorDisabled } from './CredentialAliasEditor'
 import { CredentialHealthPanel } from './CredentialHealthPanel'
 import { CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialTableHeader, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheReadRateTone, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
-import { ProviderBrandIcon } from '@/components/ProviderBrandIcon'
+import { CredentialStatusToggle, CredentialStatusUnsupportedIcon, isCredentialStatusToggleSupported } from './CredentialStatusToggle'
 import { QuestionMarkHelp } from '@/components/ui/QuestionMarkHelp'
 
 interface AiProviderCredentialsSectionProps {
@@ -20,13 +20,16 @@ interface AiProviderCredentialsSectionProps {
   aliasSavingId?: string
   onSaveAlias?: (id: string, alias: string) => Promise<void>
   onOpenDetails?: (row: AiProviderCredentialRow) => void
+  /** 正在写入上游状态的 Keeper identity id 集合，用于阻止重复点击。 */
+  statusPendingIdentityIds?: ReadonlySet<string>
+  onToggleStatus?: (identityId: string, authIndex: string, disabled: boolean) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
   onActiveOnlyChange: (activeOnly: boolean) => void
   onSortChange: (sort: UsageIdentityPageSort) => void
 }
 
-export function AiProviderCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, aliasSavingId, onSaveAlias, onOpenDetails, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange }: AiProviderCredentialsSectionProps) {
+export function AiProviderCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, aliasSavingId, onSaveAlias, onOpenDetails, statusPendingIdentityIds, onToggleStatus, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange }: AiProviderCredentialsSectionProps) {
   const { t } = useTranslation()
   const helpText = t('usage_stats.credentials_ai_providers_active_only_help')
 
@@ -49,7 +52,7 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
             description={helpText}
             positioning={{
               align: 'center',
-              estimatedHeight: 72,
+              estimatedHeight: 96,
               maxWidth: 280,
               offset: 10,
               viewportPadding: 8,
@@ -76,7 +79,19 @@ export function AiProviderCredentialsSection({ rows, total, page, totalPages, pa
       {rows.map((row) => (
         <CredentialRowShell
           key={row.identity.id || row.identity.identity}
-          icon={<ProviderBrandIcon providerType={row.identity.type} size={30} ariaLabel={row.typeLabel} />}
+          icon={isCredentialStatusToggleSupported(row.identity.type) ? (
+            <CredentialStatusToggle
+              providerType={row.identity.type}
+              displayName={row.displayName}
+              disabled={row.identity.disabled}
+              pending={statusPendingIdentityIds?.has(row.identity.id || row.identity.identity) ?? false}
+              readOnly={row.identity.is_deleted}
+              onToggle={(disabled) => onToggleStatus?.(row.identity.id || row.identity.identity, row.identity.identity, disabled)}
+            />
+          ) : (
+            // OpenAI 兼容类供应商没有对应的整条停用语义，静态图标复用同一套行内提示。
+            <CredentialStatusUnsupportedIcon displayName={row.displayName} providerType={row.identity.type} />
+          )}
           title={onSaveAlias ? (
             <CredentialAliasEditor
               identityId={row.identity.id}

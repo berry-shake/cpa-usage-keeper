@@ -316,6 +316,8 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	})
 	cpaAPIKeyService := service.NewCPAAPIKeyService(db)
 	authFilesManagementService := service.NewAuthFilesManagementService(cpaClient)
+	// 单条凭证开关成功后立即与 CPA 对齐；runner 自带合并窗口和 nil 保护。
+	credentialStatusService := service.NewCredentialStatusService(db, cpaClient, metadataSyncRunner)
 	if cfg.TLSSkipVerify {
 		logrus.WithField("cpa_base_url", cfg.CPABaseURL).Warn("TLS certificate verification is disabled for CPA and Redis queue connections")
 	}
@@ -372,9 +374,11 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 				Quota:         quotaService,
 				CPAAPIKeys:    cpaAPIKeyService,
 				AuthFiles:     authFilesManagementService,
-				RequestLogs:   requestLogService,
-				Ranking:       rankingService,
-				LocalRanking:  localRankingService,
+				// 认证文件与 AI 供应商共用一个 service，路由层按类型分发。
+				CredentialStatus: credentialStatusService,
+				RequestLogs:      requestLogService,
+				Ranking:          rankingService,
+				LocalRanking:     localRankingService,
 				Status: api.StatusRouteConfig{
 					CPAPublicURL:               cfg.CPAPublicURL,
 					CPARequestLogAccessEnabled: cfg.CPARequestLogAccessEnabled,

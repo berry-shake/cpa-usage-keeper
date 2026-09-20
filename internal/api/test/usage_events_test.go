@@ -325,6 +325,7 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 		Timestamp:           time.Date(2026, 4, 22, 11, 0, 0, 0, time.UTC),
 		Model:               "claude-sonnet",
 		ModelAlias:          "sonnet-business",
+		ResponseModel:       "actual-model",
 		ReasoningEffort:     "medium",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
@@ -366,6 +367,9 @@ func TestUsageEventsReturnsFilteredRows(t *testing.T) {
 	}
 	if !contains(body, `"model_alias":"sonnet-business"`) {
 		t.Fatalf("expected model alias in response body: %s", body)
+	}
+	if !contains(body, `"response_model":"actual-model"`) {
+		t.Fatalf("expected response model in response body: %s", body)
 	}
 	if !contains(body, `"id":"42"`) || !contains(body, `"total_count":1`) || !contains(body, `"page":1`) || !contains(body, `"page_size":100`) || !contains(body, `"total_pages":1`) {
 		t.Fatalf("expected pagination metadata and event id in response body: %s", body)
@@ -812,6 +816,7 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 		APIGroupKey:         "sk-export123456",
 		Model:               "claude-sonnet",
 		ModelAlias:          "sonnet-export",
+		ResponseModel:       "actual-export-model",
 		ReasoningEffort:     "medium",
 		ServiceTier:         "auto",
 		ResponseServiceTier: "default",
@@ -877,14 +882,14 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	if !regexp.MustCompile(`filename="usage-events-\d{8}-\d{6}\.csv"`).MatchString(resp.Header().Get("Content-Disposition")) {
 		t.Fatalf("expected timestamped csv filename, got %q", resp.Header().Get("Content-Disposition"))
 	}
-	if !contains(body, "cpa_api_key_id") || !contains(body, "auth_index") || !contains(body, "model_alias") || !contains(body, "response_service_tier") || !contains(body, "executor_type") || !contains(body, "is_identity_deleted") {
-		t.Fatalf("expected cpa_api_key_id, auth_index, model_alias, response_service_tier, executor_type, and is_identity_deleted columns, got %s", body)
+	if !contains(body, "cpa_api_key_id") || !contains(body, "auth_index") || !contains(body, "model_alias") || !contains(body, "response_model") || !contains(body, "response_service_tier") || !contains(body, "executor_type") || !contains(body, "is_identity_deleted") {
+		t.Fatalf("expected cpa_api_key_id, auth_index, model_alias, response_model, response_service_tier, executor_type, and is_identity_deleted columns, got %s", body)
 	}
 	if !contains(body, "cache_read_tokens,cache_creation_tokens,cache_read_rate") || !contains(body, ",3,4,30,") || contains(body, "cached_tokens") {
 		t.Fatalf("expected canonical cache token fields in csv export, got %s", body)
 	}
-	if !regexp.MustCompile(`(?m)^id,timestamp,api_key,cpa_api_key_id,source,source_type,auth_index,is_identity_deleted,model,model_alias,reasoning_effort,`).MatchString(body) {
-		t.Fatalf("expected model_alias to follow model in csv header, got %s", body)
+	if !regexp.MustCompile(`(?m)^id,timestamp,api_key,cpa_api_key_id,source,source_type,auth_index,is_identity_deleted,model,model_alias,response_model,reasoning_effort,`).MatchString(body) {
+		t.Fatalf("expected response_model to follow model_alias in csv header, got %s", body)
 	}
 	if !contains(body, "speed_tps,client_ip,x_forwarded_for,user_agent,input_tokens") || !contains(body, ",30.5,192.0.2.10,\"203.0.113.5, 198.51.100.8\",test-client/1.0,10,") {
 		t.Fatalf("expected client metadata after speed in csv export, got %s", body)
@@ -898,7 +903,7 @@ func TestUsageEventsExportCSVReturnsFilteredRowsWithoutPagination(t *testing.T) 
 	if contains(body, "cost_available") || contains(body, "pricing_style") {
 		t.Fatalf("expected csv export to omit cost availability metadata, got %s", body)
 	}
-	if !contains(body, "Export Key") || !contains(body, ",7,") || !contains(body, "authidx-export-main") || !contains(body, "sonnet-export") || !contains(body, "responses") || !contains(body, "failed") {
+	if !contains(body, "Export Key") || !contains(body, ",7,") || !contains(body, "authidx-export-main") || !contains(body, "sonnet-export") || !contains(body, "actual-export-model") || !contains(body, "responses") || !contains(body, "failed") {
 		t.Fatalf("expected exported row values, got %s", body)
 	}
 }

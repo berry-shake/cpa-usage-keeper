@@ -17,9 +17,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestPasswordLoginCapturesSessionClientMetadataFromRightmostForwardedIP(t *testing.T) {
+func TestPasswordLoginCapturesSessionClientMetadataFromTrustedProxy(t *testing.T) {
 	sessions := auth.NewSessionManager(time.Hour)
-	config := keeperapi.AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}
+	config := keeperapi.AuthConfig{
+		Enabled:           true,
+		LoginPassword:     "secret",
+		SessionTTL:        time.Hour,
+		TrustedProxyCIDRs: []string{"172.17.0.0/16", "172.64.0.0/13"},
+	}
 	router := keeperapi.NewRouter(nil, nil, nil, nil, config, keeperapi.NewAuthHandler(config, sessions), "")
 	userAgent := "Keeper-Test/" + strings.Repeat("a", 600) + "/tail-marker"
 
@@ -28,7 +33,7 @@ func TestPasswordLoginCapturesSessionClientMetadataFromRightmostForwardedIP(t *t
 	loginRequest.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
 	loginRequest.Header.Set("Content-Type", "application/json")
 	loginRequest.Header.Set("User-Agent", userAgent)
-	loginRequest.Header.Set("X-Forwarded-For", "198.51.100.7, invalid, 203.0.113.9")
+	loginRequest.Header.Set("X-Forwarded-For", "198.51.100.7, 172.71.10.5")
 	loginRequest.RemoteAddr = "172.17.0.1:42310"
 	router.ServeHTTP(login, loginRequest)
 	if login.Code != http.StatusNoContent {
@@ -42,14 +47,14 @@ func TestPasswordLoginCapturesSessionClientMetadataFromRightmostForwardedIP(t *t
 	if !ok {
 		t.Fatal("expected created session")
 	}
-	if session.LoginIP != "203.0.113.9" || session.LastSeenIP != "203.0.113.9" || session.UserAgent != userAgent {
+	if session.LoginIP != "198.51.100.7" || session.LastSeenIP != "198.51.100.7" || session.UserAgent != userAgent {
 		t.Fatalf("unexpected captured metadata: %+v", session)
 	}
 
 	list := httptest.NewRecorder()
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/sessions", nil)
 	listRequest.AddCookie(cookies[0])
-	listRequest.Header.Set("X-Forwarded-For", "203.0.113.9")
+	listRequest.Header.Set("X-Forwarded-For", "203.0.113.9, 172.71.10.6")
 	listRequest.RemoteAddr = "172.17.0.1:42311"
 	router.ServeHTTP(list, listRequest)
 	if list.Code != http.StatusOK {
@@ -70,7 +75,7 @@ func TestPasswordLoginCapturesSessionClientMetadataFromRightmostForwardedIP(t *t
 		t.Fatalf("expected one session, got %+v", parsed.Items)
 	}
 	item := parsed.Items[0]
-	if item.LoginIP != "203.0.113.9" || item.LastSeenIP != "203.0.113.9" || item.UserAgent != userAgent || item.LastSeen == "" {
+	if item.LoginIP != "198.51.100.7" || item.LastSeenIP != "203.0.113.9" || item.UserAgent != userAgent || item.LastSeen == "" {
 		t.Fatalf("unexpected session response metadata: %+v", item)
 	}
 	for _, parsedField := range []string{`"browser":`, `"os":`, `"device":`} {
@@ -97,6 +102,36 @@ func TestPasswordLoginFallsBackToObservedClientIPWithoutForwardedHeader(t *testi
 	session, ok := sessions.Get(response.Result().Cookies()[0].Value)
 	if !ok || session.LoginIP != "172.17.0.1" {
 		t.Fatalf("expected observed Docker gateway IP fallback, got %+v", session)
+	}
+}
+
+func TestPasswordLoginIgnoresForwardedIPFromUntrustedPeer(t *testing.T) {
+	sessions := auth.NewSessionManager(time.Hour)
+	config := keeperapi.AuthConfig{
+		Enabled:           true,
+		LoginPassword:     "secret",
+		SessionTTL:        time.Hour,
+		TrustedProxyCIDRs: []string{"172.17.0.0/16", "172.64.0.0/13"},
+	}
+	router := keeperapi.NewRouter(nil, nil, nil, nil, config, keeperapi.NewAuthHandler(config, sessions), "")
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"secret"}`))
+	request.Header.Set(requestIntentHeaderName, requestIntentHeaderValueFetch)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Forwarded-For", "203.0.113.9, 172.71.10.5")
+	request.RemoteAddr = "198.51.100.41:42310"
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected login status 204, got %d body=%s", response.Code, response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected session cookie")
+	}
+	session, ok := sessions.Get(cookies[0].Value)
+	if !ok || session.LoginIP != "198.51.100.41" || session.LastSeenIP != "198.51.100.41" {
+		t.Fatalf("expected direct peer IP, got %+v", session)
 	}
 }
 

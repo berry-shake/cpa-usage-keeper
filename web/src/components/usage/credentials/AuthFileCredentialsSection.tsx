@@ -16,7 +16,8 @@ import { CredentialAliasEditor, isCredentialAliasEditorDisabled } from './Creden
 import { CredentialHealthPanel } from './CredentialHealthPanel'
 import { CredentialSubscriptionBadge } from './CredentialSubscriptionBadge'
 import { CredentialPriorityBadge, CredentialRowShell, CredentialSectionShell, CredentialTableHeader, CredentialsPagination, MetricPill, RequestMetric, TonePercent, cacheReadRateTone, capitalize, credentialToneClassName, formatCredentialNumber, successRateTone } from './CredentialSectionShell'
-import { ProviderBrandIcon } from '@/components/ProviderBrandIcon'
+import { ProviderBrandIcon, providerBrandIconKey } from '@/components/ProviderBrandIcon'
+import { CredentialStatusToggle } from './CredentialStatusToggle'
 
 type Translate = (key: string, options?: Record<string, string>) => string
 type InspectionIndicatorTone = 'idle' | 'running' | 'completed'
@@ -114,12 +115,15 @@ interface AuthFileCredentialsSectionProps {
   aliasSavingId?: string
   onSaveAlias?: (id: string, alias: string) => Promise<void>
   onOpenDetails?: (row: AuthFileCredentialRow) => void
+  /** 正在写入上游状态的 Keeper identity id 集合，用于阻止重复点击。 */
+  statusPendingIdentityIds?: ReadonlySet<string>
+  onToggleStatus?: (identityId: string, authIndex: string, disabled: boolean) => void
   onRefreshInspectionStatus: () => Promise<void>
   onStartInspection: () => Promise<void>
   onAfterInvalidAccountAction?: () => Promise<void>
 }
 
-export function AuthFileCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, quotaRefreshing, quotaRefreshError, quotaInspectionStatus, quotaInspectionLoading, quotaInspectionStarting, quotaInspectionError, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange, onRefreshQuota, onRefreshQuotaForAuthIndex, onResetQuotaForAuthIndex, aliasSavingId, onSaveAlias, onOpenDetails, onRefreshInspectionStatus, onStartInspection, onAfterInvalidAccountAction }: AuthFileCredentialsSectionProps) {
+export function AuthFileCredentialsSection({ rows, total, page, totalPages, pageSize, activeOnly, sort, loading, quotaRefreshing, quotaRefreshError, quotaInspectionStatus, quotaInspectionLoading, quotaInspectionStarting, quotaInspectionError, onPageChange, onPageSizeChange, onActiveOnlyChange, onSortChange, onRefreshQuota, onRefreshQuotaForAuthIndex, onResetQuotaForAuthIndex, aliasSavingId, onSaveAlias, onOpenDetails, statusPendingIdentityIds, onToggleStatus, onRefreshInspectionStatus, onStartInspection, onAfterInvalidAccountAction }: AuthFileCredentialsSectionProps) {
   const { t } = useTranslation()
   const [inspectionOpen, setInspectionOpen] = useState(false)
   const [quotaUsageMode, setQuotaUsageMode] = useState<QuotaUsageMode>('current')
@@ -257,7 +261,22 @@ export function AuthFileCredentialsSection({ rows, total, page, totalPages, page
         return (
           <CredentialRowShell
             key={rowKey}
-            icon={<ProviderBrandIcon providerType={row.identity.type} size={30} ariaLabel={row.typeLabel} />}
+            icon={(
+              // 认证文件 type 直接来自 CPA，可能是不认识的类型；没有品牌图标的类型不给开关，
+              // 否则左侧图标槽位会变成一个看不见却可点、可 Tab 的按钮。
+              providerBrandIconKey(row.identity.type) ? (
+                <CredentialStatusToggle
+                  providerType={row.identity.type}
+                  displayName={row.displayName}
+                  disabled={row.identity.disabled}
+                  pending={statusPendingIdentityIds?.has(row.identity.id || row.identity.identity) ?? false}
+                  readOnly={row.identity.is_deleted}
+                  onToggle={(disabled) => onToggleStatus?.(row.identity.id || row.identity.identity, row.identity.identity, disabled)}
+                />
+              ) : (
+                <ProviderBrandIcon providerType={row.identity.type} size={30} ariaLabel={row.typeLabel} />
+              )
+            )}
             title={onSaveAlias ? (
               <CredentialAliasEditor
                 identityId={row.identity.id}

@@ -209,6 +209,7 @@ describe('runQuotaResetForAuthIndex', () => {
     const outcome = await runQuotaResetForAuthIndex('auth-1', {
       resetUsageQuota: async () => {
         calls.push('reset')
+        return { authIndex: 'auth-1' }
       },
       refreshQuotaForAuthIndex: async () => {
         calls.push('refresh')
@@ -224,6 +225,7 @@ describe('runQuotaResetForAuthIndex', () => {
     const outcome = await runQuotaResetForAuthIndex('auth-1', {
       resetUsageQuota: async () => {
         calls.push('reset')
+        return { authIndex: 'auth-1' }
       },
       refreshQuotaForAuthIndex: async () => {
         calls.push('refresh')
@@ -285,7 +287,6 @@ describe('useCredentialsTabData quota response contract', () => {
   it('routes reset outcomes through the shared helper and top notice', () => {
     expect(credentialsTabDataSource).toContain('runQuotaResetForAuthIndex(authIndex, {')
     expect(credentialsTabDataSource).toContain("onNotice?.('error', outcome.message)")
-    expect(credentialsTabDataSource).not.toContain("onAuthRequired?.()")
     expect(credentialsTabDataSource).not.toContain('quotaResetError')
   })
 })

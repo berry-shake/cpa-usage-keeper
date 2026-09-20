@@ -39,6 +39,8 @@ type Service struct {
 
 	refreshMu    sync.Mutex
 	refreshTasks map[string]*RefreshTaskRecord
+	// nextRefreshTaskCleanupAt 由 refreshMu 保护，只限制读取接口的全量清理频率。
+	nextRefreshTaskCleanupAt time.Time
 	// resetInFlight 按 auth_index 记录正在消费的 reset credit，避免并发重复扣减官方次数。
 	resetMu       sync.Mutex
 	resetInFlight map[string]struct{}
@@ -129,13 +131,13 @@ type CheckResponse struct {
 	RateLimitResetCreditsAvailableCount *int              `json:"rateLimitResetCreditsAvailableCount,omitempty"`
 }
 
-func NewService(db *gorm.DB, caller ManagementAPICaller, pricingCatalog *pricing.Catalog) *Service {
+func NewService(db *gorm.DB, caller ManagementClient, pricingCatalog *pricing.Catalog) *Service {
 	return NewServiceWithOptions(db, caller, ServiceOptions{PricingCatalog: pricingCatalog})
 }
 
-func NewServiceWithOptions(db *gorm.DB, caller ManagementAPICaller, options ServiceOptions) *Service {
+func NewServiceWithOptions(db *gorm.DB, caller ManagementClient, options ServiceOptions) *Service {
 	if options.QuotaUpstreamResponsesEnabled {
-		caller = upstreamResponseRecordingCaller{caller: caller}
+		caller = upstreamResponseRecordingCaller{ManagementClient: caller}
 	}
 	return NewServiceWithRegistryAndOptions(db, NewDefaultProviderRegistry(caller, DefaultProviderConfigs()), options)
 }

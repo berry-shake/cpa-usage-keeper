@@ -77,7 +77,8 @@ export function DashboardHeader({ backToCPA, identity, onLogout, loggingOut = fa
         if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); }
       }}><IconMoreHorizontal size={20} aria-hidden="true" />{updateAvailable && <span className={styles.updateDot} />}</button>
       {open && <div ref={menuRef} className={styles.menu} id={menuId} role="menu" aria-label={t('usage_stats.more_actions')} onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget) && !buttonRef.current?.contains(event.relatedTarget)) setOpen(false);
+        // Safari touch clicks can blur before click with no related target; let the menu action finish.
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget) && !buttonRef.current?.contains(event.relatedTarget)) setOpen(false);
       }} onKeyDown={(event) => {
         const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);

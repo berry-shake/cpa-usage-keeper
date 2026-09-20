@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyAnalysis, fetchKeyAnalysisLatency, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, startUsageQuotaInspection, syncRemotePricing, updateAuthSessionAlias, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
+import { ApiError, appPath, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyAnalysis, fetchKeyAnalysisLatency, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, setCredentialDisabled, startUsageQuotaInspection, syncRemotePricing, updateAuthSessionAlias, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -136,6 +136,14 @@ describe('fetchUsageEvents', () => {
       expect(params.get('start')).toBe('2026-06-18');
       expect(params.get('end')).toBe('2026-07-17');
     }
+  });
+
+  it('preserves the realtime insight block for both admin and Key Viewer responses', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
+    const insights = { summary: { requests: 12, failures: 2, cost: null }, outcomes: [{ bucket: '2026-09-12T12:00:00+08:00', requests: 12, failures: 2 }] };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ insights }) } as Response);
+    expect((await fetchUsageOverviewRealtime()).insights).toEqual(insights);
+    expect((await fetchKeyOverviewRealtime()).insights).toEqual(insights);
   });
 
   it('loads realtime overview from dedicated endpoints', async () => {
@@ -1028,6 +1036,24 @@ describe('fetchUsageEvents', () => {
     expect(init).toMatchObject({ credentials: 'include', method: 'PATCH' });
     expect(headerValue(init, 'Content-Type')).toBe('application/json');
     expect(init?.body).toBe(JSON.stringify({ names: ['a.json'], disabled: true }));
+  });
+
+  it('updates a single credential through the auth-index status endpoint', async () => {
+    vi.stubGlobal('window', { __APP_BASE_PATH__: '/keeper' });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ auth_index: 'provider/idx', disabled: false }),
+    } as Response);
+
+    const response = await setCredentialDisabled('ai-provider', 'provider/idx', false);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+    expect(response).toEqual({ auth_index: 'provider/idx', disabled: false });
+    expect(parsed.pathname).toBe('/keeper/api/v1/ai-providers/provider%2Fidx/status');
+    expect(init).toMatchObject({ credentials: 'include', method: 'PATCH' });
+    expect(headerValue(init, 'Content-Type')).toBe('application/json');
+    expect(init?.body).toBe(JSON.stringify({ disabled: false }));
   });
 
   it('deletes selected auth files through the protected management endpoint', async () => {
