@@ -42,11 +42,7 @@ func TestSumUsageWindowStatsByAuthIndexUsesAuthIndexAndWindow(t *testing.T) {
 }
 
 func TestUsageWindowStatsCalculatorSumsByModelKeyword(t *testing.T) {
-	db, err := OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "usage-window-stats-model-keyword.db")})
-	if err != nil {
-		t.Fatalf("OpenDatabase returned error: %v", err)
-	}
-	closeTestDatabase(t, db)
+	db := openTestDatabase(t)
 	if _, err := UpsertModelPriceSetting(db, dto.ModelPriceSettingInput{Model: "claude-fable-5", PromptPricePer1M: 10}); err != nil {
 		t.Fatalf("UpsertModelPriceSetting returned error: %v", err)
 	}

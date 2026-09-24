@@ -71,12 +71,14 @@ func TestFrameAncestorsMergesConfiguredOrigins(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := testFrameAncestorConfig(t)
-			cfg.CPAPublicURL = tc.publicURL
-			cfg.FrameAncestorOrigins = tc.extra
+			cfg := config.Config{
+				CPABaseURL:           "https://private-cpa.internal",
+				CPAPublicURL:         tc.publicURL,
+				FrameAncestorOrigins: tc.extra,
+			}
 
 			origins := frameAncestorOrigins(cfg)
-			if !reflect.DeepEqual(origins, tc.want) {
+			if !slices.Equal(origins, tc.want) {
 				t.Fatalf("expected frame ancestor origins %#v, got %#v", tc.want, origins)
 			}
 		})

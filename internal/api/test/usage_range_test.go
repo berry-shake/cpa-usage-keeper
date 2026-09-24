@@ -145,10 +145,7 @@ func TestUsageCredentialsSupportsLongCustomDayRanges(t *testing.T) {
 				"start": {tc.start.Format(time.DateOnly)},
 				"end":   {tc.end.Format(time.DateOnly)},
 			}
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/credentials?"+query.Encode(), nil)
-			resp := httptest.NewRecorder()
-
-			router.ServeHTTP(resp, req)
+			resp := serveAPIGet(router, "/api/v1/usage/credentials?"+query.Encode())
 
 			if resp.Code != tc.wantStatus {
 				t.Fatalf("expected credentials range to return %d, got %d body=%s", tc.wantStatus, resp.Code, resp.Body.String())

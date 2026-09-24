@@ -169,7 +169,7 @@ func TestAttachWindowUsageStatsOnlyBackfillsMissingKnownWindowScopeRows(t *testi
 }
 
 func TestAttachWindowUsageStatsBackfillsFableModelRowWithModelFilteredUsage(t *testing.T) {
-	db := openQuotaUsageStatsTestDB(t)
+	db := openQuotaTestDB(t)
 	weeklySeconds := int64(7 * 24 * 60 * 60)
 	resetAt := time.Date(2026, 6, 2, 5, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 6, 2, 3, 0, 0, 0, time.UTC)
@@ -219,21 +219,21 @@ func TestAttachWindowUsageStatsBackfillsFableModelRowWithModelFilteredUsage(t *t
 		},
 	}}, now)
 
-	weekly := findQuotaUsageStatsRow(t, response.Quota, "seven_day")
+	weekly := findQuotaRow(t, response.Quota, "seven_day")
 	if weekly.WindowUsageTokens == nil || *weekly.WindowUsageTokens != 3_000_000 {
 		t.Fatalf("expected weekly window to keep full auth usage, got %#v", weekly.WindowUsageTokens)
 	}
 	if weekly.WindowUsageCost == nil || math.Abs(*weekly.WindowUsageCost-50) > 0.000000001 {
 		t.Fatalf("expected weekly window cost from all models, got %#v", weekly.WindowUsageCost)
 	}
-	fable := findQuotaUsageStatsRow(t, response.Quota, "limits.weekly_scoped.fable")
+	fable := findQuotaRow(t, response.Quota, "limits.weekly_scoped.fable")
 	if fable.WindowUsageTokens == nil || *fable.WindowUsageTokens != 1_000_000 {
 		t.Fatalf("expected fable row to backfill fable-model usage only, got %#v", fable.WindowUsageTokens)
 	}
 	if fable.WindowUsageCost == nil || math.Abs(*fable.WindowUsageCost-10) > 0.000000001 {
 		t.Fatalf("expected fable row cost from fable-model usage only, got %#v", fable.WindowUsageCost)
 	}
-	opus := findQuotaUsageStatsRow(t, response.Quota, "seven_day_opus")
+	opus := findQuotaRow(t, response.Quota, "seven_day_opus")
 	if opus.WindowUsageTokens != nil || opus.WindowUsageCost != nil {
 		t.Fatalf("expected model row without usage keyword to stay empty, got tokens=%#v cost=%#v", opus.WindowUsageTokens, opus.WindowUsageCost)
 	}
