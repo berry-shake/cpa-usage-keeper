@@ -3,7 +3,6 @@ package test
 import (
 	"encoding/binary"
 	"math"
-	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -50,7 +49,7 @@ func TestLatencyDiagnosticsMergeCombinesExactCountersSketchesAndStableSamples(t 
 	if err != nil {
 		t.Fatalf("MergeDiagnosticsRows returned reverse-order error: %v", err)
 	}
-	if !reflect.DeepEqual(points, reverseAggregate.SamplePoints.Points()) {
+	if !slices.Equal(points, reverseAggregate.SamplePoints.Points()) {
 		t.Fatal("expected stable samples to be independent of row merge order")
 	}
 }
@@ -113,13 +112,13 @@ func TestLatencyDiagnosticsMergeRejectsCorruptRowsWithoutPartialAggregate(t *tes
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			rows := cloneLatencyStoreRows(baseRows)
+			rows := slices.Clone(baseRows)
 			testCase.mutate(rows)
 			aggregate, err := latencystore.MergeDiagnosticsRows(rows)
 			if err == nil {
 				t.Fatalf("expected corrupt diagnostics row to fail, got %+v", aggregate)
 			}
-			if !reflect.DeepEqual(aggregate, latencystore.DiagnosticsAggregate{}) {
+			if aggregate != (latencystore.DiagnosticsAggregate{}) {
 				t.Fatalf("expected zero aggregate on error, got %+v", aggregate)
 			}
 		})
@@ -145,16 +144,6 @@ func latencyStoreTestRows(t *testing.T, events []entities.UsageEvent, bucketType
 func latencyStoreTestEvent(id int64, timestamp time.Time, ttftMS, latencyMS int64) entities.UsageEvent {
 	generate := true
 	return entities.UsageEvent{ID: id, Timestamp: timestamp, Generate: &generate, TTFTMS: &ttftMS, LatencyMS: latencyMS}
-}
-
-func cloneLatencyStoreRows(rows []entities.UsageLatencyStat) []entities.UsageLatencyStat {
-	clones := slices.Clone(rows)
-	for index := range clones {
-		clones[index].TTFTSketch = slices.Clone(clones[index].TTFTSketch)
-		clones[index].LatencySketch = slices.Clone(clones[index].LatencySketch)
-		clones[index].SamplePoints = slices.Clone(clones[index].SamplePoints)
-	}
-	return clones
 }
 
 func assertLatencySketchP95Close(t *testing.T, got, want int64) {

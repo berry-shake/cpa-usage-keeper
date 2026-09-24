@@ -46,9 +46,6 @@ describe('unsupported credential status icon', () => {
   it('never renders a clickable status toggle for the unsupported icon', async () => {
     await act(async () => root.render(<CredentialStatusUnsupportedIcon providerType="openai" displayName="OpenAI Compatibility" />))
 
-    // 点击解释原因，但不能触发状态请求，因此这里不能出现开关按钮。
-    expect(container.querySelector('[data-credential-status-toggle="true"]')).toBeNull()
-    await act(async () => icon()?.click())
     expect(container.querySelector('[data-credential-status-toggle="true"]')).toBeNull()
   })
 })

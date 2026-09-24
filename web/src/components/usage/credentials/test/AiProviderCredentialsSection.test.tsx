@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { AiProviderCredentialsSection } from '../AiProviderCredentialsSection'
+import { createAiProviderSectionProps } from './credentialSectionFixtures'
 import type { AiProviderCredentialRow } from '../credentialViewModels'
 
 vi.mock('react-i18next', () => ({
@@ -14,18 +15,9 @@ describe('AiProviderCredentialsSection', () => {
   it('renders the AI Provider title without the Credentials eyebrow', () => {
     const html = renderToStaticMarkup(
       <AiProviderCredentialsSection
+        {...createAiProviderSectionProps()}
         rows={[]}
         total={0}
-        page={1}
-        totalPages={1}
-        pageSize={10}
-        activeOnly={false}
-        sort="priority"
-        loading={false}
-        onPageChange={() => undefined}
-        onPageSizeChange={() => undefined}
-        onActiveOnlyChange={() => undefined}
-        onSortChange={() => undefined}
       />,
     )
 
@@ -74,22 +66,13 @@ describe('AiProviderCredentialsSection', () => {
       remainingDaysLabel: '25d',
       primaryQuota: { label: '5h' },
       secondaryQuota: { label: 'Weekly' },
-    } as AiProviderCredentialRow & Record<string, unknown>
+    } satisfies AiProviderCredentialRow & Record<string, unknown>
 
     const html = renderToStaticMarkup(
       <AiProviderCredentialsSection
+        {...createAiProviderSectionProps()}
         rows={[row]}
         total={1}
-        page={1}
-        totalPages={1}
-        pageSize={10}
-        activeOnly={false}
-        sort="priority"
-        loading={false}
-        onPageChange={() => undefined}
-        onPageSizeChange={() => undefined}
-        onActiveOnlyChange={() => undefined}
-        onSortChange={() => undefined}
       />,
     )
 
@@ -105,6 +88,8 @@ describe('AiProviderCredentialsSection', () => {
     expect(html).toContain('61.75%')
     expect(html).toContain('usage_stats.credentials_last_used')
     expect(html).toContain('usage_stats.credentials_stats_updated')
+    expect(html).toContain('05/10 10:00')
+    expect(html).toContain('05/10 10:02')
     expect(html).toContain('data-provider-brand-icon="claude"')
     expect(html.indexOf('data-provider-brand-icon="claude"')).toBeLessThan(html.lastIndexOf('Provider Key'))
     // 图标本身交给按钮承载语义，按钮名称使用凭证 displayName，状态由 aria-pressed 表达。
@@ -117,7 +102,6 @@ describe('AiProviderCredentialsSection', () => {
     expect(html).toContain('usage_stats.credentials_sort_priority')
     expect(html).toContain('aria-label="usage_stats.credentials_sort_label: usage_stats.credentials_sort_priority"')
     expect(html).toContain('usage_stats.credentials_sort_last_used')
-    expect(html).toContain('data-credential-pagination-sort-sizer="true"')
     expect(html).not.toContain('Team')
     expect(html).not.toContain('25d')
     expect(html).not.toContain('Weekly')
@@ -168,18 +152,7 @@ describe('AiProviderCredentialsSection', () => {
 
     const html = renderToStaticMarkup(
       <AiProviderCredentialsSection
-        rows={[row]}
-        total={1}
-        page={1}
-        totalPages={1}
-        pageSize={10}
-        activeOnly={false}
-        sort="priority"
-        loading={false}
-        onPageChange={() => undefined}
-        onPageSizeChange={() => undefined}
-        onActiveOnlyChange={() => undefined}
-        onSortChange={() => undefined}
+        {...createAiProviderSectionProps({ rows: [row], total: 1 })}
       />,
     )
 

@@ -18,7 +18,7 @@ import (
 func TestUsageIdentityDetailMatchesListItemIncludingCachedHealth(t *testing.T) {
 	for _, authType := range []entities.UsageIdentityAuthType{1, 2} {
 		t.Run(fmt.Sprint(authType), func(t *testing.T) {
-			db := openUsageIdentityAliasAPIDatabase(t)
+			db := openAPITestDatabase(t)
 			now := time.Now()
 			row := entities.UsageIdentity{ID: 1, AuthType: authType, Identity: "health-fixture", Name: "Fixture", Type: "codex", TotalRequests: 100, ResetTotalRequests: 99, StatsResetAt: &now}
 			if err := db.Create(&row).Error; err != nil {
@@ -77,7 +77,7 @@ func TestUsageIdentityDetailMatchesListItemIncludingCachedHealth(t *testing.T) {
 func TestUsageIdentityDetailReadsOffPageAndDeletedIdentity(t *testing.T) {
 	for _, authType := range []entities.UsageIdentityAuthType{1, 2} {
 		t.Run(fmt.Sprint(authType), func(t *testing.T) {
-			db := openUsageIdentityAliasAPIDatabase(t)
+			db := openAPITestDatabase(t)
 			resetAt := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
 			row := entities.UsageIdentity{ID: 1, AuthType: authType, Identity: "detail-fixture", Name: "Fixture", TotalRequests: 10, ResetTotalRequests: 8, StatsResetAt: &resetAt, IsDeleted: true}
 			if err := db.Create(&row).Error; err != nil {
@@ -127,7 +127,7 @@ func TestUsageIdentityDetailReadsOffPageAndDeletedIdentity(t *testing.T) {
 }
 
 func TestUsageIdentityDetailValidatesIDAndAuthorization(t *testing.T) {
-	db := openUsageIdentityAliasAPIDatabase(t)
+	db := openAPITestDatabase(t)
 	seedUsageIdentityAliasAPIIdentity(t, db)
 	for _, tc := range []struct {
 		id   string

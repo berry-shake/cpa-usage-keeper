@@ -3,9 +3,9 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
+import { RequestEventsTestCard } from './requestEventsFixtures';
 import i18n from '@/i18n';
 import type { UsageEvent } from '@/lib/types';
-import { RequestEventsDetailsCard } from '../RequestEventsDetailsCard';
 
 const baseEvent: UsageEvent = {
   id: 'metrics-tooltip-event',
@@ -46,20 +46,12 @@ const largeTokenEvent: UsageEvent = {
 };
 
 const renderCardElement = (events: UsageEvent[]) => (
-  <RequestEventsDetailsCard
+  <RequestEventsTestCard
     events={events}
-    loading={false}
-    totalCount={events.length}
     modelOptions={['gpt-5']}
     sourceOptions={[{ value: 'source-a', label: 'Provider A' }]}
-    modelFilter="__all__"
-    sourceFilter="__all__"
-    resultFilter="__all__"
     visibleColumnIds={['total_tokens', 'cache_read_rate']}
     columnOrder={['total_tokens', 'cache_read_rate']}
-    onModelFilterChange={() => undefined}
-    onSourceFilterChange={() => undefined}
-    onResultFilterChange={() => undefined}
   />
 );
 
@@ -92,8 +84,6 @@ describe('RequestEventsDetailsCard token and cache tooltips', () => {
       const cells = mounted.container.querySelectorAll<HTMLTableCellElement>('tbody td');
       const tokensCell = cells[0];
       const cacheCell = cells[1];
-      expect(tokensCell).toBeInstanceOf(HTMLTableCellElement);
-      expect(cacheCell).toBeInstanceOf(HTMLTableCellElement);
       expect(tokensCell.tabIndex).toBe(0);
       expect(cacheCell.tabIndex).toBe(0);
       expect(tokensCell.getAttribute('title')).toBeNull();

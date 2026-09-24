@@ -26,6 +26,7 @@ type CredentialDetailTab = 'overview' | 'quota-history' | 'requests' | 'errors'
 interface CredentialDetailDrawerProps {
   open: boolean
   selection: CredentialDetailSelection | null
+  timeZone?: string
   onAuthRequired?: () => void
   onResetStats?: (id: string) => Promise<void>
   requestLogAccessEnabled?: boolean
@@ -72,6 +73,7 @@ function appendCredentialErrorEvents(
 export function CredentialDetailDrawer({
   open,
   selection,
+  timeZone,
   onAuthRequired,
   onResetStats,
   requestLogAccessEnabled = false,
@@ -558,7 +560,7 @@ export function CredentialDetailDrawer({
             {selection.kind === 'auth-file' ? (
               <section className={styles.overviewSection}>
                 <h3>{t('usage_stats.credentials_detail_quota')}</h3>
-                <AuthFileQuotaPanel row={selection.row} quotaUsageMode="current" />
+                <AuthFileQuotaPanel row={selection.row} quotaUsageMode="current" timeZone={timeZone} />
               </section>
             ) : null}
           </div>

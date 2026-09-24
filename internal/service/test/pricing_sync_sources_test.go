@@ -32,7 +32,7 @@ func TestPricingSyncLiteLLMUsesSharedMatchingAndZeroCacheDefaults(t *testing.T) 
 	transport := http.DefaultTransport
 	http.DefaultTransport = liteLLMCatalogTransport{t}
 	t.Cleanup(func() { http.DefaultTransport = transport })
-	provider := service.NewPricingService(openPricingServiceTestDatabase(t), emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
+	provider := service.NewPricingService(openUsageServiceTestDatabase(t), emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
 		{ID: "custom/gpt-test"}, {ID: "claude-test"}, {ID: "overflow"},
 	}}}})
 	preview, err := provider.PreviewPricingSync(context.Background(), "litellm")

@@ -41,25 +41,13 @@ describe('CredentialProviderFilterBar reset behaviour', () => {
     ))
   }
 
-  it('keeps a restored filter while the type counts are still empty', async () => {
-    // 首帧计数为空，此时重置会让持久化的供应商筛选活不过一次刷新。
+  it.each([
+    { label: 'not loaded', counts: [], calls: [] },
+    { label: 'unavailable after loading', counts: [{ type: 'claude', count: 3 }], calls: [['all']] },
+    { label: 'available', counts: [{ type: 'openai', count: 2 }, { type: 'claude', count: 3 }], calls: [] },
+  ])('reconciles a restored filter when counts are $label', async ({ counts, calls }) => {
     const onChange = vi.fn()
-    await render([], 'openai', onChange)
-
-    expect(onChange).not.toHaveBeenCalled()
-  })
-
-  it('resets a filter that loaded counts no longer offer', async () => {
-    const onChange = vi.fn()
-    await render([{ type: 'claude', count: 3 }], 'openai', onChange)
-
-    expect(onChange).toHaveBeenCalledWith('all')
-  })
-
-  it('keeps a filter that loaded counts still offer', async () => {
-    const onChange = vi.fn()
-    await render([{ type: 'openai', count: 2 }, { type: 'claude', count: 3 }], 'openai', onChange)
-
-    expect(onChange).not.toHaveBeenCalled()
+    await render(counts, 'openai', onChange)
+    expect(onChange.mock.calls).toEqual(calls)
   })
 })

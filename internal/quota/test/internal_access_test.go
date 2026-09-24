@@ -141,10 +141,6 @@ func lastAutoRefreshAttemptAt(service *quota.Service) time.Time {
 	return quotaServiceField(service, "lastAutoRefreshAttemptAt").Interface().(time.Time)
 }
 
-func usageHeaderFlushInterval(service *quota.Service) time.Duration {
-	return quotaServiceField(service, "usageHeaderFlushInterval").Interface().(time.Duration)
-}
-
 func setUsageHeaderTimerFactory(service *quota.Service, factory func(time.Duration) (<-chan time.Time, func())) {
 	quotaServiceField(service, "usageHeaderNewTimer").Set(reflect.ValueOf(factory))
 }

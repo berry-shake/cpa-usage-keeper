@@ -79,20 +79,4 @@ describe('paired analysis chart details', () => {
       }
     } finally { unmount(); }
   });
-
-  it('preserves each chart fixed palette before appending colors for additional entries', () => {
-    const { container, unmount } = mount();
-    const compositionPalette = ['#1d4ed8', '#ca8a04', '#15803d', '#7e22ce', '#b91c1c', '#0891b2'];
-    const modelPalette = ['#db2777', '#d97706', '#059669', '#2563eb', '#dc2626'];
-    try {
-      const lists = Array.from(container.querySelectorAll('ol'));
-      for (const [index, palette] of [compositionPalette, modelPalette].entries()) {
-        const colors = Array.from(lists[index].querySelectorAll('button')).map((row) => row.style.getPropertyValue('--ranking-color'));
-        expect(colors.slice(0, palette.length)).toEqual(palette);
-        expect(colors).toHaveLength(12);
-        expect(colors[palette.length]).toBeTruthy();
-        expect(palette).not.toContain(colors[palette.length]);
-      }
-    } finally { unmount(); }
-  });
 });

@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appendUniqueUsageEvents, getBackToCPALinkURL, getCredentialSectionVisibility, getOverviewDisplayLoading, getUsageCustomRangeForTab, getUsageTabOptions, handleUsageEventLoadMoreError, isUsagePageVisible, loadAnalysisSections, loadRequestEventsPreferences, loadUsagePageVersionInfo, normalizeRequestEventsPreferences, normalizeStoredApiKeyFilter, normalizeUsageTabValue, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, resolveApiKeyFilterRequestState, runUsageEventRequestLogDownload, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldResetSelectedApiKeyFilter, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration, API_KEY_FILTER_MAX_LENGTH } from '../UsagePage';
+import { appendUniqueUsageEvents, getBackToCPALinkURL, getCredentialSectionVisibility, getOverviewDisplayLoading, getUsageCustomRangeForTab, getUsageTabOptions, handleUsageEventLoadMoreError, isUsagePageVisible, loadAnalysisSections, loadRequestEventsPreferences, loadUsagePageVersionInfo, normalizeRequestEventsPreferences, normalizeStoredApiKeyFilter, normalizeUsageTabValue, refreshPageData, REQUEST_EVENTS_PREFERENCES_STORAGE_KEY, resolveApiKeyFilterRequestState, resolveCredentialTimeZone, runUsageEventRequestLogDownload, sanitizeRequestEventFilters, saveRequestEventsPreferences, scheduleOverviewAutoRefresh, shouldAutoRefreshUsageTab, shouldResetSelectedApiKeyFilter, shouldShowApiKeyFilter, shouldShowRangeControls, shouldShowUpdateCheckButton, getUpdateCheckToastDuration, API_KEY_FILTER_MAX_LENGTH } from '../UsagePage';
 import { REQUEST_EVENT_COLUMN_IDS } from '@/components/usage/RequestEventsDetailsCard';
 import { ApiError } from '@/lib/api';
 import type { UsageFilterWindow, VersionResponse } from '@/lib/types';
+
+describe('resolveCredentialTimeZone', () => {
+  it('uses only current server responses and never a persisted range timezone', () => {
+    expect(resolveCredentialTimeZone(' Asia/Shanghai ', 'UTC')).toBe('Asia/Shanghai');
+    expect(resolveCredentialTimeZone(undefined, 'America/New_York')).toBe('America/New_York');
+    expect(resolveCredentialTimeZone(undefined, undefined)).toBeUndefined();
+  });
+});
 
 describe('appendUniqueUsageEvents', () => {
   it('appends cursor batches without duplicating overlapping event ids', () => {

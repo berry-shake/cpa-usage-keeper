@@ -79,33 +79,33 @@ const waitFor = async (check: () => boolean) => {
   expect(check()).toBe(true)
 }
 
+let container: HTMLDivElement
+let root: Root
+let fetchMock: ReturnType<typeof vi.spyOn>
+let statusDeferred: Deferred<Response>
+
+beforeEach(() => {
+  window.localStorage.clear()
+  container = document.createElement('div')
+  document.body.appendChild(container)
+  root = createRoot(container)
+  statusDeferred = createDeferred<Response>()
+  fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    if (isCredentialStatusPatch(input, init as RequestInit | undefined)) {
+      return statusDeferred.promise
+    }
+    return Promise.resolve(identitiesResponse(String(input)))
+  })
+})
+
+afterEach(async () => {
+  await act(async () => root.unmount())
+  container.remove()
+  latest = null
+  fetchMock.mockRestore()
+})
+
 describe('credential status refresh after toggle', () => {
-  let container: HTMLDivElement
-  let root: Root
-  let fetchMock: ReturnType<typeof vi.spyOn>
-  let statusDeferred: Deferred<Response>
-
-  beforeEach(() => {
-    window.localStorage.clear()
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    root = createRoot(container)
-    statusDeferred = createDeferred<Response>()
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-      if (isCredentialStatusPatch(input, init as RequestInit | undefined)) {
-        return statusDeferred.promise
-      }
-      return Promise.resolve(identitiesResponse(String(input)))
-    })
-  })
-
-  afterEach(async () => {
-    await act(async () => root.unmount())
-    container.remove()
-    latest = null
-    fetchMock.mockRestore()
-  })
-
   it('refreshes with the page the user moved to while the status request was pending', async () => {
     await act(async () => root.render(<Harness onNotice={() => undefined} />))
     await flush()
@@ -171,32 +171,6 @@ describe('credential status refresh after toggle', () => {
 })
 
 describe('credential status pending identity', () => {
-  let container: HTMLDivElement
-  let root: Root
-  let fetchMock: ReturnType<typeof vi.spyOn>
-  let statusDeferred: Deferred<Response>
-
-  beforeEach(() => {
-    window.localStorage.clear()
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    root = createRoot(container)
-    statusDeferred = createDeferred<Response>()
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-      if (isCredentialStatusPatch(input, init as RequestInit | undefined)) {
-        return statusDeferred.promise
-      }
-      return Promise.resolve(identitiesResponse(String(input)))
-    })
-  })
-
-  afterEach(async () => {
-    await act(async () => root.unmount())
-    container.remove()
-    latest = null
-    fetchMock.mockRestore()
-  })
-
   it('isolates pending state by Keeper identity id while still sending auth_index upstream', async () => {
     await act(async () => root.render(<Harness onNotice={() => undefined} />))
     await flush()

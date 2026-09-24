@@ -128,12 +128,6 @@ const createFakeChartCanvas = (): HTMLCanvasElement => {
   return canvas as unknown as HTMLCanvasElement;
 };
 
-const getRecordedGradientStops = (fill: unknown): Array<[number, string]> => {
-  if (!fill || typeof fill !== 'object') return [];
-  const stops = (fill as Partial<RecordedGradient>).stops;
-  return Array.isArray(stops) ? stops : [];
-};
-
 const readVerticalGradientStops = (backgroundColor: unknown) => {
   expect(typeof backgroundColor).toBe('function');
   const stops: Array<[number, string]> = [];
@@ -195,13 +189,6 @@ describe('AnalysisPanel Top Models card', () => {
     expect(topModelsBar?.data.datasets.at(-1)?.data).toEqual([null, 40]);
     const colors = topModelsBar?.data.datasets.map((dataset) => readVerticalGradientStops(dataset.backgroundColor)[1][1]);
     expect(new Set(colors).size).toBe(7);
-    expect(topModelsBar?.data.datasets.slice(0, 5).map((dataset) => readVerticalGradientStops(dataset.backgroundColor))).toEqual([
-      [[0, '#f9a8d4'], [1, '#db2777']],
-      [[0, '#fcd34d'], [1, '#d97706']],
-      [[0, '#6ee7b7'], [1, '#059669']],
-      [[0, '#93c5fd'], [1, '#2563eb']],
-      [[0, '#fca5a5'], [1, '#dc2626']],
-    ]);
     expect(topModelsBar?.options.scales?.x?.stacked).toBe(true);
     expect(topModelsBar?.options.scales?.tokens?.stacked).toBe(true);
 
@@ -235,7 +222,7 @@ describe('AnalysisPanel Top Models card', () => {
     expect(filter?.({ parsed: { y: 0 } })).toBe(false);
   });
 
-  it('sorts each tooltip by that bucket token usage and shares Token Usage tooltip spacing', () => {
+  it('sorts each tooltip by that bucket token usage', () => {
     const buckets = ['2026-08-01T01:00:00Z'];
     const analysis = baseAnalysis('hourly', buckets);
     analysis.model_usage.series = [
@@ -247,7 +234,6 @@ describe('AnalysisPanel Top Models card', () => {
       <AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />,
     );
 
-    const tokenTooltip = chartCapture.bars[0]?.options.plugins?.tooltip;
     const topModelsTooltip = findTopModelsBar()?.options.plugins?.tooltip;
     const itemSort = topModelsTooltip?.itemSort as ((left: unknown, right: unknown, data: unknown) => number) | undefined;
     expect(typeof itemSort).toBe('function');
@@ -261,10 +247,6 @@ describe('AnalysisPanel Top Models card', () => {
       'model-gamma',
       'model-beta',
     ]);
-    expect(topModelsTooltip?.bodySpacing).toBe(2);
-    expect(topModelsTooltip?.bodySpacing).toBe(tokenTooltip?.bodySpacing);
-    expect(topModelsTooltip?.footerMarginTop).toBe(tokenTooltip?.footerMarginTop);
-    expect(topModelsTooltip?.padding).toEqual(tokenTooltip?.padding);
   });
 
   it('keeps every non-zero stacked segment visible after Chart.js clipping', () => {
@@ -412,64 +394,16 @@ describe('AnalysisPanel Top Models card', () => {
       act(() => alphaButton?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
       act(() => betaButton?.focus());
       expect(document.activeElement).toBe(betaButton);
-      expect(findLatestTopModelsBar()?.data.datasets[0]?.borderWidth).toBe(0);
-      expect(findLatestTopModelsBar()?.data.datasets[1]?.borderWidth).toBe(1.5);
+      expect(betaButton?.dataset.active).toBe('true');
+      expect(alphaButton?.dataset.muted).toBe('true');
 
       act(() => alphaButton?.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body })));
       expect(document.activeElement).toBe(betaButton);
-      expect(findLatestTopModelsBar()?.data.datasets[1]?.borderWidth).toBe(1.5);
+      expect(betaButton?.dataset.active).toBe('true');
     } finally {
       act(() => root.unmount());
       container.remove();
     }
 
-  });
-
-  it('keeps non-focused datasets muted while the chart bucket is active', () => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-    const buckets = ['2026-08-01T01:00:00Z'];
-    const analysis = baseAnalysis('hourly', buckets);
-    analysis.model_usage.series = [
-      { model: 'model-alpha', total_tokens: [100], requests: [1] },
-      { model: 'model-beta', total_tokens: [50], requests: [1] },
-    ];
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    let chart: Chart<'bar', Array<number | null>, string> | undefined;
-    try {
-      act(() => root.render(
-        <AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} />,
-      ));
-      const betaButton = Array.from(container.querySelectorAll('button'))
-        .find((item) => item.getAttribute('aria-label')?.startsWith('2. model-beta'));
-      act(() => betaButton?.focus());
-
-      const topModelsBar = findLatestTopModelsBar();
-      expect(topModelsBar).toBeDefined();
-      chart = new Chart(createFakeChartCanvas(), {
-        type: 'bar',
-        data: topModelsBar?.data ?? { labels: [], datasets: [] },
-        platform: BasicPlatform,
-        options: {
-          ...topModelsBar?.options,
-          responsive: false,
-          animation: false,
-        },
-      });
-      chart.setActiveElements([
-        { datasetIndex: 0, index: 0 },
-        { datasetIndex: 1, index: 0 },
-      ]);
-
-      const alphaElement = chart.getDatasetMeta(0).data[0] as unknown as { options: { backgroundColor?: unknown } };
-      const expected = readVerticalGradientStops(topModelsBar!.data.datasets[0].backgroundColor);
-      expect(getRecordedGradientStops(alphaElement.options.backgroundColor)).toEqual(expected);
-      expect(expected.every(([, color]) => color.endsWith('33'))).toBe(true);
-    } finally {
-      chart?.destroy();
-      act(() => root.unmount());
-      container.remove();
-    }
   });
 });

@@ -59,7 +59,7 @@ func TestDeleteCodexQuotaCycleResolvesObservationOwnershipBeforeDeletion(t *test
 	for _, detour := range []bool{false, true} {
 		for _, target := range []int{0, 1} {
 			t.Run(fmt.Sprintf("detour=%t/target=%d", detour, target), func(t *testing.T) {
-				db := openCodexQuotaHistoryRepositoryDatabase(t, "delete-ownership.db")
+				db := openTestDatabase(t)
 				base := time.Now().Add(-time.Hour)
 				reset := base.Add(5 * time.Hour)
 				old := codexQuotaHistoryObservation("delete-auth", "primary", 18000, reset, 60, base)
@@ -92,7 +92,7 @@ func TestDeleteCodexQuotaCycleResolvesObservationOwnershipBeforeDeletion(t *test
 }
 
 func TestDeleteCodexQuotaCyclePreservesOtherCyclesAndUsage(t *testing.T) {
-	db := openCodexQuotaHistoryRepositoryDatabase(t, "delete-cycle.db")
+	db := openTestDatabase(t)
 	base := time.Now().Add(-time.Hour)
 	reset := base.Add(7 * 24 * time.Hour)
 	observations := []repositorydto.CodexMainQuotaObservation{
@@ -143,7 +143,7 @@ func TestDeleteCodexQuotaCyclePreservesOtherCyclesAndUsage(t *testing.T) {
 }
 
 func TestDeleteCodexQuotaCycleRollsBackWhenParentDeleteFails(t *testing.T) {
-	db := openCodexQuotaHistoryRepositoryDatabase(t, "delete-cycle-rollback.db")
+	db := openTestDatabase(t)
 	base := time.Now()
 	if err := repository.WriteCodexMainQuotaObservations(context.Background(), db, []repositorydto.CodexMainQuotaObservation{
 		codexQuotaHistoryObservation("delete-auth", "primary", 18000, base.Add(time.Hour), 80, base),

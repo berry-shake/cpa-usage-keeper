@@ -2,7 +2,7 @@ package test
 
 import (
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +13,6 @@ import (
 	"cpa-usage-keeper/internal/repository/migration"
 	"cpa-usage-keeper/internal/timeutil"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -34,18 +33,17 @@ func TestUsageEventAPIGroupKeyTimestampIndexMigration(t *testing.T) {
 		{name: "existing ascending index", seedIndex: "timestamp"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			dbPath := filepath.Join(t.TempDir(), "app.db")
 			var db *gorm.DB
-			var err error
 			if test.fresh {
-				db, err = repository.OpenDatabase(config.Config{SQLitePath: dbPath})
+				var err error
+				db, err = repository.OpenDatabase(config.Config{SQLitePath: filepath.Join(t.TempDir(), "app.db")})
+				if err != nil {
+					t.Fatalf("open database: %v", err)
+				}
+				closeMigrationTestDatabase(t, db)
 			} else {
-				db, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+				db = openUnmigratedTestDatabase(t)
 			}
-			if err != nil {
-				t.Fatalf("open database: %v", err)
-			}
-			closeMigrationTestDatabase(t, db)
 
 			if !test.fresh {
 				// 旧库只保留本次迁移需要的列，历史版本标记为完成，避免其它迁移影响测试。
@@ -122,11 +120,7 @@ func makeAPIGroupKeyTimestampMigrationPending(t *testing.T, db *gorm.DB) {
 }
 
 func TestUsageEventAPIGroupKeyTimestampIndexMigrationRollsBackOnFailure(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "invalid-schema.db")), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	closeMigrationTestDatabase(t, db)
+	db := openUnmigratedTestDatabase(t)
 	// 缺少 timestamp 让重建失败，验证原索引删除和迁移版本记录都在同一事务中回滚。
 	for _, statement := range []string{
 		`CREATE TABLE usage_events (id INTEGER PRIMARY KEY, api_group_key TEXT NOT NULL)`,
@@ -146,7 +140,7 @@ func TestUsageEventAPIGroupKeyTimestampIndexMigrationRollsBackOnFailure(t *testi
 		t.Fatal("expected missing timestamp column to fail migration")
 	}
 	var columns []string
-	if err := db.Raw(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, usageEventAPIGroupKeyTimestampIndexName).Scan(&columns).Error; err != nil || !reflect.DeepEqual(columns, []string{"api_group_key", "id"}) {
+	if err := db.Raw(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, usageEventAPIGroupKeyTimestampIndexName).Scan(&columns).Error; err != nil || !slices.Equal(columns, []string{"api_group_key", "id"}) {
 		t.Fatalf("expected original compound index to survive rollback, got %v, error %v", columns, err)
 	}
 	if !db.Migrator().HasIndex(&entities.UsageEvent{}, "idx_usage_events_api_group_key") {
@@ -184,7 +178,7 @@ func assertAPIGroupKeyTimestampQueries(t *testing.T, db *gorm.DB, start, end tim
 	predicate := `api_group_key = ? AND timestamp >= ? AND timestamp < ?`
 	listSQL := `SELECT id FROM usage_events WHERE ` + predicate + ` ORDER BY timestamp DESC, id DESC LIMIT 2`
 	var ids []int64
-	if err := db.Raw(listSQL, args...).Scan(&ids).Error; err != nil || !reflect.DeepEqual(ids, []int64{5, 4}) {
+	if err := db.Raw(listSQL, args...).Scan(&ids).Error; err != nil || !slices.Equal(ids, []int64{5, 4}) {
 		t.Fatalf("expected descending timestamp/id page [5 4], got %v, error %v", ids, err)
 	}
 	var count int64

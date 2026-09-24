@@ -9,7 +9,7 @@ import (
 )
 
 func TestUsageIdentityStatsResetSortsByPeriodAndRetainsDeletedBaselines(t *testing.T) {
-	db := openUsageIdentityAliasRepositoryDatabase(t)
+	db := openTestDatabase(t)
 	ctx := context.Background()
 	now := time.Now()
 	for _, identity := range []entities.UsageIdentity{
@@ -57,7 +57,7 @@ func TestUsageIdentityStatsResetSortsByPeriodAndRetainsDeletedBaselines(t *testi
 }
 
 func TestUsageIdentityStatsResetAndAggregationShareAtomicSnapshot(t *testing.T) {
-	db := openUsageIdentityAliasRepositoryDatabase(t)
+	db := openTestDatabase(t)
 	ctx := context.Background()
 	now := time.Now()
 	identity := entities.UsageIdentity{ID: 1, Identity: "concurrent", AuthType: 1, TotalRequests: 10, SuccessCount: 10, TotalTokens: 100, InputTokens: 80, CacheReadTokens: 20}

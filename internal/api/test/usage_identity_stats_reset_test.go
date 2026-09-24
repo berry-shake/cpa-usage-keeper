@@ -18,7 +18,7 @@ import (
 func TestUsageIdentityStatsResetPreservesLifetimeAndCountsLaterAggregation(t *testing.T) {
 	for _, authType := range []entities.UsageIdentityAuthType{entities.UsageIdentityAuthTypeAuthFile, entities.UsageIdentityAuthTypeAIProvider} {
 		t.Run(fmt.Sprint(authType), func(t *testing.T) {
-			db := openUsageIdentityAliasAPIDatabase(t)
+			db := openAPITestDatabase(t)
 			ctx := context.Background()
 			now := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
 			identity := entities.UsageIdentity{ID: 1, AuthType: authType, Identity: "reset-fixture", Name: "Fixture", Type: "codex", TotalRequests: 10, SuccessCount: 8, FailureCount: 2, TotalTokens: 1000, InputTokens: 600, CacheReadTokens: 300, LastAggregatedUsageEventID: 5, LastUsedAt: &now}
@@ -107,7 +107,7 @@ func TestUsageIdentityStatsResetPreservesLifetimeAndCountsLaterAggregation(t *te
 }
 
 func TestUsageIdentityStatsResetValidatesIDAndAuthorization(t *testing.T) {
-	db := openUsageIdentityAliasAPIDatabase(t)
+	db := openAPITestDatabase(t)
 	seedUsageIdentityAliasAPIIdentity(t, db)
 	for _, tc := range []struct {
 		name, id     string

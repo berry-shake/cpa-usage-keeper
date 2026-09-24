@@ -38,10 +38,9 @@ describe('credential list preferences wiring', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
-    fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({ identities: [], total_count: 0, page: 1, page_size: 10, total_pages: 0, type_counts: [] }),
-    } as Response)
+    fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({
+      identities: [], total_count: 0, page: 1, page_size: 10, total_pages: 0, type_counts: [],
+    }))
   })
 
   afterEach(async () => {
@@ -88,16 +87,16 @@ describe('credential list preferences wiring', () => {
 
   it('persists each selection and returns to the first page', async () => {
     await act(async () => root.render(<Harness />))
-    await act(async () => latest?.setAiProviderPage(4))
+    await act(async () => latest!.setAiProviderPage(4))
     expect(latest?.aiProviderPage).toBe(4)
 
-    await act(async () => latest?.setAiProviderSort('total_tokens'))
+    await act(async () => latest!.setAiProviderSort('total_tokens'))
     expect(latest?.aiProviderSort).toBe('total_tokens')
     expect(latest?.aiProviderPage).toBe(1)
     expect(storedPreferences('ai-provider').sort).toBe('total_tokens')
 
-    await act(async () => latest?.setAiProviderPageSize(20))
-    await act(async () => latest?.setAiProviderProviderFilter('claude'))
+    await act(async () => latest!.setAiProviderPageSize(20))
+    await act(async () => latest!.setAiProviderProviderFilter('claude'))
     expect(storedPreferences('ai-provider')).toEqual({
       version: 1,
       sort: 'total_tokens',
@@ -108,7 +107,7 @@ describe('credential list preferences wiring', () => {
 
   it('keeps the two sections in separate records', async () => {
     await act(async () => root.render(<Harness />))
-    await act(async () => latest?.setAuthFileSort('last_used_at'))
+    await act(async () => latest!.setAuthFileSort('last_used_at'))
 
     expect(latest?.authFileSort).toBe('last_used_at')
     expect(latest?.aiProviderSort).toBe('total_requests')

@@ -40,8 +40,7 @@ func BenchmarkBuildUsageHeaderSnapshot(b *testing.B) {
 		Headers:    headers,
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		// 每轮必须成功，避免编译器把无观察结果的构造路径消除。
 		if snapshot, ok := quota.BuildUsageHeaderSnapshot(input); !ok || snapshot == nil {
 			b.Fatal("expected codex usage header snapshot")
@@ -68,8 +67,7 @@ func BenchmarkTryAppendUsageHeaderSnapshotPointers32(b *testing.B) {
 		}
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		if !service.TryAppendUsageHeaderSnapshots(snapshots) {
 			b.Fatal("expected pointer batch append")
 		}

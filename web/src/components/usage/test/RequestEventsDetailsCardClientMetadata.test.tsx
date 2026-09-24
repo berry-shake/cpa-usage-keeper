@@ -3,7 +3,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
-import { RequestEventsDetailsCard } from '../RequestEventsDetailsCard';
+import { RequestEventsTestCard } from './requestEventsFixtures';
 import type { UsageEvent } from '@/lib/types';
 
 const clientIP = '2001:0db8:85a3:0000:0000:8a2e:0370:7334';
@@ -45,20 +45,12 @@ const renderCardElement = (
   events: UsageEvent[],
   visibleColumnIds: Array<(typeof clientMetadataColumnIds)[number]> = [...clientMetadataColumnIds],
 ) => (
-  <RequestEventsDetailsCard
+  <RequestEventsTestCard
     events={events}
-    loading={false}
-    totalCount={events.length}
     modelOptions={['gpt-5']}
     sourceOptions={[{ value: 'source-a', label: 'Provider A' }]}
-    modelFilter="__all__"
-    sourceFilter="__all__"
-    resultFilter="__all__"
     visibleColumnIds={visibleColumnIds}
     columnOrder={[...clientMetadataColumnIds]}
-    onModelFilterChange={() => undefined}
-    onSourceFilterChange={() => undefined}
-    onResultFilterChange={() => undefined}
   />
 );
 
@@ -81,7 +73,7 @@ const mountCard = async (
 };
 
 describe('RequestEventsDetailsCard client metadata columns', () => {
-  it('limits displayed values while preserving a complete IPv6 address', async () => {
+  it('limits displayed metadata and exposes complete raw values to keyboard users and tooltips', async () => {
     const mounted = await mountCard([baseEvent]);
 
     try {
@@ -92,16 +84,6 @@ describe('RequestEventsDetailsCard client metadata columns', () => {
         `${Array.from(userAgent).slice(0, 48).join('')}...`,
       ]);
       expect(cells.every((cell) => cell.getAttribute('title') === null)).toBe(true);
-    } finally {
-      await mounted.unmount();
-    }
-  });
-
-  it('shows only the complete raw value in the shared custom tooltip', async () => {
-    const mounted = await mountCard([baseEvent]);
-
-    try {
-      const cells = Array.from(mounted.container.querySelectorAll<HTMLTableCellElement>('tbody td'));
       for (const [cell, rawValue] of cells.map((cell, index) => (
         [cell, [clientIP, xForwardedFor, userAgent][index]] as const
       ))) {
@@ -113,7 +95,6 @@ describe('RequestEventsDetailsCard client metadata columns', () => {
         });
         const tooltip = document.body.querySelector('[role="tooltip"]');
         expect(tooltip?.textContent).toBe(rawValue);
-        expect(tooltip?.querySelectorAll('span')).toHaveLength(1);
 
         await act(async () => {
           cell.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));

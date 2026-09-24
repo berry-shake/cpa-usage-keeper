@@ -1,12 +1,38 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { resolve } from 'node:path';
+import { compile } from 'sass';
 import { expect, it, vi } from 'vitest';
 import { Modal } from '../Modal';
 import { Select } from '../Select';
+import styles from '../Select.module.scss';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+const selectCSS = compile(resolve(process.cwd(), 'src/components/ui/Select.module.scss')).css;
+
+it('renders disabled selects with the shared inert control state', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const stylesheet = document.createElement('style');
+  stylesheet.textContent = selectCSS.replace(/\.trigger(?=[:\s[])/g, `.${styles.trigger}`);
+  document.head.appendChild(stylesheet);
+  try {
+    await act(async () => root.render(
+      <Select value="a" options={[{ value: 'a', label: 'Alpha' }]} onChange={vi.fn()} disabled />
+    ));
+    const trigger = container.querySelector<HTMLButtonElement>('button')!;
+    expect(trigger.disabled).toBe(true);
+    expect(getComputedStyle(trigger).cursor).toBe('not-allowed');
+    expect(getComputedStyle(trigger).opacity).toBe('0.6');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    stylesheet.remove();
+  }
+});
 
 it.each([false, true])('does not interrupt pointer scrolling with automatic option alignment (searchable: %s)', async (searchable) => {
   const container = document.createElement('div');

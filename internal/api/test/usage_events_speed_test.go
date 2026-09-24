@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strconv"
 	"testing"
@@ -32,8 +31,7 @@ func TestUsageEventSpeedWithoutTTFTAcrossListAndExports(t *testing.T) {
 				{ID: 2, LatencyMS: 0, OutputTokens: 61},
 			}}
 			router := NewRouter(nil, nil, provider, nil, AuthConfig{}, nil, "")
-			response := httptest.NewRecorder()
-			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			response := serveAPIGet(router, tc.path)
 			if response.Code != http.StatusOK {
 				t.Fatalf("expected status 200, got %d: %s", response.Code, response.Body.String())
 			}

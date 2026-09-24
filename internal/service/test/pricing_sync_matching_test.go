@@ -31,7 +31,7 @@ func TestPricingSyncPreservesModelVersionSuffixes(t *testing.T) {
 	for model := range cases {
 		modelList = append(modelList, models.ModelInfo{ID: model})
 	}
-	provider := service.NewPricingService(openPricingServiceTestDatabase(t), emptyPricingCatalogForTest(),
+	provider := service.NewPricingService(openUsageServiceTestDatabase(t), emptyPricingCatalogForTest(),
 		stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: modelList}}})
 	preview, err := provider.PreviewPricingSync(context.Background(), "")
 	if err != nil {

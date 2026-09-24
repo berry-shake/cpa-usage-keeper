@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { AuthFileCredentialsSection } from '../AuthFileCredentialsSection'
+import { createAuthFileSectionProps } from './credentialSectionFixtures'
 import type { AuthFileCredentialRow } from '../credentialViewModels'
 
 vi.mock('react-i18next', () => ({
@@ -10,33 +11,6 @@ vi.mock('react-i18next', () => ({
     t: (key: string, params?: Record<string, string>) => `${key}:${params?.tokens ?? ''}:${params?.cost ?? ''}`,
   }),
 }))
-
-const createSectionProps = (overrides: Partial<Parameters<typeof AuthFileCredentialsSection>[0]> = {}) => ({
-  rows: [],
-  total: 0,
-  page: 1,
-  totalPages: 1,
-  pageSize: 10,
-  activeOnly: false,
-  sort: 'priority' as const,
-  loading: false,
-  quotaRefreshing: false,
-  quotaRefreshError: '',
-  quotaInspectionStatus: null,
-  quotaInspectionLoading: false,
-  quotaInspectionStarting: false,
-  quotaInspectionError: '',
-  onPageChange: () => undefined,
-  onPageSizeChange: () => undefined,
-  onActiveOnlyChange: () => undefined,
-  onSortChange: () => undefined,
-  onRefreshQuota: async () => undefined,
-  onRefreshQuotaForAuthIndex: async () => undefined,
-  onResetQuotaForAuthIndex: async () => undefined,
-  onRefreshInspectionStatus: async () => undefined,
-  onStartInspection: async () => undefined,
-  ...overrides,
-})
 
 const createRow = (overrides: Partial<AuthFileCredentialRow['identity']> = {}): AuthFileCredentialRow => ({
   identity: { id: '1', identity: 'auth-1', type: 'codex', is_deleted: false, ...overrides },
@@ -59,7 +33,7 @@ const createRow = (overrides: Partial<AuthFileCredentialRow['identity']> = {}): 
 } as AuthFileCredentialRow)
 
 const renderSection = (rows: AuthFileCredentialRow[]) =>
-  renderToStaticMarkup(createElement(AuthFileCredentialsSection, createSectionProps({ rows, total: rows.length })))
+  renderToStaticMarkup(createElement(AuthFileCredentialsSection, createAuthFileSectionProps({ rows, total: rows.length })))
 
 describe('AuthFileCredentialsSection status toggle gating', () => {
   it('renders the enable/disable toggle for credential types Keeper knows', () => {

@@ -4,7 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
-import { RequestEventsDetailsCard } from '../RequestEventsDetailsCard';
+import { RequestEventsTestCard } from './requestEventsFixtures';
 
 describe('RequestEventsDetailsCard model filter ordering', () => {
   let container: HTMLDivElement;
@@ -29,25 +29,17 @@ describe('RequestEventsDetailsCard model filter ordering', () => {
     const originalModels = [...models];
     const onModelFilterChange = vi.fn();
     await act(async () => root.render(
-      <RequestEventsDetailsCard
+      <RequestEventsTestCard
         events={[]}
-        loading={false}
-        totalCount={0}
         modelOptions={models}
-        sourceOptions={[]}
         modelFilter={selectedModel}
-        sourceFilter="__all__"
-        resultFilter="__all__"
         onModelFilterChange={onModelFilterChange}
-        onSourceFilterChange={() => undefined}
-        onResultFilterChange={() => undefined}
       />,
     ));
 
-    const trigger = container.querySelector<HTMLInputElement>('input[role="combobox"][aria-label="Model"]');
-    expect(trigger).not.toBeNull();
-    await act(async () => trigger?.focus());
-    await act(async () => trigger?.click());
+    const trigger = container.querySelector<HTMLInputElement>('input[role="combobox"][aria-label="Model"]')!;
+    await act(async () => trigger.focus());
+    await act(async () => trigger.click());
     const options = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Model"] [role="option"]'));
     expect(options.map((option) => option.textContent)).toEqual([
       'All',
@@ -66,7 +58,7 @@ describe('RequestEventsDetailsCard model filter ordering', () => {
       .map((option) => option.textContent)).toEqual([selectedModel === '__all__' ? 'All' : selectedModel]);
     expect(models).toEqual(originalModels);
 
-    await act(async () => options.find((option) => option.textContent === 'team/openai/gpt-5.6-sol')?.click());
+    await act(async () => options.find((option) => option.textContent === 'team/openai/gpt-5.6-sol')!.click());
     expect(onModelFilterChange).toHaveBeenCalledExactlyOnceWith('team/openai/gpt-5.6-sol');
   });
 });

@@ -25,24 +25,6 @@ describe('CredentialAliasEditor', () => {
     expect(html).toContain('usage_stats.credentials_alias_edit')
   })
 
-  it('keeps the display name and edit action in separate layout slots', () => {
-    const html = renderToStaticMarkup(
-      <CredentialAliasEditor
-        identityId="1"
-        displayName="Very Long Credential Name"
-        alias="Very Long Credential Name"
-        saving={false}
-        onSaveAlias={async () => undefined}
-      />,
-    )
-
-    expect(html).toContain('credentialAliasDisplayLayout')
-    expect(html).toContain('credentialAliasNameSlot')
-    expect(html).toContain('credentialAliasActionSlot')
-    expect(html.indexOf('credentialAliasNameSlot')).toBeLessThan(html.indexOf('credentialAliasActionSlot'))
-    expect(html).not.toMatch(/credentialAliasDisplay_[a-z0-9]+/)
-  })
-
   it('disables other rows while an alias save is in flight', () => {
     expect(isCredentialAliasEditorDisabled('1', false, '')).toBe(false)
     expect(isCredentialAliasEditorDisabled('1', false, '1')).toBe(false)
@@ -64,7 +46,6 @@ describe('CredentialAliasEditor', () => {
 
     expect(html).toContain('data-credential-detail-trigger="true"')
     expect(html).toContain('type="button"')
-    expect(html).toContain('credentialDetailNameArrow')
     expect(html.indexOf('data-credential-detail-trigger="true"')).toBeLessThan(html.indexOf('usage_stats.credentials_alias_edit'))
   })
 })

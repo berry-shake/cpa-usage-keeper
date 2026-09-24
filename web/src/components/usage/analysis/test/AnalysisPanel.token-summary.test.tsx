@@ -1,5 +1,6 @@
+// @vitest-environment happy-dom
+
 import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { AnalysisResponse } from '@/lib/types';
 
@@ -19,11 +20,10 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import { AnalysisPanel } from '../AnalysisPanel';
+import { emptyAnalysis, renderAnalysisPanel } from './analysisFixtures';
 
 const analysis: AnalysisResponse = {
-  granularity: 'hourly',
-  timezone: 'UTC',
+  ...emptyAnalysis,
   token_usage: [
     {
       bucket: '2026-07-14T08:00:00Z',
@@ -50,10 +50,6 @@ const analysis: AnalysisResponse = {
       cost_available: true,
     },
   ],
-  api_key_composition: [],
-  model_composition: [],
-  auth_files_composition: [],
-  ai_provider_composition: [],
   cost_breakdown: {
     uncached_input_cost_usd: 1,
     cache_read_cost_usd: 1.5,
@@ -62,42 +58,21 @@ const analysis: AnalysisResponse = {
     total_cost_usd: 6,
     cost_available: true,
   },
-  model_efficiency: [],
-  heatmap: {
-    api_keys: [],
-    api_key_labels: {},
-    models: [],
-    cells: [],
-  },
 };
 
 describe('AnalysisPanel token chart summary', () => {
-  it.each([undefined, ['model'] as const])('keeps range totals in the token chart for composition dimensions %s', (compositionDimensions) => {
-    const markup = renderToStaticMarkup(
-      <AnalysisPanel analysis={analysis} loading={false} isDark={false} isMobile={false} compositionDimensions={compositionDimensions} />,
-    );
-    const tokenCard = markup.slice(markup.indexOf('<section'), markup.indexOf('</section>'));
-    const summaryStart = tokenCard.indexOf('analysisSummary');
-    const chartStart = tokenCard.indexOf('analysisChartSurface');
-    const summaryMarkup = tokenCard.slice(summaryStart, chartStart);
-
-    expect(summaryStart).toBeGreaterThan(-1);
-    expect(chartStart).toBeGreaterThan(summaryStart);
-    expect(summaryMarkup).toContain('usage_stats.total_tokens');
-    expect(summaryMarkup).toContain('usage_stats.total_cost');
-    expect(summaryMarkup).toContain('usage_stats.analysis_cost_per_million_tokens');
-    expect(summaryMarkup.indexOf('usage_stats.total_tokens')).toBeLessThan(
-      summaryMarkup.indexOf('usage_stats.total_cost'),
-    );
-    expect(summaryMarkup.indexOf('usage_stats.total_cost')).toBeLessThan(
-      summaryMarkup.indexOf('usage_stats.analysis_cost_per_million_tokens'),
-    );
-    expect(summaryMarkup).toContain('3.00M');
-    expect(summaryMarkup).toContain('$6.00');
-    expect(summaryMarkup).toContain('$2.00');
-    expect(markup).not.toContain('usage_stats.analysis_cost_breakdown_title');
-    const titles = [...markup.matchAll(/<h2[^>]*>(.*?)<\/h2>/g)].map((match) => match[1]);
-    expect(titles).toEqual([
+  it.each([undefined, ['model'] as const])('keeps ordered range totals above the token chart for dimensions %s', (compositionDimensions) => {
+    const container = renderAnalysisPanel({ analysis, compositionDimensions });
+    const tokenCard = container.querySelector('section')!;
+    const summary = tokenCard.querySelector('[class*="analysisSummary"]')!;
+    const chart = tokenCard.querySelector('[class*="analysisChartSurface"]')!;
+    expect(summary.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect([...summary.children].map((metric) => metric.textContent)).toEqual([
+      'usage_stats.total_tokens3.00M',
+      'usage_stats.total_cost$6.00',
+      'usage_stats.analysis_cost_per_million_tokens$2.00',
+    ]);
+    expect([...container.querySelectorAll('h2')].map((heading) => heading.textContent)).toEqual([
       'usage_stats.analysis_token_usage_title',
       'usage_stats.analysis_composition_title',
       'usage_stats.analysis_top_models_title',
@@ -108,14 +83,13 @@ describe('AnalysisPanel token chart summary', () => {
   });
 
   it('retains the pricing hint and avoids invalid rates for zero tokens', () => {
-    const markup = renderToStaticMarkup(
-      <AnalysisPanel analysis={{ ...analysis, token_usage: [], cost_breakdown: { ...analysis.cost_breakdown, cost_available: false } }} loading={false} isDark={false} isMobile={false} />,
-    );
-    const tokenCard = markup.slice(markup.indexOf('<section'), markup.indexOf('</section>'));
-    expect(tokenCard).toContain('usage_stats.cost_need_price');
-    expect(tokenCard).toContain('analysisSummary');
-    expect(tokenCard).toContain('$6.00');
-    expect(tokenCard).toContain('$0.00');
-    expect(tokenCard).not.toMatch(/NaN|Infinity/);
+    const container = renderAnalysisPanel({
+      analysis: { ...analysis, token_usage: [], cost_breakdown: { ...analysis.cost_breakdown, cost_available: false } },
+    });
+    const tokenCard = container.querySelector('section')!;
+    expect(tokenCard.textContent).toContain('usage_stats.cost_need_price');
+    const values = [...tokenCard.querySelectorAll('[class*="analysisSummary"] dd')].map((value) => value.textContent);
+    expect(values).toEqual(['0', '$6.00', '$0.0000']);
+    expect(tokenCard.textContent).not.toMatch(/NaN|Infinity/);
   });
 });

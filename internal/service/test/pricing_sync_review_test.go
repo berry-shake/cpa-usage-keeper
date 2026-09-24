@@ -32,7 +32,7 @@ func previewReviewCatalog(t *testing.T, source, catalog string, names ...string)
 	for _, name := range names {
 		modelList = append(modelList, models.ModelInfo{ID: name})
 	}
-	provider := service.NewPricingService(openPricingServiceTestDatabase(t), emptyPricingCatalogForTest(),
+	provider := service.NewPricingService(openUsageServiceTestDatabase(t), emptyPricingCatalogForTest(),
 		stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: modelList}}})
 	preview, err := provider.PreviewPricingSync(context.Background(), source)
 	if err != nil {

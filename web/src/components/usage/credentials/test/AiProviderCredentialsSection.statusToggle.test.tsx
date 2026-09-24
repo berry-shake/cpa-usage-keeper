@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AiProviderCredentialsSection } from '../AiProviderCredentialsSection'
+import { createAiProviderSectionProps } from './credentialSectionFixtures'
 import type { AiProviderCredentialRow } from '../credentialViewModels'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -51,20 +52,12 @@ describe('AiProviderCredentialsSection status toggle wiring', () => {
   const render = async (rows: AiProviderCredentialRow[], props: { onToggleStatus?: (identityId: string, authIndex: string, disabled: boolean) => void; statusPendingIdentityIds?: ReadonlySet<string> } = {}) => {
     await act(async () => root.render(
       <AiProviderCredentialsSection
-        rows={rows}
-        total={rows.length}
-        page={1}
-        totalPages={1}
-        pageSize={10}
-        activeOnly={false}
-        sort="priority"
-        loading={false}
-        onToggleStatus={props.onToggleStatus}
-        statusPendingIdentityIds={props.statusPendingIdentityIds}
-        onPageChange={() => undefined}
-        onPageSizeChange={() => undefined}
-        onActiveOnlyChange={() => undefined}
-        onSortChange={() => undefined}
+        {...createAiProviderSectionProps({
+          rows,
+          total: rows.length,
+          onToggleStatus: props.onToggleStatus,
+          statusPendingIdentityIds: props.statusPendingIdentityIds,
+        })}
       />,
     ))
   }

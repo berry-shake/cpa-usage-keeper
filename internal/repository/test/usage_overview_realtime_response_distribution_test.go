@@ -3,6 +3,7 @@ package test
 import (
 	"runtime"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"cpa-usage-keeper/internal/entities"
@@ -86,9 +87,7 @@ func TestBuildUsageOverviewRealtimeExcludesPrewarmFromResponseDistributions(t *t
 			assertRealtimeResponseDistributionUsesOnlyValidPairs(t, realtime.ResponseDistribution.Latency, 500)
 			var maxRequestCount int64
 			for _, point := range realtime.RequestLevel {
-				if point.Requests > maxRequestCount {
-					maxRequestCount = point.Requests
-				}
+				maxRequestCount = max(maxRequestCount, point.Requests)
 			}
 			if maxRequestCount != 2 {
 				t.Fatalf("expected prewarm to remain in rolling request counts, got max=%d", maxRequestCount)
@@ -102,41 +101,31 @@ func TestUsageRecentEventCacheTryAppendCopiesGeneratePointer(t *testing.T) {
 	t.Cleanup(func() { runtime.GOMAXPROCS(previousMaxProcs) })
 
 	db := openTestDatabase(t)
-	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	cache, err := repository.NewUsageRecentEventCache(db, repository.UsageRecentEventCacheOptions{Now: func() time.Time { return now }})
-	if err != nil {
-		t.Fatalf("NewUsageRecentEventCache returned error: %v", err)
-	}
-	t.Cleanup(cache.Close)
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+		cache, err := repository.NewUsageRecentEventCache(db, repository.UsageRecentEventCacheOptions{Now: func() time.Time { return now }})
+		if err != nil {
+			t.Fatalf("NewUsageRecentEventCache returned error: %v", err)
+		}
+		t.Cleanup(cache.Close)
 
-	generate := false
-	if !cache.TryAppend([]entities.UsageEvent{{
-		EventKey:  "async-prewarm",
-		Timestamp: now,
-		Generate:  &generate,
-	}}) {
-		t.Fatal("expected async append to be accepted")
-	}
-	// TryAppend 返回后调用方可以复用原始事件；缓存必须持有独立的 Generate 值。
-	generate = true
+		generate := false
+		if !cache.TryAppend([]entities.UsageEvent{{
+			EventKey:  "async-prewarm",
+			Timestamp: now,
+			Generate:  &generate,
+		}}) {
+			t.Fatal("expected async append to be accepted")
+		}
+		// TryAppend 返回后调用方可以复用原始事件；缓存必须持有独立的 Generate 值。
+		generate = true
 
-	deadline := time.Now().Add(time.Second)
-	for {
+		synctest.Wait()
 		events, ok := cache.Events(now.Add(-time.Minute), now.Add(time.Minute), false, "")
-		if !ok {
-			t.Fatal("expected recent cache to remain available")
+		if !ok || len(events) != 1 || events[0].Generate {
+			t.Fatalf("expected async append to retain generate=false, got available=%v events=%+v", ok, events)
 		}
-		if len(events) == 1 {
-			if events[0].Generate {
-				t.Fatal("expected async cache append to preserve the original generate=false value")
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for async cache append, got %d events", len(events))
-		}
-		runtime.Gosched()
-	}
+	})
 }
 
 func assertRealtimeResponseDistributionUsesOnlyValidPairs(t *testing.T, series repodto.RealtimeResponseDistributionSeriesRecord, wantMS int64) {
