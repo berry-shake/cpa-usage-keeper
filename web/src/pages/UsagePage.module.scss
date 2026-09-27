@@ -3179,15 +3179,7 @@
 }
 
 .requestEventsCountBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 9px;
-  border-radius: $radius-full;
-  border: 1px solid color-mix(in srgb, var(--primary-color) 28%, var(--border-color));
-  background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-primary));
-  color: color-mix(in srgb, var(--text-primary) 80%, var(--primary-color));
-  font-size: 11px;
-  font-weight: 800;
+  @include card-count-badge;
 }
 
 .requestEventsActions {

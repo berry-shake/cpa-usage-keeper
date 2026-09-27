@@ -35,6 +35,7 @@ describe('AiProviderCredentialsSection', () => {
         identity: 'sk-provider',
         type: 'claude',
         provider: 'anthropic',
+        priority: 5,
         total_requests: 0,
         success_count: 0,
         failure_count: 0,

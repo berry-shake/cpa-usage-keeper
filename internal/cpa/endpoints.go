@@ -3,6 +3,7 @@ package cpa
 const (
 	cpaManagementAuthFilesEndpoint           = "/v0/management/auth-files"
 	cpaManagementAuthFilesStatusEndpoint     = "/v0/management/auth-files/status"
+	cpaManagementAuthFilesFieldsEndpoint     = "/v0/management/auth-files/fields"
 	cpaManagementAPIKeysEndpoint             = "/v0/management/api-keys"
 	cpaManagementVertexAPIKeyEndpoint        = "/v0/management/vertex-api-key"
 	cpaManagementGeminiAPIKeyEndpoint        = "/v0/management/gemini-api-key"

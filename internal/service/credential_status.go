@@ -28,9 +28,9 @@ var (
 	ErrCredentialStatusConflict = errors.New("credential status target cannot be changed on its own")
 )
 
-// MetadataRefresher 让开关成功后尽快与 CPA 重新对齐；实现方自带 nil 保护和合并窗口。
+// MetadataRefresher 让本地操作后尽快与 CPA 对齐，不改变当前轮询/通知模式。
 type MetadataRefresher interface {
-	RequestMetadataRefresh()
+	RequestLocalMetadataRefresh()
 }
 
 // CredentialStatusClient 是凭证开关需要的 CPA 能力子集。
@@ -55,12 +55,12 @@ type credentialStatusService struct {
 	db      *gorm.DB
 	client  CredentialStatusClient
 	refresh MetadataRefresher
-	// locks 串行化同一 auth_index 的读改写，避免并发开关互相覆盖 excluded-models。
-	locks keyedMutex
+	// locks 按认证文件名或供应商 auth_index 串行化读改写，避免跨操作互相覆盖。
+	locks *CredentialMutationLocks
 }
 
-func NewCredentialStatusService(db *gorm.DB, client CredentialStatusClient, refresh MetadataRefresher) CredentialStatusProvider {
-	return &credentialStatusService{db: db, client: client, refresh: refresh}
+func NewCredentialStatusService(db *gorm.DB, client CredentialStatusClient, refresh MetadataRefresher, locks *CredentialMutationLocks) CredentialStatusProvider {
+	return &credentialStatusService{db: db, client: client, refresh: refresh, locks: locks}
 }
 
 // SetAuthFileDisabled 用列表里的 auth_index 反查文件名，再按 CPA 的 name + auth_index 定位唯一账号。
@@ -69,7 +69,6 @@ func (s *credentialStatusService) SetAuthFileDisabled(ctx context.Context, authI
 	if err != nil {
 		return CredentialStatusResponse{}, err
 	}
-	defer s.locks.lock("auth-file:" + resolvedAuthIndex)()
 
 	identity, err := repository.FindActiveUsageIdentityByAuthTypeAndIdentity(ctx, s.db, entities.UsageIdentityAuthTypeAuthFile, resolvedAuthIndex)
 	if err != nil {
@@ -85,6 +84,8 @@ func (s *credentialStatusService) SetAuthFileDisabled(ctx context.Context, authI
 	if name == "" {
 		return CredentialStatusResponse{}, fmt.Errorf("%w: auth file name is unavailable", ErrCredentialStatusValidation)
 	}
+
+	defer s.locks.lockAuthFile(name)()
 
 	statusCode, err := s.client.UpdateAuthFileStatus(ctx, name, resolvedAuthIndex, disabled)
 	if err != nil {
@@ -186,12 +187,12 @@ func (s *credentialStatusService) persistDisabled(ctx context.Context, authType 
 	if err := repository.UpdateUsageIdentityDisabled(ctx, s.db, authType, authIndex, disabled); err != nil {
 		// CPA 已经成功时，本地写回失败也要排队一次 metadata 同步，让后台在数据库恢复后重新对齐状态。
 		if s.refresh != nil {
-			s.refresh.RequestMetadataRefresh()
+			s.refresh.RequestLocalMetadataRefresh()
 		}
 		return fmt.Errorf("update usage identity disabled state: %w", err)
 	}
 	if s.refresh != nil {
-		s.refresh.RequestMetadataRefresh()
+		s.refresh.RequestLocalMetadataRefresh()
 	}
 	return nil
 }

@@ -421,7 +421,7 @@ export function CredentialDetailDrawer({
         {selection.kind === 'auth-file' && selection.row.subscriptionBadge
           ? <CredentialSubscriptionBadge model={selection.row.subscriptionBadge} />
           : null}
-        {row.priorityLabel ? <CredentialPriorityBadge>{row.priorityLabel}</CredentialPriorityBadge> : null}
+        <CredentialPriorityBadge>{row.priorityLabel || 'P0'}</CredentialPriorityBadge>
         <span className={identity.disabled || identity.is_deleted ? styles.statusDisabled : styles.statusEnabled}>
           {identity.is_deleted
             ? t('usage_stats.deleted')
@@ -554,7 +554,7 @@ export function CredentialDetailDrawer({
                 <dt>{t('usage_stats.credentials_detail_provider')}</dt><dd>{row.providerLabel || '-'}</dd>
                 <dt>{t('usage_stats.credentials_detail_type')}</dt><dd>{row.typeLabel || '-'}</dd>
                 <dt>{t('usage_stats.credentials_detail_auth_type')}</dt><dd>{row.authTypeLabel || '-'}</dd>
-                <dt>{t('usage_stats.credentials_detail_priority')}</dt><dd>{row.priorityLabel || '-'}</dd>
+                <dt>{t('usage_stats.credentials_detail_priority')}</dt><dd>{row.priorityLabel || 'P0'}</dd>
               </dl>
             </section>
             {selection.kind === 'auth-file' ? (

@@ -145,6 +145,7 @@ const usageIdentityAggregationColumns = "id, auth_type, identity, total_requests
 const UsageIdentityAggregationBatchSize = 25
 
 const activeAuthFileUsageIdentityLookupBatchSize = 500
+const openAIProviderPriorityUpdateBatchSize = 500
 
 func ListUsageIdentities(ctx context.Context, db *gorm.DB) ([]entities.UsageIdentity, error) {
 	if db == nil {
@@ -282,6 +283,50 @@ func UpdateUsageIdentityDisabled(ctx context.Context, db *gorm.DB, authType enti
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// UpdateUsageIdentityPriority 写入单条凭证的即时优先级。
+func UpdateUsageIdentityPriority(ctx context.Context, db *gorm.DB, authType entities.UsageIdentityAuthType, identity string, priority int) error {
+	if db == nil {
+		return fmt.Errorf("database is nil")
+	}
+	result := db.WithContext(ctx).Model(&entities.UsageIdentity{}).
+		Where("auth_type = ? AND identity = ? AND is_deleted = ?", authType, strings.TrimSpace(identity), false).
+		Update("priority", priority)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// UpdateOpenAIProviderPriority 使用单个事务更新同一 CPA provider 下所有已同步的 key。
+func UpdateOpenAIProviderPriority(ctx context.Context, db *gorm.DB, authIndexes []string, priority int) error {
+	if db == nil {
+		return fmt.Errorf("database is nil")
+	}
+	if len(authIndexes) == 0 {
+		return fmt.Errorf("openai provider auth indexes are required")
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var updated int64
+		for start := 0; start < len(authIndexes); start += openAIProviderPriorityUpdateBatchSize {
+			end := min(start+openAIProviderPriorityUpdateBatchSize, len(authIndexes))
+			result := tx.Model(&entities.UsageIdentity{}).
+				Where("auth_type = ? AND type = ? AND identity IN ? AND is_deleted = ?", entities.UsageIdentityAuthTypeAIProvider, "openai", authIndexes[start:end], false).
+				Update("priority", priority)
+			if result.Error != nil {
+				return result.Error
+			}
+			updated += result.RowsAffected
+		}
+		if updated == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func ListActiveUsageIdentityTypeCounts(ctx context.Context, db *gorm.DB, request ListUsageIdentitiesPageRequest) ([]dto.UsageIdentityTypeCount, error) {
@@ -802,7 +847,7 @@ func usageIdentitySyncKey(authType entities.UsageIdentityAuthType, identity stri
 
 // usageIdentityMetadataUpdates 只刷新上游 metadata 与 active 状态，保留 alias、统计、游标和 created_at。
 func usageIdentityMetadataUpdates(identity entities.UsageIdentity, now time.Time) map[string]any {
-	return map[string]any{
+	updates := map[string]any{
 		"name":           identity.Name,
 		"auth_type_name": identity.AuthTypeName,
 		"type":           identity.Type,
@@ -826,4 +871,24 @@ func usageIdentityMetadataUpdates(identity entities.UsageIdentity, now time.Time
 		// updated_at 明确使用入口统一 now，不能读取输入实体通常为空的时间字段。
 		"updated_at": timeutil.FormatStorageTime(now),
 	}
+	if identity.AuthType == entities.UsageIdentityAuthTypeAuthFile && strings.EqualFold(strings.TrimSpace(identity.Type), "codex") {
+		if identity.ActiveUntil == nil {
+			delete(updates, "active_until")
+		} else {
+			incoming := timeutil.FormatStorageTime(*identity.ActiveUntil)
+			// 本项目使用 SQLite；julianday 将旧库存储的不同 offset 转成同一 instant，避免 RFC3339 文本误判。
+			updates["active_until"] = gorm.Expr("CASE WHEN active_until IS NULL OR julianday(?) > julianday(active_until) THEN ? ELSE active_until END", incoming, incoming)
+		}
+	}
+	return updates
+}
+
+// UpdateCodexUsageIdentityActiveUntil 只写官方订阅时间，并防止旧账号的在途响应落到新账号行。
+func UpdateCodexUsageIdentityActiveUntil(ctx context.Context, db *gorm.DB, identity entities.UsageIdentity, activeUntil time.Time) error {
+	if identity.ID == 0 || identity.AccountID == nil || strings.TrimSpace(*identity.AccountID) == "" || activeUntil.IsZero() {
+		return nil
+	}
+	return db.WithContext(ctx).Model(&entities.UsageIdentity{}).
+		Where("id = ? AND auth_type = ? AND identity = ? AND account_id = ? AND LOWER(TRIM(type)) = ? AND is_deleted = ?", identity.ID, entities.UsageIdentityAuthTypeAuthFile, identity.Identity, *identity.AccountID, "codex", false).
+		Update("active_until", timeutil.FormatStorageTime(activeUntil)).Error
 }

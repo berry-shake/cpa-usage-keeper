@@ -146,7 +146,7 @@ type credentialStatusRefresherStub struct {
 	calls int
 }
 
-func (s *credentialStatusRefresherStub) RequestMetadataRefresh() {
+func (s *credentialStatusRefresherStub) RequestLocalMetadataRefresh() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
@@ -214,7 +214,7 @@ func TestCredentialStatusServiceAuthFileUsesStoredFileNameAndAuthIndex(t *testin
 	seedAuthFileCredential(t, db, "codex-user.json", "idx-a")
 	client := &credentialStatusClientStub{}
 	refresher := &credentialStatusRefresherStub{}
-	provider := service.NewCredentialStatusService(db, client, refresher)
+	provider := service.NewCredentialStatusService(db, client, refresher, &service.CredentialMutationLocks{})
 
 	result, err := provider.SetAuthFileDisabled(context.Background(), "idx-a", true)
 	if err != nil {
@@ -253,7 +253,7 @@ func TestCredentialStatusServiceAuthFileUsesStoredFileNameAndAuthIndex(t *testin
 func TestCredentialStatusServiceAuthFileRejectsUnknownIdentity(t *testing.T) {
 	db := openMetadataTestDatabase(t, "credential-status-auth-file-missing.db")
 	client := &credentialStatusClientStub{}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	_, err := provider.SetAuthFileDisabled(context.Background(), "idx-missing", true)
 	if !errors.Is(err, service.ErrCredentialStatusNotFound) {
@@ -268,7 +268,7 @@ func TestCredentialStatusServiceAuthFileMapsUpstream404ToNotFound(t *testing.T) 
 	db := openMetadataTestDatabase(t, "credential-status-auth-file-404.db")
 	seedAuthFileCredential(t, db, "gone.json", "idx-gone")
 	client := &credentialStatusClientStub{authFileStatusCode: http.StatusNotFound}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	_, err := provider.SetAuthFileDisabled(context.Background(), "idx-gone", true)
 	if !errors.Is(err, service.ErrCredentialStatusNotFound) {
@@ -286,7 +286,7 @@ func TestCredentialStatusServiceAuthFileMapsUpstream409ToConflict(t *testing.T) 
 	// CPA 对插件多账号文件展开出的虚拟子账号返回 409，重试永远不会成功。
 	client := &credentialStatusClientStub{authFileStatusCode: http.StatusConflict}
 	refresher := &credentialStatusRefresherStub{}
-	provider := service.NewCredentialStatusService(db, client, refresher)
+	provider := service.NewCredentialStatusService(db, client, refresher, &service.CredentialMutationLocks{})
 
 	_, err := provider.SetAuthFileDisabled(context.Background(), "idx-virtual-child", true)
 	if !errors.Is(err, service.ErrCredentialStatusConflict) {
@@ -304,7 +304,7 @@ func TestCredentialStatusServiceAuthFileMapsUpstream409ToConflict(t *testing.T) 
 func TestCredentialStatusServiceAuthFileRequiresAuthIndex(t *testing.T) {
 	db := openMetadataTestDatabase(t, "credential-status-auth-file-validation.db")
 	client := &credentialStatusClientStub{}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	if _, err := provider.SetAuthFileDisabled(context.Background(), "  ", true); !errors.Is(err, service.ErrCredentialStatusValidation) {
 		t.Fatalf("expected validation error, got %v", err)
@@ -327,7 +327,7 @@ func TestCredentialStatusServiceProviderTogglesWildcardExcludedModel(t *testing.
 		},
 	}}
 	refresher := &credentialStatusRefresherStub{}
-	provider := service.NewCredentialStatusService(db, client, refresher)
+	provider := service.NewCredentialStatusService(db, client, refresher, &service.CredentialMutationLocks{})
 
 	result, err := provider.SetAIProviderDisabled(context.Background(), "idx-gemini", true)
 	if err != nil {
@@ -381,7 +381,7 @@ func TestCredentialStatusServiceProviderNormalizesExistingExclusions(t *testing.
 			}},
 		},
 	}}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	if _, err := provider.SetAIProviderDisabled(context.Background(), "idx-claude", true); err != nil {
 		t.Fatalf("SetAIProviderDisabled returned error: %v", err)
@@ -422,7 +422,7 @@ func TestCredentialStatusServiceProviderTargetsSecondDuplicateKeyByIndex(t *test
 			},
 		},
 	}}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	if _, err := provider.SetAIProviderDisabled(context.Background(), "idx-second", true); err != nil {
 		t.Fatalf("SetAIProviderDisabled returned error: %v", err)
@@ -453,7 +453,7 @@ func TestCredentialStatusServiceProviderKeepsFirstEntryForRepeatedAuthIndex(t *t
 			},
 		},
 	}}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	// 这是防御性用例：CPA 的稳定 ID 生成器会给哈希相同的重复项追加 -N 后缀，因此经 CPA API
 	// 不可达，重复 auth-index 只能来自异常数据。此时沿用首项下标，与 Keeper metadata 侧保留
@@ -474,7 +474,7 @@ func TestCredentialStatusServiceProviderRejectsUnsupportedType(t *testing.T) {
 	db := openMetadataTestDatabase(t, "credential-status-provider-unsupported.db")
 	seedProviderCredential(t, db, "openai", "idx-openai", "secret-openai")
 	client := &credentialStatusClientStub{}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	_, err := provider.SetAIProviderDisabled(context.Background(), "idx-openai", true)
 	if !errors.Is(err, service.ErrCredentialStatusUnsupported) {
@@ -491,7 +491,7 @@ func TestCredentialStatusServiceProviderRejectsUnknownAuthIndex(t *testing.T) {
 	client := &credentialStatusClientStub{providerPayloads: map[string]*response.ProviderKeyConfigResult{
 		"codex": {StatusCode: http.StatusOK, Payload: []providerconfig.ProviderKeyConfig{{APIKey: "secret-other", AuthIndex: "idx-other"}}},
 	}}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	_, err := provider.SetAIProviderDisabled(context.Background(), "idx-codex", true)
 	if !errors.Is(err, service.ErrCredentialStatusNotFound) {
@@ -512,7 +512,7 @@ func TestCredentialStatusServiceProviderMapsUpstream404ToNotFound(t *testing.T) 
 		},
 		providerFetchErr: errors.New("provider config returned 404"),
 	}
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	_, err := provider.SetAIProviderDisabled(context.Background(), "idx-codex", true)
 	if !errors.Is(err, service.ErrCredentialStatusNotFound) {
@@ -528,7 +528,7 @@ func TestCredentialStatusServiceSkipsLocalWriteWhenUpstreamFails(t *testing.T) {
 	seedAuthFileCredential(t, db, "codex-refresh.json", "idx-refresh")
 	client := &credentialStatusClientStub{authFileStatusErr: errors.New("upstream unavailable")}
 	refresher := &credentialStatusRefresherStub{}
-	provider := service.NewCredentialStatusService(db, client, refresher)
+	provider := service.NewCredentialStatusService(db, client, refresher, &service.CredentialMutationLocks{})
 
 	if _, err := provider.SetAuthFileDisabled(context.Background(), "idx-refresh", true); err == nil {
 		t.Fatal("expected upstream error")
@@ -551,7 +551,7 @@ func TestCredentialStatusServiceRequestsMetadataRefreshWhenLocalWriteFailsAfterU
 			t.Fatalf("drop usage identities table: %v", err)
 		}
 	}
-	provider := service.NewCredentialStatusService(db, client, refresher)
+	provider := service.NewCredentialStatusService(db, client, refresher, &service.CredentialMutationLocks{})
 
 	if _, err := provider.SetAuthFileDisabled(context.Background(), "idx-local-write-failure", true); err == nil {
 		t.Fatal("expected local persistence error")
@@ -569,7 +569,7 @@ func TestCredentialStatusServiceSerializesConcurrentProviderToggles(t *testing.T
 	}}
 	// 拉长读窗口，缺少服务层串行化时四次读取必然全部发生在任何写入之前。
 	client.providerFetchDelay = 20 * time.Millisecond
-	provider := service.NewCredentialStatusService(db, client, nil)
+	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {

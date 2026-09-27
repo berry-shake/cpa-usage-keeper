@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ type queuedUsageDetail struct {
 	Source              string          `json:"source"`
 	AuthIndex           string          `json:"auth_index"`
 	ClientIP            *string         `json:"client_ip"`
+	ResolvedClientIP    *string         `json:"resolved_client_ip"`
 	XForwardedFor       *string         `json:"x_forwarded_for"`
 	UserAgent           *string         `json:"user_agent"`
 	Tokens              dto.TokenStats  `json:"tokens"`
@@ -90,6 +92,15 @@ func trimRedisOptionalString(value *string) *string {
 	return &trimmed
 }
 
+func (d queuedUsageDetail) clientIP() *string {
+	// CPA resolves forwarding headers against its trusted proxies. Legacy messages
+	// retain their original client_ip; do not independently trust X-Forwarded-For.
+	if resolved := trimRedisOptionalString(d.ResolvedClientIP); resolved != nil && net.ParseIP(*resolved) != nil {
+		return resolved
+	}
+	return d.ClientIP
+}
+
 func normalizeRedisGenerate(value *bool, failed bool, executorType string, tokens dto.TokenStats) *bool {
 	if value != nil {
 		return value
@@ -132,7 +143,7 @@ func (d queuedUsageDetail) toUsageEvent(fetchedAt time.Time) entities.UsageEvent
 		RequestID:           strings.TrimSpace(d.RequestID),
 		SessionID:           strings.TrimSpace(d.SessionID),
 		ParentSessionID:     trimRedisOptionalString(&d.ParentSessionID),
-		ClientIP:            d.ClientIP,
+		ClientIP:            d.clientIP(),
 		XForwardedFor:       d.XForwardedFor,
 		UserAgent:           d.UserAgent,
 		Model:               model,

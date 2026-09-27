@@ -59,7 +59,7 @@ func TestAuthFilesManagementServiceBoundsConcurrentStatusUpdates(t *testing.T) {
 	// 虚拟时间等到全部 worker 阻塞后再推进，避免真实 sleep 和调度运气。
 	synctest.Test(t, func(t *testing.T) {
 		client := &authFilesManagementClientStub{delay: 10 * time.Millisecond}
-		service := keeperservice.NewAuthFilesManagementService(client)
+		service := keeperservice.NewAuthFilesManagementService(client, &keeperservice.CredentialMutationLocks{})
 		names := make([]string, 20)
 		for i := range names {
 			names[i] = fmt.Sprintf("auth-%d.json", i)
@@ -89,7 +89,7 @@ func TestAuthFilesManagementServiceBoundsConcurrentStatusUpdates(t *testing.T) {
 
 func TestAuthFilesManagementServiceTrimsAndDedupesNames(t *testing.T) {
 	client := &authFilesManagementClientStub{}
-	service := keeperservice.NewAuthFilesManagementService(client)
+	service := keeperservice.NewAuthFilesManagementService(client, &keeperservice.CredentialMutationLocks{})
 
 	response, err := service.DeleteAuthFiles(context.Background(), []string{" a.json ", "a.json", "b.json"})
 	if err != nil {
@@ -103,7 +103,7 @@ func TestAuthFilesManagementServiceTrimsAndDedupesNames(t *testing.T) {
 
 func TestAuthFilesManagementServiceRejectsEmptyNames(t *testing.T) {
 	client := &authFilesManagementClientStub{}
-	service := keeperservice.NewAuthFilesManagementService(client)
+	service := keeperservice.NewAuthFilesManagementService(client, &keeperservice.CredentialMutationLocks{})
 
 	_, err := service.DeleteAuthFiles(context.Background(), []string{" "})
 	if !errors.Is(err, keeperservice.ErrAuthFilesManagementValidation) {
@@ -118,7 +118,7 @@ func TestAuthFilesManagementServiceRejectsEmptyNames(t *testing.T) {
 
 func TestAuthFilesManagementServiceReturnsStatusUpdateErrors(t *testing.T) {
 	client := &authFilesManagementClientStub{statusErrByName: map[string]error{"b.json": errors.New("upstream rejected")}}
-	service := keeperservice.NewAuthFilesManagementService(client)
+	service := keeperservice.NewAuthFilesManagementService(client, &keeperservice.CredentialMutationLocks{})
 
 	_, err := service.SetAuthFilesDisabled(context.Background(), []string{"a.json", "b.json"}, true)
 	if err == nil || !strings.Contains(err.Error(), "b.json") {

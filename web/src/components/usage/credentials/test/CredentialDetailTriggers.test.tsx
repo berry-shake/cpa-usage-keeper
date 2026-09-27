@@ -91,7 +91,7 @@ describe('credential detail name triggers', () => {
         {...createAuthFileSectionProps()}
         rows={[authFileRow]}
         total={1}
-        onSaveAlias={async () => undefined}
+        onEdit={async () => undefined}
         onOpenDetails={onOpenDetails}
       />,
     ))
@@ -102,7 +102,7 @@ describe('credential detail name triggers', () => {
     expect(onOpenDetails).not.toHaveBeenCalled()
     await act(async () => authFileTrigger!.click())
     expect(onOpenDetails).toHaveBeenCalledWith(authFileRow)
-    expect(container.querySelector('[aria-label="usage_stats.credentials_alias_edit"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="usage_stats.credentials_edit_title"]')).not.toBeNull()
   })
 
   it('opens details from an AI-provider name', async () => {

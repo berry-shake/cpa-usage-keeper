@@ -6,6 +6,7 @@ import {
   paginateCredentials,
   selectQuotaEligibleAuthIndexes,
   splitCredentialIdentities,
+  updateCredentialDetailStats,
 } from '../credentialViewModels'
 
 function quotaResponse(authIndex: string, quota: UsageQuotaRow[], rateLimitResetCreditsAvailableCount?: number | null, subscription?: UsageSubscriptionInfo): UsageQuotaCheckResponse {
@@ -60,6 +61,16 @@ function health(overrides: Partial<UsageCredentialHealth> = {}): UsageCredential
 
 describe('credentialViewModels', () => {
   afterEach(() => vi.useRealTimers())
+
+  it('updates the open detail priority from a fresh identity even if its row left the current page', () => {
+    const original = identity({ auth_type: 2, priority: 4 })
+    const selection = { kind: 'ai-provider' as const, row: buildAiProviderCredentialRows([original])[0] }
+    const updated = updateCredentialDetailStats(selection, identity({ auth_type: 2, priority: -3 }))
+    expect(updated.row.priorityLabel).toBe('P-3')
+    expect(updated.row.identity.priority).toBe(-3)
+    const cleared = updateCredentialDetailStats(updated, identity({ auth_type: 2, priority: 0 }))
+    expect(cleared.row.priorityLabel).toBe('P0')
+  })
 
   it('splits usage identities by auth type while keeping deleted rows for traffic display', () => {
     const groups = splitCredentialIdentities([

@@ -1,12 +1,57 @@
 package test
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
 	"cpa-usage-keeper/internal/service"
 )
+
+func TestDecodeRedisUsageMessagePrefersResolvedClientIP(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		resolved, peer, want *string
+	}{
+		{"ipv4", new("203.0.113.5"), new("172.19.0.7"), new("203.0.113.5")},
+		{"ipv6", new("2001:db8::5"), new("172.19.0.7"), new("2001:db8::5")},
+		{"whitespace", new(" 203.0.113.5 "), new("172.19.0.7"), new("203.0.113.5")},
+		{"empty", new(""), new("172.19.0.7"), new("172.19.0.7")},
+		{"null", nil, new("172.19.0.7"), new("172.19.0.7")},
+		{"invalid", new("not-an-ip"), new("172.19.0.7"), new("172.19.0.7")},
+		{"forwarded-list", new("203.0.113.5, 172.19.0.1"), new("172.19.0.7"), new("172.19.0.7")},
+		{"resolved-without-peer", new("203.0.113.5"), nil, new("203.0.113.5")},
+		{"invalid-without-peer", new("not-an-ip"), nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{
+				"request_id": "resolved-client", "client_ip": tc.peer,
+				"resolved_client_ip": tc.resolved, "x_forwarded_for": "203.0.113.5, 172.19.0.1",
+				"user_agent": "test-client/1.0",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			event, raw, err := service.DecodeRedisUsageMessage(string(payload), time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(event.ClientIP, tc.want) {
+				t.Fatalf("client_ip = %v, want %v", event.ClientIP, tc.want)
+			}
+			if event.XForwardedFor == nil || *event.XForwardedFor != "203.0.113.5, 172.19.0.1" {
+				t.Fatal("forwarding evidence changed")
+			}
+			if event.UserAgent == nil || *event.UserAgent != "test-client/1.0" {
+				t.Fatal("user agent changed")
+			}
+			if string(raw) != string(payload) {
+				t.Fatal("original usage payload changed")
+			}
+		})
+	}
+}
 
 func TestDecodeRedisUsageMessagePreservesOptionalMetadata(t *testing.T) {
 	type metadata struct {

@@ -30,10 +30,11 @@ type AuthFilesManagementResponse struct {
 
 type authFilesManagementService struct {
 	client AuthFilesManagementClient
+	locks  *CredentialMutationLocks
 }
 
-func NewAuthFilesManagementService(client AuthFilesManagementClient) AuthFilesManagementProvider {
-	return &authFilesManagementService{client: client}
+func NewAuthFilesManagementService(client AuthFilesManagementClient, locks *CredentialMutationLocks) AuthFilesManagementProvider {
+	return &authFilesManagementService{client: client, locks: locks}
 }
 
 func (s *authFilesManagementService) SetAuthFilesDisabled(ctx context.Context, names []string, disabled bool) (AuthFilesManagementResponse, error) {
@@ -64,6 +65,7 @@ func (s *authFilesManagementService) SetAuthFilesDisabled(ctx context.Context, n
 				mu.Unlock()
 				return
 			}
+			defer s.locks.lockAuthFile(name)()
 			// 批量入口只有文件名，auth_index 留空沿用原有语义。
 			if _, err := s.client.UpdateAuthFileStatus(ctx, name, "", disabled); err != nil {
 				mu.Lock()

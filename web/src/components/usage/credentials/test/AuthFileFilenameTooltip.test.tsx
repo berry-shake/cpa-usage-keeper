@@ -33,7 +33,7 @@ const row = {
   displayQuotas: [],
 } as AuthFileCredentialRow
 
-const sectionProps = createAuthFileSectionProps({ rows: [row], total: 1, onSaveAlias: async () => undefined })
+const sectionProps = createAuthFileSectionProps({ rows: [row], total: 1, onEdit: async () => undefined })
 
 let container: HTMLDivElement
 let root: Root

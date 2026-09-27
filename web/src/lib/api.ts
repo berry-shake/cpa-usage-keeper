@@ -838,6 +838,23 @@ export async function setCredentialDisabled(kind: CredentialStatusKind, authInde
   return response.json()
 }
 
+export interface CredentialPriorityResponse {
+  auth_index: string
+  priority: number
+}
+
+export async function setCredentialPriority(kind: CredentialStatusKind, authIndex: string, priority: number): Promise<CredentialPriorityResponse> {
+  const response = await apiFetch(apiPath(`${credentialStatusPathByKind[kind]}/${encodeURIComponent(authIndex)}/priority`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ priority }),
+  })
+  if (!response.ok) {
+    await parseApiError(response, `Failed to update credential priority: ${response.status}`)
+  }
+  return response.json()
+}
+
 export async function deleteAuthFiles(names: string[]): Promise<AuthFilesManagementResponse> {
   const response = await apiFetch(apiPath('/auth-files'), {
     method: 'DELETE',
