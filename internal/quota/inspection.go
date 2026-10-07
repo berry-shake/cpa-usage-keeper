@@ -329,7 +329,7 @@ func inspectionQuotaLimitReached(identity entities.UsageIdentity, task *RefreshT
 		return geminiCLIInspectionLimitReached(rows)
 	case "antigravity":
 		return antigravityInspectionLimitReached(rows)
-	case "kimi":
+	case "kimi", "kimi-ai", "kimi.ai", "kimi.com":
 		return kimiInspectionLimitReached(rows)
 	case "xai":
 		return xaiInspectionLimitReached(rows)
@@ -348,7 +348,7 @@ func inspectionQuotaProvider(identity entities.UsageIdentity, task *RefreshTaskR
 	for _, value := range []string{taskType, identity.Type} {
 		normalized := strings.ToLower(strings.TrimSpace(value))
 		switch normalized {
-		case "antigravity", "codex", "gemini-cli", "claude", "kimi", "xai":
+		case "antigravity", "codex", "gemini-cli", "claude", "kimi", "kimi-ai", "kimi.ai", "kimi.com", "xai":
 			return normalized
 		}
 	}

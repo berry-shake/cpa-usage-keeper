@@ -249,3 +249,45 @@ describe('runQuotaResetForAuthIndex', () => {
     expect(outcome).toEqual({ kind: 'error', message: 'Quota reset failed. Please try again later.' })
   })
 })
+
+
+describe('Claude manual quota reset outcomes', () => {
+  it('does not refresh or retry when the official result is unknown or refused', async () => {
+    for (const code of ['unknown', 'not_limited', 'cooldown', 'ineligible', 'unavailable', 'rate_limited', 'auth_error']) {
+      const calls: string[] = []
+      const result = { authIndex: 'claude', code }
+      const outcome = await runQuotaResetForAuthIndex('claude', {
+        grantId: 'spring',
+        resetUsageQuota: async () => { calls.push('claim'); return result },
+        refreshQuotaForAuthIndex: async () => { calls.push('refresh') },
+      })
+      expect(calls).toEqual(['claim'])
+      expect(outcome.kind).toBe('warning')
+      expect(outcome.result).toEqual(result)
+    }
+  })
+  it('reports a lost management response as unknown without a quota refresh', async () => {
+    let refreshed = false
+    const outcome = await runQuotaResetForAuthIndex('claude', {
+      grantId: 'spring',
+      resetUsageQuota: async () => { throw new Error('connection lost') },
+      refreshQuotaForAuthIndex: async () => { refreshed = true },
+    })
+    expect(refreshed).toBe(false)
+    expect(outcome.result?.code).toBe('unknown')
+    expect('message' in outcome ? outcome.message : '').toContain('check quota before deciding whether to submit again')
+  })
+  it('uses the existing recovery warning and single-row refresh after confirmed success', async () => {
+    const calls: string[] = []
+    const result = { authIndex: 'claude', code: 'reset', recoveryFailed: true }
+    const outcome = await runQuotaResetForAuthIndex('claude', {
+      grantId: 'spring',
+      resetUsageQuota: async () => { calls.push('claim'); return result },
+      refreshQuotaForAuthIndex: async () => { calls.push('refresh') },
+    })
+    expect(calls).toEqual(['claim', 'refresh'])
+    expect(outcome.kind).toBe('warning')
+    expect(outcome.result).toEqual(result)
+    expect('message' in outcome ? outcome.message : '').toContain('CPA')
+  })
+})

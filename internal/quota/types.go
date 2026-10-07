@@ -203,15 +203,16 @@ type ClaudeExtraUsage struct {
 }
 
 type ClaudeUsagePayload struct {
-	FiveHour          *ClaudeUsageWindow `json:"fiveHour,omitempty"`
-	SevenDay          *ClaudeUsageWindow `json:"sevenDay,omitempty"`
-	SevenDayOAuthApps *ClaudeUsageWindow `json:"sevenDayOauthApps,omitempty"`
-	SevenDayOpus      *ClaudeUsageWindow `json:"sevenDayOpus,omitempty"`
-	SevenDaySonnet    *ClaudeUsageWindow `json:"sevenDaySonnet,omitempty"`
-	SevenDayCowork    *ClaudeUsageWindow `json:"sevenDayCowork,omitempty"`
-	IguanaNecktie     *ClaudeUsageWindow `json:"iguanaNecktie,omitempty"`
-	ExtraUsage        *ClaudeExtraUsage  `json:"extraUsage,omitempty"`
-	Limits            []ClaudeLimitItem  `json:"limits,omitempty"`
+	ResetGrants       *ClaudeResetGrantStatus `json:"resetGrants,omitempty"`
+	FiveHour          *ClaudeUsageWindow      `json:"fiveHour,omitempty"`
+	SevenDay          *ClaudeUsageWindow      `json:"sevenDay,omitempty"`
+	SevenDayOAuthApps *ClaudeUsageWindow      `json:"sevenDayOauthApps,omitempty"`
+	SevenDayOpus      *ClaudeUsageWindow      `json:"sevenDayOpus,omitempty"`
+	SevenDaySonnet    *ClaudeUsageWindow      `json:"sevenDaySonnet,omitempty"`
+	SevenDayCowork    *ClaudeUsageWindow      `json:"sevenDayCowork,omitempty"`
+	IguanaNecktie     *ClaudeUsageWindow      `json:"iguanaNecktie,omitempty"`
+	ExtraUsage        *ClaudeExtraUsage       `json:"extraUsage,omitempty"`
+	Limits            []ClaudeLimitItem       `json:"limits,omitempty"`
 }
 
 type ClaudeLimitItem struct {
@@ -283,8 +284,18 @@ type KimiLimitItem struct {
 }
 
 type KimiUsagePayload struct {
-	Usage  *KimiUsageDetail `json:"usage,omitempty"`
-	Limits []KimiLimitItem  `json:"limits,omitempty"`
+	Usage  *KimiUsageDetail    `json:"usage,omitempty"`
+	Limits []KimiLimitItem     `json:"limits,omitempty"`
+	Usages *KimiAggregateUsage `json:"usages,omitempty"`
+}
+
+type KimiAggregateUsage struct {
+	MonthTotal *KimiUsageRatio `json:"limit_month_total,omitempty"`
+}
+
+type KimiUsageRatio struct {
+	UsedRatio float64 `json:"used_ratio"`
+	ResetTime string  `json:"reset_time,omitempty"`
 }
 
 type XAIMoneyValue struct {

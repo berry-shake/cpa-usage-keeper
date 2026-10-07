@@ -55,6 +55,40 @@ describe('AuthFileCredentialsSection quota reset formatting', () => {
 })
 
 describe('AuthFileCredentialsSection title', () => {
+  it.each([
+    ['kimi', 'china', 'usage_stats.credentials_kimi_site_china'],
+    ['kimi-ai', 'international', 'usage_stats.credentials_kimi_site_international'],
+    ['kimi.ai', 'international', 'usage_stats.credentials_kimi_site_international'],
+    ['kimi.com', 'china', 'usage_stats.credentials_kimi_site_china'],
+  ])('shows the %s site beside expiry and priority below the credential name', (type, site, labelKey) => {
+    const row = createRow({
+      identity: { id: '1', identity: 'auth-1', type, is_deleted: false, priority: 1 },
+      displayName: 'Kimi Account',
+      remainingDaysLabel: '28d',
+      priorityLabel: 'P1',
+    })
+    const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, createAuthFileSectionProps({ rows: [row], total: 1 })))
+
+    expect(html).toContain(`data-kimi-site="${site}"`)
+    expect(html).toContain(labelKey)
+    expect(html.indexOf('Kimi Account')).toBeLessThan(html.indexOf(`data-kimi-site="${site}"`))
+    expect(html).toContain('28d')
+    expect(html).toContain('P1')
+  })
+
+  it('uses the Auth File type for the site and does not infer it from provider or base URL', () => {
+    const rows = [
+      createRow({ identity: { id: '1', identity: 'domestic', type: 'kimi', provider: 'kimi-ai', base_url: 'https://api.kimi.ai/coding', is_deleted: false } }),
+      createRow({ identity: { id: '2', identity: 'generic', type: 'generic', provider: 'kimi-ai', is_deleted: false } }),
+      createRow({ identity: { id: '3', identity: 'claude', type: 'claude', provider: 'claude', is_deleted: false } }),
+    ]
+    const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, createAuthFileSectionProps({ rows, total: 3 })))
+
+    expect(html.match(/data-kimi-site=/g)).toHaveLength(1)
+    expect(html).toContain('data-kimi-site="china"')
+    expect(html).not.toContain('data-kimi-site="international"')
+  })
+
   it('renders the Auth Files title without the Credentials eyebrow', () => {
     const html = renderToStaticMarkup(createElement(AuthFileCredentialsSection, createAuthFileSectionProps()))
 

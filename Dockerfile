@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS
 	-ldflags="-s -w -X cpa-usage-keeper/internal/version.Version=${VERSION}" \
 	-o /out/cpa-usage-keeper ./cmd/server/main.go
 
-FROM alpine:3.20
+FROM alpine:3.24
 WORKDIR /
 RUN apk add --no-cache ca-certificates tzdata su-exec \
 	&& addgroup -S app \

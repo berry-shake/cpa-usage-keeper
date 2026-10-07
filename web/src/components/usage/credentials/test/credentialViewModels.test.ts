@@ -523,6 +523,21 @@ describe('credentialViewModels', () => {
     expect(rows[0].displayQuotas.map((quota) => quota.barPercent)).toEqual([80, 60, 40])
   })
 
+  it('displays international Kimi short and monthly quotas without changing its identity type', () => {
+    const quotas = new Map<string, UsageQuotaCheckResponse>([
+      ['kimi-ai-auth', quotaResponse('kimi-ai-auth', [
+        { key: 'limits.0', label: '5h', used: 25, limit: 100, remaining: 75, usedPercent: 25, window: { seconds: 18000 } },
+        { key: 'usages.limit_month_total', label: 'Monthly', used: 7.95, limit: 100, remaining: 92.05, usedPercent: 7.95, resetAt: '2026-11-05T00:00:00Z' },
+      ])],
+    ])
+
+    const rows = buildAuthFileCredentialRows([identity({ identity: 'kimi-ai-auth', provider: 'kimi-ai', type: 'kimi-ai' })], quotas)
+
+    expect(rows[0].identity.type).toBe('kimi-ai')
+    expect(rows[0].displayQuotas.map((quota) => quota.label)).toEqual(['5h', 'Monthly'])
+    expect(rows[0].displayQuotas.map((quota) => quota.barPercent)).toEqual([75, 92.05])
+  })
+
   it('keeps unknown Codex windows displayable without showing a generic Window quota', () => {
     const quotas = new Map<string, UsageQuotaCheckResponse>([
       ['auth-1', quotaResponse('auth-1', [
