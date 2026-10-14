@@ -90,9 +90,9 @@ Keep usage history for [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIP
 
 ## Features
 
-- **Keep your history**: persist CPA usage in SQLite with scheduled backups.
-- **Understand costs**: analyze usage, caching, and estimated costs by model, API Key, and provider.
-- **Investigate requests**: inspect and export request details, and explore success rates, time to first token (TTFT), and total latency.
+- **Keep your history**: persist CPA usage and execution/trace metadata in SQLite with scheduled backups.
+- **Understand costs**: analyze usage, caching, and estimated costs by model, API Key, and provider. Total-only token reports remain intact without inventing a billable input/output split.
+- **Investigate requests**: inspect and export request details, distinguish streaming from non-streaming responses, copy the original User-Agent, and explore success rates, time to first token (TTFT), and total latency.
 - **Track quotas**: monitor credential health and remaining quotas, refresh quotas, edit priorities, and explore Codex quota history.
 - **Share scoped access**: provide a read-only usage view for an individual CPA API Key.
 

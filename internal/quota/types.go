@@ -57,27 +57,34 @@ type SubscriptionInfo struct {
 	TierName string `json:"tierName,omitempty"`
 }
 
+// QuotaUsageBreakdown 表示共享额度的使用构成，不是独立限额。
+type QuotaUsageBreakdown struct {
+	Product     string   `json:"product"`
+	UsedPercent *float64 `json:"usedPercent,omitempty"`
+}
+
 type QuotaRow struct {
-	Key               string       `json:"key"`
-	Label             string       `json:"label,omitempty"`
-	Scope             string       `json:"scope,omitempty"`
-	Metric            string       `json:"metric,omitempty"`
-	GroupKey          string       `json:"groupKey,omitempty"`
-	GroupLabel        string       `json:"groupLabel,omitempty"`
-	GroupDescription  string       `json:"groupDescription,omitempty"`
-	Used              *float64     `json:"used,omitempty"`
-	Limit             *float64     `json:"limit,omitempty"`
-	Remaining         *float64     `json:"remaining,omitempty"`
-	UsedPercent       *float64     `json:"usedPercent,omitempty"`
-	RemainingFraction *float64     `json:"remainingFraction,omitempty"`
-	Allowed           *bool        `json:"allowed,omitempty"`
-	LimitReached      *bool        `json:"limitReached,omitempty"`
-	Window            *QuotaWindow `json:"window,omitempty"`
-	ResetAt           string       `json:"resetAt,omitempty"`
-	ResetAfterSeconds *int64       `json:"resetAfterSeconds,omitempty"`
-	WindowUsageTokens *int64       `json:"window_usage_tokens,omitempty"`
-	WindowUsageCost   *float64     `json:"window_usage_cost,omitempty"`
-	// WindowUsageModelKeyword 标记该 row 的本地窗口用量按模型关键字过滤统计（如 fable），仅服务端内部使用不下发前端。
+	UsageBreakdown    []QuotaUsageBreakdown `json:"usageBreakdown,omitempty"`
+	Key               string                `json:"key"`
+	Label             string                `json:"label,omitempty"`
+	Scope             string                `json:"scope,omitempty"`
+	Metric            string                `json:"metric,omitempty"`
+	GroupKey          string                `json:"groupKey,omitempty"`
+	GroupLabel        string                `json:"groupLabel,omitempty"`
+	GroupDescription  string                `json:"groupDescription,omitempty"`
+	Used              *float64              `json:"used,omitempty"`
+	Limit             *float64              `json:"limit,omitempty"`
+	Remaining         *float64              `json:"remaining,omitempty"`
+	UsedPercent       *float64              `json:"usedPercent,omitempty"`
+	RemainingFraction *float64              `json:"remainingFraction,omitempty"`
+	Allowed           *bool                 `json:"allowed,omitempty"`
+	LimitReached      *bool                 `json:"limitReached,omitempty"`
+	Window            *QuotaWindow          `json:"window,omitempty"`
+	ResetAt           string                `json:"resetAt,omitempty"`
+	ResetAfterSeconds *int64                `json:"resetAfterSeconds,omitempty"`
+	WindowUsageTokens *int64                `json:"window_usage_tokens,omitempty"`
+	WindowUsageCost   *float64              `json:"window_usage_cost,omitempty"`
+	// WindowUsageModelKeyword marks model-filtered local window usage and is never sent to the frontend.
 	WindowUsageModelKeyword string `json:"-"`
 }
 
