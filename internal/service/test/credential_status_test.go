@@ -2,9 +2,11 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -24,7 +26,7 @@ type credentialStatusAuthFileCall struct {
 
 type credentialStatusProviderCall struct {
 	providerType   string
-	index          int
+	group          int
 	excludedModels []string
 }
 
@@ -94,7 +96,7 @@ func (s *credentialStatusClientStub) FetchProviderKeyConfig(_ context.Context, p
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
-		return &response.ProviderKeyConfigResult{StatusCode: http.StatusOK}, nil
+		return &response.ProviderKeyConfigResult{StatusCode: http.StatusOK, Document: &providerconfig.Document{}}, nil
 	}
 	// 返回快照，避免并发读改写共享同一份 slice。
 	snapshot := &response.ProviderKeyConfigResult{StatusCode: payload.StatusCode, Body: payload.Body}
@@ -103,31 +105,33 @@ func (s *credentialStatusClientStub) FetchProviderKeyConfig(_ context.Context, p
 		entry.ExcludedModels = append([]string(nil), entry.ExcludedModels...)
 		snapshot.Payload[i] = entry
 	}
+	snapshot.Document = testProviderDocument(snapshot.Payload)
 	if fetchErr != nil {
 		return snapshot, fetchErr
 	}
 	return snapshot, nil
 }
 
-func (s *credentialStatusClientStub) UpdateProviderKeyExcludedModels(_ context.Context, providerType string, index int, excludedModels []string) (int, error) {
+func (s *credentialStatusClientStub) UpdateProviderConfig(_ context.Context, providerType string, document *providerconfig.Document) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.providerCalls = append(s.providerCalls, credentialStatusProviderCall{
-		providerType:   providerType,
-		index:          index,
-		excludedModels: append([]string(nil), excludedModels...),
-	})
-	if s.providerWriteVersions == nil {
-		s.providerWriteVersions = map[string]int{}
+	updated, err := document.ProviderKeys("")
+	if err != nil {
+		return 0, err
 	}
-	if s.providerReadVersions[providerType] != s.providerWriteVersions[providerType] {
-		s.providerStaleWrites++
+	groupIndex := 0
+	if previous := s.providerPayloads[providerType]; previous != nil {
+		before := testProviderDocument(previous.Payload)
+		for index := range document.Groups {
+			if !reflect.DeepEqual(before.Groups[index].Keys[0].Fields["excluded-models"], document.Groups[index].Keys[0].Fields["excluded-models"]) {
+				groupIndex = index
+				break
+			}
+		}
 	}
-	s.providerWriteVersions[providerType]++
-	// 写回 payload，让下一次读取看到最新结果；丢失更新会因此变成可见的状态回退。
-	if payload, ok := s.providerPayloads[providerType]; ok && payload != nil && index >= 0 && index < len(payload.Payload) {
-		payload.Payload[index].ExcludedModels = append([]string(nil), excludedModels...)
-	}
+	var models []string
+	json.Unmarshal(document.Groups[groupIndex].Keys[0].Fields["excluded-models"], &models)
+	s.providerCalls = append(s.providerCalls, credentialStatusProviderCall{providerType: providerType, group: groupIndex, excludedModels: models})
 	statusCode := s.providerUpdateCode
 	if statusCode == 0 {
 		statusCode = http.StatusOK
@@ -136,7 +140,17 @@ func (s *credentialStatusClientStub) UpdateProviderKeyExcludedModels(_ context.C
 		return statusCode, s.providerUpdateErr
 	}
 	if statusCode != http.StatusOK {
-		return statusCode, fmt.Errorf("provider key patch returned status %d", statusCode)
+		return statusCode, fmt.Errorf("provider list PUT returned status %d", statusCode)
+	}
+	if s.providerWriteVersions == nil {
+		s.providerWriteVersions = map[string]int{}
+	}
+	if s.providerReadVersions[providerType] != s.providerWriteVersions[providerType] {
+		s.providerStaleWrites++
+	}
+	s.providerWriteVersions[providerType]++
+	if payload := s.providerPayloads[providerType]; payload != nil {
+		payload.Payload = updated
 	}
 	return statusCode, nil
 }
@@ -337,12 +351,12 @@ func TestCredentialStatusServiceProviderTogglesWildcardExcludedModel(t *testing.
 		t.Fatalf("unexpected response: %+v", result)
 	}
 	if len(client.providerCalls) != 1 {
-		t.Fatalf("expected one provider patch, got %+v", client.providerCalls)
+		t.Fatalf("expected one provider PUT, got %+v", client.providerCalls)
 	}
 	patch := client.providerCalls[0]
-	// 必须按 CPA 配置数组下标改，值匹配在重复 API Key 时会命中第一条。
-	if patch.providerType != "gemini" || patch.index != 1 {
-		t.Fatalf("unexpected provider patch target: %+v", patch)
+	// 只修改目标 auth_index 所在的成员，其他组保持不变。
+	if patch.providerType != "gemini" || patch.group != 1 {
+		t.Fatalf("unexpected provider PUT target: %+v", patch)
 	}
 	// 停用只追加精确 "*"，必须保留用户已有规则。
 	if len(patch.excludedModels) != 2 || patch.excludedModels[0] != "gpt-5" || patch.excludedModels[1] != "*" {
@@ -401,7 +415,7 @@ func TestCredentialStatusServiceProviderNormalizesExistingExclusions(t *testing.
 	}
 }
 
-func TestCredentialStatusServiceProviderTargetsSecondDuplicateKeyByIndex(t *testing.T) {
+func TestCredentialStatusServiceProviderTargetsDistinctAuthIndexInSecondGroup(t *testing.T) {
 	db := openMetadataTestDatabase(t, "credential-status-provider-duplicate-key.db")
 	// 同一 API Key 两条配置、不同 BaseURL；用户点的是第二条。
 	seedCredentialStatusIdentity(t, db, entities.UsageIdentity{
@@ -428,12 +442,12 @@ func TestCredentialStatusServiceProviderTargetsSecondDuplicateKeyByIndex(t *test
 		t.Fatalf("SetAIProviderDisabled returned error: %v", err)
 	}
 	if len(client.providerCalls) != 1 {
-		t.Fatalf("expected one provider patch, got %+v", client.providerCalls)
+		t.Fatalf("expected one provider PUT, got %+v", client.providerCalls)
 	}
 	patch := client.providerCalls[0]
-	// CPA 只按 match 改第一条，因此这里必须传第二条的下标。
-	if patch.index != 1 {
-		t.Fatalf("expected patch index 1 for the second duplicate key, got %+v", patch)
+	// 相同 API Key 在不同 base-url 下有不同 auth_index，仍按标识定位。
+	if patch.group != 1 {
+		t.Fatalf("expected group 1 for the second duplicate key, got %+v", patch)
 	}
 	// 只能带上目标条目自己的排除规则，第一条的规则不能被波及。
 	if len(patch.excludedModels) != 2 || patch.excludedModels[0] != "second-model" || patch.excludedModels[1] != "*" {
@@ -455,15 +469,12 @@ func TestCredentialStatusServiceProviderKeepsFirstEntryForRepeatedAuthIndex(t *t
 	}}
 	provider := service.NewCredentialStatusService(db, client, nil, &service.CredentialMutationLocks{})
 
-	// 这是防御性用例：CPA 的稳定 ID 生成器会给哈希相同的重复项追加 -N 后缀，因此经 CPA API
-	// 不可达，重复 auth-index 只能来自异常数据。此时沿用首项下标，与 Keeper metadata 侧保留
-	// 首项的精确 auth-index 去重口径一致。真正守住 P1-1 的是断言 index==1 的
-	// TestCredentialStatusServiceProviderTargetsSecondDuplicateKeyByIndex。
+	// 相同 auth_index 的重复配置是有效上游输入，继续修改首项。
 	if _, err := provider.SetAIProviderDisabled(context.Background(), "idx-codex", true); err != nil {
 		t.Fatalf("SetAIProviderDisabled returned error: %v", err)
 	}
-	if len(client.providerCalls) != 1 || client.providerCalls[0].index != 0 {
-		t.Fatalf("expected patch against the first entry, got %+v", client.providerCalls)
+	if len(client.providerCalls) != 1 || client.providerCalls[0].group != 0 {
+		t.Fatalf("expected PUT updating the first entry, got %+v", client.providerCalls)
 	}
 	if models := client.providerCalls[0].excludedModels; len(models) != 2 || models[0] != "first-model" || models[1] != "*" {
 		t.Fatalf("unexpected excluded models: %#v", models)
@@ -481,7 +492,7 @@ func TestCredentialStatusServiceProviderRejectsUnsupportedType(t *testing.T) {
 		t.Fatalf("expected unsupported error, got %v", err)
 	}
 	if len(client.providerCalls) != 0 {
-		t.Fatalf("expected no provider patch for unsupported type, got %+v", client.providerCalls)
+		t.Fatalf("expected no provider PUT for unsupported type, got %+v", client.providerCalls)
 	}
 }
 
@@ -499,7 +510,7 @@ func TestCredentialStatusServiceProviderRejectsUnknownAuthIndex(t *testing.T) {
 	}
 	// 定位失败时绝不能退化成“改第一条”。
 	if len(client.providerCalls) != 0 {
-		t.Fatalf("expected no provider patch when auth index is absent, got %+v", client.providerCalls)
+		t.Fatalf("expected no provider PUT when auth index is absent, got %+v", client.providerCalls)
 	}
 }
 
@@ -519,7 +530,7 @@ func TestCredentialStatusServiceProviderMapsUpstream404ToNotFound(t *testing.T) 
 		t.Fatalf("expected not found error, got %v", err)
 	}
 	if len(client.providerCalls) != 0 {
-		t.Fatalf("expected no provider patch after fetch 404, got %+v", client.providerCalls)
+		t.Fatalf("expected no provider PUT after fetch 404, got %+v", client.providerCalls)
 	}
 }
 
@@ -582,10 +593,10 @@ func TestCredentialStatusServiceSerializesConcurrentProviderToggles(t *testing.T
 	}
 	wg.Wait()
 	if len(client.providerCalls) != 4 {
-		t.Fatalf("expected four serialized provider patches, got %d", len(client.providerCalls))
+		t.Fatalf("expected four serialized provider PUTes, got %d", len(client.providerCalls))
 	}
 	if client.providerStaleWrites != 0 {
-		t.Fatalf("expected every read-modify-write to observe the previous patch, got %d stale writes", client.providerStaleWrites)
+		t.Fatalf("expected every read-modify-write to observe the previous PUT, got %d stale writes", client.providerStaleWrites)
 	}
 	// 串行化后每次读改写都能看到上一轮结果，最终停用列表里 "*" 至多出现一次。
 	last := client.providerCalls[len(client.providerCalls)-1]

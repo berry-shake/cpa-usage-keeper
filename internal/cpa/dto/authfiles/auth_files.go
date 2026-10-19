@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-// AuthFilesResponse 是 CPA /management/auth-files 响应 DTO。
+// AuthFilesResponse 是 CPA 凭证列表接口的响应 DTO。
 type AuthFilesResponse struct {
 	Files []AuthFile `json:"files"`
 }
 
-// AuthFile 是 CPA /management/auth-files 中单个 auth file 的原始响应 DTO。
+// AuthFile 保存凭证列表中单个认证文件的原始响应字段。
 type AuthFile struct {
 	AuthIndex   string                  `json:"auth_index"`
 	Name        string                  `json:"name"`

@@ -97,8 +97,10 @@ export function ActivityHeatmapGrid({
         setActiveTooltip(null);
       }
     };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setActiveTooltip(null); };
     document.addEventListener('pointerdown', handler);
-    return () => document.removeEventListener('pointerdown', handler);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', handler); document.removeEventListener('keydown', escape); };
   }, [visibleTooltip]);
 
   const buildTooltipState = useCallback((

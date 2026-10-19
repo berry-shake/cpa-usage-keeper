@@ -24,9 +24,13 @@ func decodeLiteLLM(decoder *json.Decoder) ([]Entry, error) {
 	}
 	entries := make([]Entry, 0, len(models))
 	for _, id := range sortedKeys(models) {
+		if id == "sample_spec" {
+			continue
+		}
 		model := models[id]
 		// 只映射基础文本 token 价格；图片、音频、请求数和上下文阶梯有独立计价语义。
-		if model.Mode != "chat" && model.Mode != "completion" && model.Mode != "responses" {
+		mode := strings.ToLower(strings.TrimSpace(model.Mode))
+		if mode != "" && mode != "chat" && mode != "completion" && mode != "responses" {
 			continue
 		}
 		// chat 也包含纯音频模型；只排除明确没有文本输出的条目，缺少字段时保持兼容。
@@ -38,7 +42,8 @@ func decodeLiteLLM(decoder *json.Decoder) ([]Entry, error) {
 		}
 		provider := liteLLMProviderID(model.Provider)
 		if provider == "" {
-			continue
+			// 没有供应商元数据的旧目录仍可按模型身份匹配，不伪造官方供应商。
+			provider = "litellm"
 		}
 		// 部分目录条目仅提供 cache_hit；标准字段存在时保留其值，包括显式零价。
 		cacheRead := model.CacheRead
@@ -46,11 +51,28 @@ func decodeLiteLLM(decoder *json.Decoder) ([]Entry, error) {
 			cacheRead = model.CacheHit
 		}
 		entries = append(entries, Entry{ProviderID: provider, ProviderName: provider, Model: Model{
-			ID: id, Name: id,
+			ID: id, Name: canonicalLiteLLMModelName(id),
 			Cost: Cost{Input: perMillion(model.Input), Output: perMillion(model.Output), CacheRead: perMillion(cacheRead), CacheWrite: perMillion(model.CacheWrite)},
 		}})
 	}
 	return entries, nil
+}
+
+// canonicalLiteLLMModelName 保留原始 ID，以名称索引兼容 Bedrock 地区及供应商前缀。
+// 只在 ASCII 字母之间拆分点号，避免截断 gpt-3.5 和 gemini-1.5 等版本。
+func canonicalLiteLLMModelName(id string) string {
+	name := id[strings.LastIndex(id, "/")+1:]
+	start := 0
+	for index := 1; index+1 < len(name); index++ {
+		if name[index] == '.' && liteLLMASCIIAlpha(name[index-1]) && liteLLMASCIIAlpha(name[index+1]) {
+			start = index + 1
+		}
+	}
+	return name[start:]
+}
+
+func liteLLMASCIIAlpha(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
 }
 
 func perMillion(price *float64) *float64 {

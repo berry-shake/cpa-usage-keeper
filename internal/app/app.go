@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"time"
 
 	"cpa-usage-keeper/internal/api"
 	"cpa-usage-keeper/internal/auth"
@@ -18,9 +17,10 @@ import (
 	"cpa-usage-keeper/internal/poller"
 	"cpa-usage-keeper/internal/pricing"
 	"cpa-usage-keeper/internal/quota"
-	"cpa-usage-keeper/internal/ranking"
+	"cpa-usage-keeper/internal/releasecheck"
 	"cpa-usage-keeper/internal/repository"
 	"cpa-usage-keeper/internal/service"
+	"cpa-usage-keeper/internal/version"
 	webui "cpa-usage-keeper/web"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -49,8 +49,15 @@ type QuotaRunner interface {
 	StartAutoRefresh(context.Context) error
 }
 
+// PricingTaskWaiter 只暴露关闭数据库前必须等待的重算生命周期边界。
+type PricingTaskWaiter interface {
+	WaitPricingRecalculation()
+}
+
 type App struct {
 	Config *config.Config
+	// StartupShell 先于数据库初始化对外服务，业务准备完成后原子切到 Router。
+	StartupShell *api.StartupShell
 	// DB 是统一 GORM 入口：普通查询由 dbresolver 路由到 reader，写入和默认事务留在 writer。
 	DB *gorm.DB
 	// ReadDB 只保留 reader 的生命周期和池状态入口；业务服务不得再自行选择数据库池。
@@ -63,52 +70,27 @@ type App struct {
 	CPAErrors Runner
 	// UsageAggregation 是唯一串行调度三类派生聚合事务的后台 runner。
 	UsageAggregation  Runner
-	Ranking           Runner
-	LocalRanking      Runner
 	Maintenance       *StorageCleanupRunner
 	MetadataSync      *MetadataSyncRunner
 	QuotaService      QuotaRunner
 	QuotaAutoRefresh  QuotaRunner
 	BackupMaintenance *DatabaseBackupRunner
 	RecentUsageCache  *repository.UsageRecentEventCache
+	CostReadGate      *service.CostReadGate
 	PricingCatalog    *pricing.Catalog
+	PricingService    PricingTaskWaiter
 	LogCloser         io.Closer
 
-	backgroundCancel context.CancelFunc
-	backgroundWG     sync.WaitGroup
+	backgroundCancel  context.CancelFunc
+	backgroundContext context.Context
+	backgroundWG      sync.WaitGroup
+	ingestBridge      *UsageIngestBridge
+	serveStartup      bool
+	ingestStarted     bool
 }
 
 // newUsageRecentEventCache 是最近事件缓存构造入口，测试可替换它来覆盖缓存初始化失败路径。
 var newUsageRecentEventCache = repository.NewUsageRecentEventCache
-
-type loggedInitializationError struct {
-	err error
-}
-
-func (e *loggedInitializationError) Error() string {
-	return e.err.Error()
-}
-
-func (e *loggedInitializationError) Unwrap() error {
-	return e.err
-}
-
-// IsInitializationErrorLogged 判断构造阶段是否已在释放日志资源前写入终止错误。
-func IsInitializationErrorLogged(err error) bool {
-	var logged *loggedInitializationError
-	return errors.As(err, &logged)
-}
-
-func failInitialization(logCloser io.Closer, err error) error {
-	logging.LogTerminalFatal("initialize app", err)
-	if closeErr := logCloser.Close(); closeErr != nil {
-		wrappedCloseErr := fmt.Errorf("close logging: %w", closeErr)
-		err = errors.Join(err, wrappedCloseErr)
-		// 文件日志已经进入关闭流程，额外将关闭失败写到恢复后的控制台输出，避免错误只留在返回值里。
-		logging.LogTerminalError("close logging after initialization failure", wrappedCloseErr)
-	}
-	return &loggedInitializationError{err: err}
-}
 
 func New() (*App, error) {
 	return NewWithOptions(Options{})
@@ -125,7 +107,7 @@ func NewWithOptions(options Options) (*App, error) {
 
 func NewWithConfig(cfg config.Config) (*App, error) {
 	// NewWithConfig 也可被程序化调用，不能只依赖环境变量加载路径完成 mode 校验。
-	forcedIngestMode, ok := poller.ParseRedisIngestForcedMode(cfg.RedisIngestMode)
+	_, ok := poller.ParseRedisIngestForcedMode(cfg.RedisIngestMode)
 	if !ok {
 		return nil, fmt.Errorf("REDIS_INGEST_MODE must be one of auto, subscribe, redis_pull, http_pull")
 	}
@@ -134,89 +116,50 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	return &App{
+		Config:       &cfg,
+		LogCloser:    logCloser,
+		StartupShell: api.NewStartupShell(webui.Static, appAuthConfig(cfg), cfg.AppBasePath),
+	}, nil
+}
 
-	// repository 先初始化唯一 writer，再注册文件 reader 和官方读写路由；内存库继续复用原单池语义。
-	db, readDB, err := repository.OpenDatabasePools(cfg)
-	// 任一数据库池构造失败时 repository 已回收局部资源，App 只需要释放日志句柄。
-	if err != nil {
-		return nil, failInitialization(logCloser, err)
-	}
-	// Ranking 完全复用现有 app_settings 和统一 DB；构造阶段不访问中心，默认 disabled 没有外部请求。
-	rankingService, err := ranking.NewService(ranking.NewStore(db), ranking.NewAggregator(db), ranking.NewClient())
-	if err != nil {
-		if readDB != db {
-			_ = closeGormDB(readDB)
-		}
-		_ = closeGormDB(db)
-		_ = logCloser.Close()
-		return nil, err
-	}
-	rankingRunner, err := ranking.NewRunner(rankingService)
-	if err != nil {
-		if readDB != db {
-			_ = closeGormDB(readDB)
-		}
-		_ = closeGormDB(db)
-		_ = logCloser.Close()
-		return nil, err
-	}
-	// 最近事件缓存继续使用统一 DB；其 Query 会由 dbresolver 自动路由到 reader。
+// buildReadyApp 只在首次迁移数据完成后构造完整业务对象，不负责打开或关闭启动阶段的数据库池。
+func buildReadyApp(cfg config.Config, db, readDB *gorm.DB, logCloser io.Closer, lifecycleCtx context.Context, ingestRunner *poller.RedisIngestRunner) (*App, error) {
+	// M8 必须先成功加载共享费用缓存；重算结束要在同一对象重载，不能以 nil 伪装业务就绪。
 	recentUsageCache, err := newUsageRecentEventCache(db, repository.UsageRecentEventCacheOptions{})
 	if err != nil {
-		// 缓存初始化失败会让 realtime/最近边界降级到 DB，但不影响核心写入和查询能力。
-		logrus.WithError(err).Error("recent usage event cache initialization failed; falling back to database queries")
-		recentUsageCache = nil
-	}
-	localRankingService, err := ranking.NewLocalRankingService(db, ranking.LocalRankingServiceOptions{})
-	if err != nil {
-		if recentUsageCache != nil {
-			recentUsageCache.Close()
-		}
-		if readDB != db {
-			_ = closeGormDB(readDB)
-		}
-		_ = closeGormDB(db)
-		_ = logCloser.Close()
-		return nil, err
-	}
-	localRankingRunner, err := ranking.NewLocalRankingRunner(localRankingService)
-	if err != nil {
-		if recentUsageCache != nil {
-			recentUsageCache.Close()
-		}
-		if readDB != db {
-			_ = closeGormDB(readDB)
-		}
-		_ = closeGormDB(db)
-		_ = logCloser.Close()
-		return nil, err
+		return nil, fmt.Errorf("initialize recent usage event cache: %w", err)
 	}
 	pricingSnapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
 	if err != nil {
-		if recentUsageCache != nil {
-			recentUsageCache.Close()
-		}
-		if readDB != db {
-			_ = closeGormDB(readDB)
-		}
-		_ = closeGormDB(db)
-		return nil, failInitialization(logCloser, fmt.Errorf("load pricing snapshot: %w", err))
+		recentUsageCache.Close()
+		return nil, fmt.Errorf("load pricing snapshot: %w", err)
 	}
 	pricingCatalog := pricing.NewCatalog(pricingSnapshot)
+	// 单个 App 共享一把费用读取许可，供 HTTP 费用请求和后续手动重算协调。
+	costReadGate := service.NewCostReadGate()
 
 	cpaClient := cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify)
 	quotaService := quota.NewServiceWithOptions(db, cpaClient, quota.ServiceOptions{
 		RefreshWorkerLimit:            cfg.QuotaRefreshWorkerLimit,
 		QuotaUpstreamResponsesEnabled: cfg.QuotaUpstreamResponsesEnabled,
-		PricingCatalog:                pricingCatalog,
 	})
+	prepared := false
+	defer func() {
+		if !prepared {
+			// StopRefreshTasks 已同步等待刷新 worker，清理后才能关闭缓存和共享数据库。
+			quotaService.StopRefreshTasks()
+			recentUsageCache.Close()
+		}
+	}()
 	// 单 writer aggregation runner 只维护 rollups/Identity，并在 App.Run 时主动追平。
 	usageAggregationRunner := poller.NewUsageAggregationRunner(db)
 	// syncService 仍然是 metadata 和 usage 处理共享的业务服务入口。
 	syncService := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{
-		UsageRawRetentionDays: cfg.UsageRawRetentionDays,
 		BaseURL:               cfg.CPABaseURL,
 		Client:                cpaClient,
+		PricingCatalog:        pricingCatalog,
+		UsageRawRetentionDays: cfg.UsageRawRetentionDays,
 		// usage_events 事务提交后通过这个缓存做非阻塞增量追加，供 Overview realtime 和右边界补偿复用。
 		RecentUsageEvents: recentUsageCache,
 		// usage 与 metadata 提交后只唤醒单 writer runner，不在前台链路执行派生聚合。
@@ -226,43 +169,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	})
 	// metadataSyncRunner 提前创建，保证控制消息和后台任务使用同一个调度器实例。
 	metadataSyncRunner := NewMetadataSyncRunner(syncService, cfg.MetadataSyncInterval)
-	// redisPullSource 负责 Redis batch pull，并在 usage/queue 两个 key 间做一次兼容探测。
-	redisPullSource := poller.NewRedisPullSource(cpa.RedisQueueOptions{
-		BaseURL:       cfg.CPABaseURL,
-		RedisAddr:     cfg.RedisQueueAddr,
-		ManagementKey: cfg.CPAManagementKey,
-		Timeout:       cfg.RequestTimeout,
-		BatchSize:     cfg.RedisQueueBatchSize,
-		TLS:           cfg.RedisQueueTLS,
-		TLSSkipVerify: cfg.TLSSkipVerify,
-	})
-	// httpPullSource 保持 HTTP usage queue 兜底路径不变。
-	httpPullSource := poller.NewHTTPPullSource(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify, cfg.RedisQueueBatchSize)
-	// redisSubscribeSource 保持 Redis SUBSCRIBE 优先路径不变。
-	redisSubscribeSource := poller.NewRedisSubscribeSource(poller.RedisSubscribeOptions{
-		BaseURL:       cfg.CPABaseURL,
-		RedisAddr:     cfg.RedisQueueAddr,
-		ManagementKey: cfg.CPAManagementKey,
-		Timeout:       cfg.RequestTimeout,
-		TLS:           cfg.RedisQueueTLS,
-		TLSSkipVerify: cfg.TLSSkipVerify,
-	})
-	// usage 通道可能混入 metadata 控制消息，落 inbox 前先过滤并转交 metadata runner。
-	// inbox writer 不再接收 queue key，来源由 runner 传入并写入 redis_usage_inboxes.source。
-	redisInboxWriter := poller.NewControlAwareRedisInboxWriter(poller.NewRedisInboxWriter(db), metadataSyncRunner)
-	// redisIngestRunner 继续负责三种 usage 拉取方式的选择和降级。
-	redisIngestRunner := poller.NewRedisIngestRunner(redisSubscribeSource, redisPullSource, httpPullSource, redisInboxWriter, poller.RedisIngestRunnerConfig{
-		IdleInterval:       cfg.RedisQueueIdleInterval,
-		BatchSize:          cfg.RedisQueueBatchSize,
-		HTTPBackoffInitial: time.Second,
-		HTTPBackoffMax:     30 * time.Second,
-		// 显式固定长期模式时跳过其他模式的启动探测，但保留该模式内部的临时 fallback。
-		ForcedMode: forcedIngestMode,
-		// subscribe 断线重连和 redis_pull 恢复探测间隔，默认 30s。
-		RecoveryRetryInterval: cfg.RedisIngestRecoveryInterval,
-	})
-	// usage 链路一旦降级或失败，metadata 同步回到轮询，直到下一条 CPA 控制消息重新启用通知模式。
-	redisIngestRunner.SetControlMessageObserver(metadataSyncRunner)
+	// 同一接收 runner 在迁移与业务阶段存活；桥接的 writer/observer 在库就绪后一次移交。
 	// redisProcessRunner 仍然只处理本地 inbox 到 usage_events 的消费。
 	redisProcessRunner := poller.NewRedisProcessRunner(syncService)
 	// errorEventService 同时承担 Errors runner 的直接写入和详情 API 的分页读取。
@@ -278,27 +185,14 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	})
 	redisErrorIngestRunner := poller.NewRedisErrorIngestRunner(redisErrorSubscribeSource, errorEventService)
 	// backgroundPoller 继续组合远端 ingest 和本地 process 的状态展示。
-	backgroundPoller := poller.NewRedisPoller(redisIngestRunner, redisProcessRunner)
+	backgroundPoller := poller.NewRedisPoller(ingestRunner, redisProcessRunner)
 	var backupMaintenance *DatabaseBackupRunner
 	if cfg.BackupEnabled {
 		// 备份继续借用唯一 writer 连接，保持旧版串行快照语义，避免独立连接持续写入时反复重启在线备份。
 		sqlDB, err := db.DB()
-		// 无法取得 writer 底层池时备份无法可靠运行，App 构造必须整体失败并逆序清理资源。
+		// 无法取得 writer 底层池时，M8 失败但外层仍持有数据库与接收生命周期。
 		if err != nil {
-			// 缓存可能已经启动内部资源，先于数据库连接关闭。
-			if recentUsageCache != nil {
-				recentUsageCache.Close()
-			}
-			// quota service 可能已经准备异步任务状态，数据库关闭前先通知其停止。
-			quotaService.StopRefreshTasks()
-			// 文件库 reader 没有其它持有者后先关闭；内存库与 writer 相同，留给下一步只关闭一次。
-			if readDB != db {
-				_ = closeGormDB(readDB)
-			}
-			// 最后关闭唯一 writer，确保任何已开始的写操作先于日志资源结束。
-			_ = closeGormDB(db)
-			// 数据库资源全部回收后再关闭日志文件。
-			return nil, failInitialization(logCloser, err)
+			return nil, fmt.Errorf("initialize database backup maintenance: %w", err)
 		}
 		// 备份期间其它写入继续在 writer 池外排队；页面查询仍可使用独立 reader，不恢复旧版的全局读阻塞。
 		backupStore := newDatabaseBackupStore(sqlDB, cfg.BackupDir)
@@ -324,24 +218,19 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 	if cfg.TLSSkipVerify {
 		logrus.WithField("cpa_base_url", cfg.CPABaseURL).Warn("TLS certificate verification is disabled for CPA and Redis queue connections")
 	}
-	pricingService := service.NewPricingService(db, pricingCatalog, cpaClient)
+	pricingService := service.NewPricingServiceWithRecalculation(db, pricingCatalog, service.PricingRecalculationDependencies{
+		LifecycleCtx: lifecycleCtx, Sync: syncService, Aggregation: usageAggregationRunner,
+		CostReadGate: costReadGate, Recent: recentUsageCache, Quota: quotaService,
+	}, cpaClient)
 	sessionManager := auth.NewSessionManager(cfg.AuthSessionTTL)
 	if cfg.AuthEnabled {
 		// Session Get/List 自动走 reader，Save/Delete 仍由写回调路由到唯一 writer。
 		sessionManager = auth.NewPersistentSessionManager(cfg.AuthSessionTTL, auth.NewGormSessionStore(db))
 	}
-	authConfig := api.AuthConfig{
-		Enabled:                         cfg.AuthEnabled,
-		LoginPassword:                   cfg.LoginPassword,
-		SessionTTL:                      cfg.AuthSessionTTL,
-		BasePath:                        cfg.AppBasePath,
-		FrameAncestorOrigins:            frameAncestorOrigins(cfg),
-		TrustedProxyCIDRs:               cfg.TrustedProxyCIDRs,
-		APIKeyViewerLocalRankingEnabled: cfg.APIKeyViewerLocalRankingEnabled,
-	}
+	authConfig := appAuthConfig(cfg)
 	authHandler := api.NewAuthHandler(authConfig, sessionManager)
 
-	return &App{
+	ready := &App{
 		Config: &cfg,
 		// 对外保留单一 DB 入口，现有服务和后台任务不需要感知物理池。
 		DB: db,
@@ -349,19 +238,19 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 		ReadDB: readDB,
 		Poller: backgroundPoller,
 		// Redis ingest/process 分成两个后台 runner，避免远端订阅拉取和本地 SQLite 处理互相等待。
-		RedisIngest:       redisIngestRunner,
+		RedisIngest:       ingestRunner,
 		RedisProcess:      redisProcessRunner,
 		CPAErrors:         redisErrorIngestRunner,
 		UsageAggregation:  usageAggregationRunner,
-		Ranking:           rankingRunner,
-		LocalRanking:      localRankingRunner,
 		Maintenance:       NewStorageCleanupRunner(syncService),
 		MetadataSync:      metadataSyncRunner,
 		QuotaService:      quotaService,
 		QuotaAutoRefresh:  quotaService,
 		BackupMaintenance: backupMaintenance,
 		RecentUsageCache:  recentUsageCache,
+		CostReadGate:      costReadGate,
 		PricingCatalog:    pricingCatalog,
+		PricingService:    pricingService,
 		LogCloser:         logCloser,
 		Router: api.NewRouter(
 			webui.Static,
@@ -373,6 +262,7 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 			cfg.AppBasePath,
 			api.OptionalProviders{
 				UsageIdentity: usageIdentityService,
+				CostReadGate:  costReadGate,
 				ErrorEvents:   errorEventService,
 				Quota:         quotaService,
 				CPAAPIKeys:    cpaAPIKeyService,
@@ -381,15 +271,27 @@ func NewWithConfig(cfg config.Config) (*App, error) {
 				CredentialStatus:   credentialStatusService,
 				CredentialPriority: credentialPriorityService,
 				RequestLogs:        requestLogService,
-				Ranking:            rankingService,
-				LocalRanking:       localRankingService,
 				Status: api.StatusRouteConfig{
 					CPAPublicURL:               cfg.CPAPublicURL,
 					CPARequestLogAccessEnabled: cfg.CPARequestLogAccessEnabled,
 				},
 			},
 		),
-	}, nil
+	}
+	prepared = true
+	return ready, nil
+}
+
+// appAuthConfig 让启动外壳和完整路由使用同一 BasePath、TLS 页面祖先及认证约束。
+func appAuthConfig(cfg config.Config) api.AuthConfig {
+	return api.AuthConfig{
+		Enabled:              cfg.AuthEnabled,
+		LoginPassword:        cfg.LoginPassword,
+		SessionTTL:           cfg.AuthSessionTTL,
+		BasePath:             cfg.AppBasePath,
+		FrameAncestorOrigins: frameAncestorOrigins(cfg),
+		TrustedProxyCIDRs:    cfg.TrustedProxyCIDRs,
+	}
 }
 
 func frameAncestorOrigins(cfg config.Config) []string {
@@ -439,7 +341,11 @@ func (a *App) Close() error {
 	}
 
 	a.stopBackgroundTasks()
+	if a.PricingService != nil {
+		a.PricingService.WaitPricingRecalculation()
+	}
 	if a.QuotaService != nil {
+		// StopRefreshTasks 已同步等待刷新 worker，随后才可释放缓存和数据库。
 		a.QuotaService.StopRefreshTasks()
 	}
 	if a.RecentUsageCache != nil {
@@ -476,13 +382,16 @@ func (a *App) Close() error {
 }
 
 func (a *App) Run() error {
-	if a == nil || a.Router == nil || a.Config == nil {
-		return fmt.Errorf("application is not initialized")
-	}
+	return a.RunContext(context.Background())
+}
 
-	ctx := a.startBackgroundContext()
-	defer a.stopBackgroundTasks()
-	if a.RedisIngest != nil {
+// startReadyBackgroundTasks 只在费用数据及完整 Router 都已准备后启动普通消费、聚合与维护。
+func (a *App) startReadyBackgroundTasks(ctx context.Context) {
+	a.startBackgroundTask(func() {
+		releasecheck.New(a.DB, version.Version, nil).Run(ctx)
+	})
+	if a.RedisIngest != nil && !a.ingestStarted {
+		a.ingestStarted = true
 		a.startBackgroundTask(func() {
 			if err := a.RedisIngest.Run(ctx); err != nil {
 				logrus.Errorf("redis ingest stopped: %v", err)
@@ -513,14 +422,6 @@ func (a *App) Run() error {
 			}
 		})
 	}
-	if a.Ranking != nil {
-		a.startBackgroundTask(func() {
-			// 排名中心故障只能终止本次可选同步任务，不能影响 Keeper HTTP 或 usage 采集。
-			if err := a.Ranking.Run(ctx); err != nil {
-				logrus.Errorf("ranking synchronization stopped: %v", err)
-			}
-		})
-	}
 	if a.Maintenance != nil {
 		a.startBackgroundTask(func() {
 			if err := a.Maintenance.Run(ctx); err != nil {
@@ -532,14 +433,6 @@ func (a *App) Run() error {
 		a.startBackgroundTask(func() {
 			if err := a.MetadataSync.Run(ctx); err != nil {
 				logrus.Errorf("metadata sync stopped: %v", err)
-			}
-		})
-	}
-	if a.LocalRanking != nil {
-		a.startBackgroundTask(func() {
-			// Metadata 已先启动；Local runner 再等待首个五分钟周期，让 usage 与 Key 信息完成启动追赶。
-			if err := a.LocalRanking.Run(ctx); err != nil {
-				logrus.Errorf("local ranking aggregation stopped: %v", err)
 			}
 		})
 	}
@@ -562,16 +455,12 @@ func (a *App) Run() error {
 		})
 	}
 
-	server := NewHTTPServer(*a.Config, a.Router)
-	if a.Config.TLSEnabled {
-		return server.ListenAndServeTLS(a.Config.TLSCertFile, a.Config.TLSKeyFile)
-	}
-	return server.ListenAndServe()
 }
 
-func (a *App) startBackgroundContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
+func (a *App) startBackgroundContext(parent context.Context) context.Context {
+	ctx, cancel := context.WithCancel(parent)
 	a.backgroundCancel = cancel
+	a.backgroundContext = ctx
 	return ctx
 }
 

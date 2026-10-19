@@ -74,10 +74,6 @@ const (
 	migrationAddUsageEventClientMetadata = "20260729_add_usage_event_client_metadata"
 	// migrationCreateUsageEventArchive 创建永久冷表；运行期归档在 schema 完成后才会启动。
 	migrationCreateUsageEventArchive = "20260730_create_usage_event_archive"
-	// migrationLocalRankingStats 创建固定四周期的本地排行累计。
-	migrationLocalRankingStats = "20260731_local_ranking_stats"
-	// migrationAddCPAAPIKeyLocalRankingAvatar 保存可空的本地排行头像覆盖值。
-	migrationAddCPAAPIKeyLocalRankingAvatar = "20260803_add_cpa_api_key_local_ranking_avatar"
 	// migrationAddAuthSessionClientMetadata 保存会话客户端与最近活动信息，旧会话只回填活动时间。
 	migrationAddAuthSessionClientMetadata = "20260813_add_auth_session_client_metadata"
 	// migrationCreateErrorEvents 创建 CPA errors 订阅的独立最终事件表。
@@ -100,9 +96,13 @@ const (
 	migrationAddUsageEventStreamStatusCode          = "20260919_usage_event_stream_status_code"
 	migrationNormalizeUsageEventParentSessionNull   = "20260922_normalize_usage_event_parent_session_null"
 	// migrationLimitLatencySamplePoints 缩小已保存散点，事务前必须备份旧 BLOB。
-	migrationLimitLatencySamplePoints = "20260925_limit_latency_sample_points"
+	migrationLimitLatencySamplePoints   = "20260925_limit_latency_sample_points"
+	migrationAddPricingStorageStructure = "20261009_pricing_storage_structure"
+	migrationRemoveRanking              = "20261009_remove_ranking"
 	// migrationAddUsageEventTraceMetadata 只保存上游提供的执行与节点元数据，历史行保持 NULL。
 	migrationAddUsageEventTraceMetadata = "20261008_usage_event_trace_metadata"
+	// migrationRecoverExecutionUsageEvents 以短事务回填事件标识并重新排队旧入口误拒绝的执行消息。
+	migrationRecoverExecutionUsageEvents = "20261018_recover_execution_usage_events"
 )
 
 type schemaMigration struct {
@@ -146,6 +146,64 @@ func Run(db *gorm.DB, optionValues ...RunOptions) error {
 		}
 	}
 	return nil
+}
+
+// RunPublished 只执行费用持久化改版之前的已发布迁移；各版本仍使用原事务、分批和备份合同。
+// 首次升级必须先在仓储层完成 M1 保护，再调用此入口，不能提前运行末尾费用结构版本。
+func RunPublished(db *gorm.DB, optionValues ...RunOptions) error {
+	if len(optionValues) > 1 {
+		return fmt.Errorf("run published schema migrations: expected at most one options value")
+	}
+	options := RunOptions{}
+	if len(optionValues) == 1 {
+		options = optionValues[0]
+	}
+	if err := createSchemaMigrationsTable(db); err != nil {
+		return err
+	}
+	migrations := orderedMigrations()
+	boundary, err := pricingStorageMigrationBoundary(migrations)
+	if err != nil {
+		return err
+	}
+	for _, item := range migrations[:boundary] {
+		if err := runSchemaMigration(db, item, options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RunPricingStorageStructure 在 M3 旧价和 C/H 已持久化后单独添加费用列；缺旧版本时拒绝越序增列。
+func RunPricingStorageStructure(db *gorm.DB) error {
+	if err := createSchemaMigrationsTable(db); err != nil {
+		return err
+	}
+	migrations := orderedMigrations()
+	boundary, err := pricingStorageMigrationBoundary(migrations)
+	if err != nil {
+		return err
+	}
+	for _, item := range migrations[:boundary] {
+		applied, err := schemaMigrationApplied(db, item.version)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			return fmt.Errorf("published schema migration %s must finish before pricing storage", item.version)
+		}
+	}
+	return runSchemaMigration(db, migrations[boundary])
+}
+
+// pricingStorageMigrationBoundary 定位固定费用版本；后续恢复迁移在完整迁移阶段执行。
+func pricingStorageMigrationBoundary(migrations []databaseMigration) (int, error) {
+	for index, item := range migrations {
+		if item.version == migrationAddPricingStorageStructure {
+			return index, nil
+		}
+	}
+	return 0, fmt.Errorf("pricing storage migration is not registered")
 }
 
 func MarkAllAsApplied(db *gorm.DB) error {
@@ -232,8 +290,6 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationUsageLatencyStats, run: usageLatencyStatsMigration, disableTransaction: true},
 		{version: migrationAddUsageEventClientMetadata, run: addUsageEventClientMetadataMigration},
 		{version: migrationCreateUsageEventArchive, run: createUsageEventArchiveMigration},
-		{version: migrationLocalRankingStats, run: localRankingStatsMigration},
-		{version: migrationAddCPAAPIKeyLocalRankingAvatar, run: addCPAAPIKeyLocalRankingAvatarMigration},
 		{version: migrationAddAuthSessionClientMetadata, run: addAuthSessionClientMetadataMigration},
 		// 已进入 main 的 Errors 最终表先按原顺序创建，不能因 quota 分支合并而改写已发布迁移序列。
 		{version: migrationCreateErrorEvents, run: createErrorEventsMigration},
@@ -254,7 +310,13 @@ func orderedMigrations() []databaseMigration {
 		{version: migrationAddUsageEventStreamStatusCode, run: addUsageEventStreamStatusCodeMigration},
 		{version: migrationNormalizeUsageEventParentSessionNull, run: normalizeUsageEventParentSessionNullMigration},
 		{version: migrationLimitLatencySamplePoints, run: limitLatencySamplePointsMigration, destructive: true},
+		// main 先发布的迁移必须位于 v2 费用分界之前，已执行的版本由迁移记录跳过。
 		{version: migrationAddUsageEventTraceMetadata, run: addUsageEventTraceMetadataMigration},
+		// 费用结构只在全部已发布旧迁移之后增列，旧数据回填由后续启动阶段控制。
+		{version: migrationAddPricingStorageStructure, run: addPricingStorageStructureMigration},
+		{version: migrationRemoveRanking, run: removeRankingMigration},
+		// 恢复迁移追加在 v2 既有迁移之后，保留已部署 next 的执行顺序。
+		{version: migrationRecoverExecutionUsageEvents, run: recoverExecutionUsageEventsMigration, disableTransaction: true},
 	}
 }
 

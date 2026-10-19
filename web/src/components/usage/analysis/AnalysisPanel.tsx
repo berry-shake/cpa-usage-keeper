@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FocusEvent, type MouseEvent } from 'react';
+import { ChartLifecycleProvider, type ChartRefreshSignal } from '../charts/chartLifecycle';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@/lib/chartjs';
 import { Interaction, Tooltip } from 'chart.js';
 import type { Chart, ChartData, ChartOptions, InteractionItem, InteractionModeFunction, Plugin, ScriptableContext, TooltipModel, TooltipPositionerFunction } from 'chart.js';
-import { Bar, Doughnut, Scatter } from 'react-chartjs-2';
-import type { AnalysisCompositionItem, AnalysisCostBreakdown, AnalysisHeatmapCell, AnalysisLatencyDiagnostics, AnalysisModelEfficiencyItem, AnalysisModelUsagePayload, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
+import { Bar, Doughnut, Scatter } from '../charts/UsageChart';
+import type { AnalysisCompositionItem, AnalysisCostSummary, AnalysisHeatmapCell, AnalysisLatencyDiagnostics, AnalysisModelEfficiencyItem, AnalysisModelUsagePayload, AnalysisResponse, AnalysisTokenUsageBucket } from '@/lib/types';
 import { calculateDisplayInputTokens, calculateDisplayOutputTokens, formatCompactNumber, formatDurationMs, formatUsd } from '@/utils/usage';
 import { buildUsageChartTooltipStyle, getUsageChartTheme, toUsageChartGradientFill as toGradientFill, USAGE_CHART_REQUESTS_LINE_COLOR, USAGE_CHART_COMPOSITION_COLORS as CHART_COLORS, USAGE_CHART_TOKEN_COLORS as TOKEN_COLORS, type UsageChartGradientColor, type UsageChartTheme } from '@/utils/usage/chartConfig';
 import { createCompositionLabelsPlugin } from './compositionLabels';
 import { compositionGeometryPlugin } from './compositionGeometry';
 import { AnalysisRankingList, getAnalysisRankingColor, useAnalysisHighlight, type AnalysisRankingItem } from './analysisRanking';
 import { useTopModelsTooltip } from './topModelsTooltip';
+import { formatBucketLabel } from './analysisTimeLabels';
 import styles from './AnalysisPanel.module.scss';
+import { AnalysisModelSpeedCard } from '../model-speed/AnalysisModelSpeedCard';
+import type { ModelSpeedRefreshSignal } from '../model-speed/modelSpeedAnimation';
 import { LatencyScatterChart } from '../LatencyScatterChart';
 
 interface AnalysisPanelProps {
@@ -23,6 +27,11 @@ interface AnalysisPanelProps {
   isDark: boolean;
   isMobile: boolean;
   compositionDimensions?: readonly AnalysisCompositionDimension[];
+  modelSpeedPreferenceScope?: string | null;
+  modelSpeedQueryKey?: string;
+  modelSpeedRefreshSignal?: ModelSpeedRefreshSignal;
+  chartRefreshSignal?: ChartRefreshSignal;
+  latencyRefreshSignal?: ChartRefreshSignal;
 }
 
 export type AnalysisCompositionDimension = 'api_key' | 'model' | 'auth_files' | 'ai_provider';
@@ -453,47 +462,6 @@ const getHeatmapVisualIntensity = (value: number, maxValue: number) => {
   return 0.05 + 0.95 * Math.pow(rawIntensity, 0.65);
 };
 
-const getIntlTimeZone = (timezone: string | undefined) => {
-  const trimmed = timezone?.trim();
-  if (!trimmed || trimmed === 'Local') return undefined;
-  return trimmed;
-};
-
-const formatBucketLabelFromLiteral = (bucket: string, granularity: AnalysisResponse['granularity']) => {
-  const match = bucket.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}))?/);
-  if (!match) return null;
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = match[4] ? Number(match[4]) : NaN;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  if (granularity === 'daily') {
-    return `${month}/${day}`;
-  }
-  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
-  return `${String(hour).padStart(2, '0')}:00`;
-};
-
-const formatBucketLabel = (bucket: string, granularity: AnalysisResponse['granularity'], timezone?: string) => {
-  const date = new Date(bucket);
-  if (Number.isNaN(date.getTime())) return bucket;
-  const timeZone = getIntlTimeZone(timezone);
-  // Analysis bucket 已按项目 TZ 聚合，前端必须显式使用响应 TZ，避免被 CI 或浏览器本地时区二次换算。
-  try {
-    if (granularity === 'daily') {
-      return new Intl.DateTimeFormat('en-US', { month: 'numeric', day: 'numeric', timeZone }).format(date);
-    }
-    const hour = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone }).format(date);
-    return `${hour}:00`;
-  } catch {
-    const literalLabel = formatBucketLabelFromLiteral(bucket, granularity);
-    if (literalLabel) return literalLabel;
-  }
-  if (granularity === 'daily') {
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  }
-  return `${String(date.getHours()).padStart(2, '0')}:00`;
-};
-
 const compareModelNames = (left: string, right: string) => {
   if (left === right) return 0;
   return left < right ? -1 : 1;
@@ -610,7 +578,6 @@ function buildTopModelsChartOptions({
   return {
     responsive: true,
     maintainAspectRatio: false,
-    animation: false,
     // 触摸拖动留给页面滚动；轻点产生的 click 才打开明细。
     events: ['mousemove', 'mouseout', 'click'],
     interaction: { mode: 'index', intersect: false },
@@ -926,7 +893,8 @@ function buildCompositionChartOptions(chartTheme: ChartTheme, labels: Compositio
   };
 }
 
-function TokenUsageChart({ rows, breakdown, loading, isDark, isMobile }: { rows: ChartRow[]; breakdown: AnalysisCostBreakdown | undefined; loading: boolean; isDark: boolean; isMobile: boolean }) {
+// 总费用读取接口已存汇总；每百万 Token 成本沿用当前图表的 Token 分母，不重新匹配单价。
+function TokenUsageChart({ rows, summary, loading, isDark, isMobile }: { rows: ChartRow[]; summary: AnalysisCostSummary | undefined; loading: boolean; isDark: boolean; isMobile: boolean }) {
   const { t } = useTranslation();
   const tokenLabels = useMemo(() => ({
     input: t('usage_stats.input_tokens'),
@@ -950,9 +918,9 @@ function TokenUsageChart({ rows, breakdown, loading, isDark, isMobile }: { rows:
     averageTokenTotal,
   }), [averageTokenTotal, chartTheme, isMobile, rows, tokenLabels.total]);
   const legendItems = useMemo(() => buildTokenLegendItems(tokenLabels, averageTokenTotal, chartTheme.averageLine), [averageTokenTotal, chartTheme.averageLine, tokenLabels]);
-  const hasUnavailableCost = breakdown?.cost_available === false || rows.some((row) => !row.costAvailable);
+  const hasUnavailableCost = summary?.cost_available === false || rows.some((row) => !row.costAvailable);
   const totalTokens = rows.reduce((sum, row) => sum + row.total, 0);
-  const totalCost = toNumber(breakdown?.total_cost_usd);
+  const totalCost = toNumber(summary?.total_cost_usd);
   return (
     <section className={`${styles.analysisCard} keeper-card-surface`}>
       <AnalysisCardHeader
@@ -1016,7 +984,7 @@ function TopModelsCard({ modelUsage, composition, granularity, timezone, loading
   const view = useMemo(() => buildTopModelsViewModel(modelUsage, granularity, timezone, composition), [composition, granularity, modelUsage, timezone]);
   const activeHighlightedModel = view.series.some((item) => item.key === highlight.active) ? highlight.active : null;
   const chartData = useMemo(() => buildTopModelsChartData(view, activeHighlightedModel), [activeHighlightedModel, view]);
-  const { external, onPointerDown, tooltip } = useTopModelsTooltip(chartData, !loading, isMobile);
+  const { external, onPointerDown, onPointerMove, tooltip } = useTopModelsTooltip(chartData, !loading, isMobile, chartTheme);
   const chartOptions = useMemo(() => buildTopModelsChartOptions({
     chartTheme, isMobile, bucketTotals: view.bucketTotals, totalLabel: t('usage_stats.total_tokens'), external,
   }), [chartTheme, external, isMobile, t, view.bucketTotals]);
@@ -1031,7 +999,7 @@ function TopModelsCard({ modelUsage, composition, granularity, timezone, loading
       {loading ? <div className={styles.emptyState}>{t('common.loading')}</div> : view.series.length === 0 ? <div className={styles.emptyState}>{t('usage_stats.no_data')}</div> : (
         <>
           <div className={styles.analysisChartSurface}>
-            <div className={styles.pairedChartFrame} role="img" onPointerDown={onPointerDown} aria-label={`${t('usage_stats.analysis_top_models_chart_aria')}: ${formatCompactNumber(view.rangeTotal)}`}>
+            <div className={styles.pairedChartFrame} role="img" onPointerDown={onPointerDown} onPointerMove={onPointerMove} aria-label={`${t('usage_stats.analysis_top_models_chart_aria')}: ${formatCompactNumber(view.rangeTotal)}`}>
               <Bar data={chartData} options={chartOptions} />
             </div>
           </div>
@@ -1074,9 +1042,10 @@ function LatencyDiagnosticsCard({ diagnostics, loading, error, isDark, isMobile 
         showPricingHint={false}
         hint=""
       />
-      {loading ? (
+      {error && hasData && <div role="status">{error}</div>}
+      {loading && !diagnostics ? (
         <div className={styles.emptyState}>{t('common.loading')}</div>
-      ) : error ? (
+      ) : error && !hasData ? (
         <div className={styles.emptyState}>{error}</div>
       ) : unsupported ? (
         <div className={styles.emptyState}>{t('usage_stats.analysis_latency_recent_range_only')}</div>
@@ -1120,7 +1089,6 @@ function CompositionPanel({ tabs, loading, isDark, windowMinutes }: { tabs: Comp
   const [activeTabId, setActiveTabId] = useState<CompositionTab['id']>(tabs[0]?.id ?? 'model');
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const items = activeTab?.items ?? EMPTY_COMPOSITION_ITEMS;
-  const activeContentKey = `${activeTab?.id ?? 'empty'}:${items.map((item) => item.key).join('|')}`;
   const highlight = useAnalysisHighlight(activeTab?.id ?? 'empty');
   const rankingItems = useMemo<AnalysisRankingItem[]>(() => items.map((item, index) => ({
     key: item.key, label: item.label, total: toNumber(item.total_tokens), share: toNumber(item.percent),
@@ -1135,8 +1103,33 @@ function CompositionPanel({ tabs, loading, isDark, windowMinutes }: { tabs: Comp
   const chartOptions = useMemo(() => buildCompositionChartOptions(chartTheme, tooltipLabels), [chartTheme, tooltipLabels]);
   const chartLabels = useMemo(() => items.map((item) => ({ name: item.label, share: formatPercent(toNumber(item.percent)) })), [items]);
   const labelsPlugin = useMemo(() => createCompositionLabelsPlugin(chartLabels, chartTheme.textPrimary), [chartLabels, chartTheme.textPrimary]);
-  // 标签与主题变化时重建已安装的插件；悬浮只更新图表数据，不重建实例。
-  const chartKey = JSON.stringify([activeContentKey, chartLabels, chartTheme.textPrimary]);
+  // 已安装插件读取最新标签与主题，自动刷新不再靠 key 卸载整张环图。
+  const liveLabelsPlugin = useRef(labelsPlugin);
+  useLayoutEffect(() => { liveLabelsPlugin.current = labelsPlugin; }, [labelsPlugin]);
+  const stableLabelsPlugin = useMemo<Plugin<'doughnut'>>(() => ({
+    id: 'analysis-composition-labels',
+    afterDatasetsDraw: (...args) => liveLabelsPlugin.current.afterDatasetsDraw?.(...args),
+  }), []);
+  const liveDimension = useRef(activeTab?.id);
+  useLayoutEffect(() => { liveDimension.current = activeTab?.id; }, [activeTab?.id]);
+  const interactionState = useRef({ dimension: activeTab?.id, ignoreReplay: false });
+  const interactionPlugin = useMemo<Plugin<'doughnut'>>(() => {
+    return {
+      id: 'analysis-composition-interaction',
+      beforeUpdate: chart => {
+        if (interactionState.current.dimension === liveDimension.current) return;
+        interactionState.current.dimension = liveDimension.current;
+        interactionState.current.ignoreReplay = true;
+        chart.setActiveElements([]);
+        chart.tooltip?.setActiveElements([], { x: 0, y: 0 });
+      },
+      // 新维度必须等待真实交互，不能重放旧维度留下的指针位置。
+      beforeEvent: (_chart, args) => {
+        if (args.replay && interactionState.current.ignoreReplay) return false;
+        if (!args.replay) interactionState.current.ignoreReplay = false;
+      },
+    };
+  }, []);
   const hasUnavailableCost = items.some((item) => item.cost_available === false);
   return (
     <section className={`${styles.analysisCard} ${styles.pairedChartCard} keeper-card-surface`}>
@@ -1157,7 +1150,7 @@ function CompositionPanel({ tabs, loading, isDark, windowMinutes }: { tabs: Comp
           <div className={styles.analysisChartSurface}>
             <div className={`${styles.pairedChartFrame} ${styles.donutCanvasBox}`} role="img"
               aria-label={`${activeTab.label}: ${items.map((item) => `${item.label} ${formatPercent(toNumber(item.percent))}`).join(', ')}`}>
-              <Doughnut key={chartKey} data={chartData} options={chartOptions} plugins={[compositionGeometryPlugin, labelsPlugin]} />
+              <Doughnut data={chartData} options={chartOptions} plugins={[compositionGeometryPlugin, stableLabelsPlugin, interactionPlugin]} />
             </div>
           </div>
           <AnalysisRankingList key={activeTab.id} items={rankingItems} label={t('usage_stats.analysis_composition_title')} windowMinutes={windowMinutes} highlight={highlight} />
@@ -1691,6 +1684,11 @@ export function AnalysisPanel({
   isDark,
   isMobile,
   compositionDimensions = DEFAULT_COMPOSITION_DIMENSIONS,
+  modelSpeedPreferenceScope = 'admin',
+  modelSpeedQueryKey = '',
+  modelSpeedRefreshSignal,
+  chartRefreshSignal,
+  latencyRefreshSignal,
 }: AnalysisPanelProps) {
   const { t } = useTranslation();
   const tokenRows = useMemo(() => buildTokenUsageRows(analysis?.token_usage ?? [], analysis?.granularity ?? 'hourly', analysis?.timezone), [analysis]);
@@ -1710,8 +1708,9 @@ export function AnalysisPanel({
   }, [apiComposition, modelComposition, authFilesComposition, aiProviderComposition, compositionDimensions, t]);
 
   return (
+    <ChartLifecycleProvider queryKey={modelSpeedQueryKey} source={analysis} refreshSignal={chartRefreshSignal}>
     <div className={styles.analysisPanel}>
-      <TokenUsageChart rows={tokenRows} breakdown={analysis?.cost_breakdown} loading={loading} isDark={isDark} isMobile={isMobile} />
+      <TokenUsageChart rows={tokenRows} summary={analysis?.cost_summary} loading={loading} isDark={isDark} isMobile={isMobile} />
       <div className={styles.insightGrid}>
         <CompositionPanel tabs={compositionTabs} loading={loading} isDark={isDark} windowMinutes={analysisWindowMinutes} />
         <TopModelsCard
@@ -1725,11 +1724,15 @@ export function AnalysisPanel({
           isMobile={isMobile}
         />
       </div>
-      <div className={styles.insightGrid}>
+      <ChartLifecycleProvider queryKey={modelSpeedQueryKey} source={latencyDiagnostics} refreshSignal={latencyRefreshSignal}>
         <LatencyDiagnosticsCard diagnostics={latencyDiagnostics} loading={latencyLoading} error={latencyError} isDark={isDark} isMobile={isMobile} />
+      </ChartLifecycleProvider>
+      <div className={styles.insightGrid}>
+        <AnalysisModelSpeedCard speed={analysis?.model_speed} granularity={analysis?.granularity ?? 'hourly'} loading={loading} isDark={isDark} isMobile={isMobile} timezone={analysis?.timezone} preferenceScope={modelSpeedPreferenceScope} queryKey={modelSpeedQueryKey} refreshSignal={modelSpeedRefreshSignal} />
         <ModelEfficiencyCard rows={analysis?.model_efficiency ?? []} loading={loading} isDark={isDark} isMobile={isMobile} />
       </div>
       <Heatmap cells={analysis?.heatmap?.cells ?? []} apiKeys={analysis?.heatmap?.api_keys ?? []} apiKeyLabels={analysis?.heatmap?.api_key_labels ?? {}} models={analysis?.heatmap?.models ?? []} loading={loading} isDark={isDark} />
     </div>
+    </ChartLifecycleProvider>
   );
 }

@@ -31,11 +31,10 @@ vi.mock('../pages/LoginPage', () => ({
 }));
 vi.mock('../pages/KeyOverviewPage', () => ({
   KeyOverviewPage: ({ onNavigate }: ComponentProps<typeof import('../pages/KeyOverviewPage').KeyOverviewPage>) => (
-    <button data-navigate onClick={() => onNavigate('/key-ranking')}>Overview</button>
+    <button data-navigate onClick={() => onNavigate('/key-analysis')}>Overview</button>
   ),
 }));
 vi.mock('../pages/KeyAnalysisPage', () => ({ KeyAnalysisPage: () => <div>Analysis</div> }));
-vi.mock('../pages/KeyRankingPage', () => ({ KeyRankingPage: () => <div>Ranking</div> }));
 
 describe('App session and navigation', () => {
   let container: HTMLDivElement;
@@ -78,8 +77,8 @@ describe('App session and navigation', () => {
     expect(window.location.pathname + window.location.search).toBe('/cpa/key-overview?embed=cpamc');
     expect(container.querySelector('.app-frame')!.getAttribute('data-embed')).toBe('cpamc');
     await act(async () => container.querySelector<HTMLButtonElement>('[data-navigate]')!.click());
-    expect(container.textContent).toContain('Ranking');
-    expect(window.location.pathname + window.location.search).toBe('/cpa/key-ranking?embed=cpamc');
+    expect(container.textContent).toContain('Analysis');
+    expect(window.location.pathname + window.location.search).toBe('/cpa/key-analysis?embed=cpamc');
     expect(window.history.length).toBe(historyLength);
   });
 

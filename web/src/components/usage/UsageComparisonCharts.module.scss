@@ -7,9 +7,9 @@
 .total span { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
 .chart { position: relative; height: 240px; min-width: 0; }
 .empty { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
-.tooltip { position: absolute; z-index: 2; pointer-events: none; width: max-content; max-width: min(320px, 100%); padding: 14px 16px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-primary); color: var(--text-primary); box-shadow: 0 4px 12px rgba(0, 0, 0, .14); font-size: 13px; }
-.tooltipTitle { font-weight: 600; margin-bottom: 10px; }
-.tooltipRow { display: flex; align-items: center; gap: 9px; margin-top: 7px; }
+.tooltip { position: absolute; z-index: 2; pointer-events: none; width: max-content; max-width: min(320px, 100%); padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); box-shadow: 0 4px 12px rgba(0, 0, 0, .14); font-size: 12px; }
+.tooltipTitle { font-weight: 600; margin-bottom: 6px; }
+.tooltipRow { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
 .tooltipRow i { width: 10px; height: 10px; flex-shrink: 0; }
 .tooltipRow span { min-width: 0; overflow-wrap: anywhere; }
 .tooltipRow strong { padding-left: 14px; margin-left: auto; font-weight: 400; white-space: nowrap; font-variant-numeric: tabular-nums; }

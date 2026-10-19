@@ -36,8 +36,8 @@ func usageTraceMetadataCases() []struct {
 	}{
 		{"explicit true", `,"execution_id":"execution-1","trace_id":"000000ab","node_kind":"future-kind","is_fork":true,"is_compaction":true`, usageTraceMetadata{traceMetadataPointer("execution-1"), traceMetadataPointer("000000ab"), traceMetadataPointer("future-kind"), traceMetadataPointer(true), traceMetadataPointer(true)}},
 		{"explicit false", `,"execution_id":"execution-2","trace_id":"custom-trace","node_kind":"fork","is_fork":false,"is_compaction":false`, usageTraceMetadata{traceMetadataPointer("execution-2"), traceMetadataPointer("custom-trace"), traceMetadataPointer("fork"), traceMetadataPointer(false), traceMetadataPointer(false)}},
-		{"omitted", ``, usageTraceMetadata{}},
-		{"explicit null", `,"execution_id":null,"trace_id":null,"node_kind":null,"is_fork":null,"is_compaction":null`, usageTraceMetadata{}},
+		{"optional fields omitted", `,"execution_id":"execution-omitted"`, usageTraceMetadata{ExecutionID: traceMetadataPointer("execution-omitted")}},
+		{"optional fields null", `,"execution_id":"execution-null","trace_id":null,"node_kind":null,"is_fork":null,"is_compaction":null`, usageTraceMetadata{ExecutionID: traceMetadataPointer("execution-null")}},
 		{"raw values", `,"execution_id":" execution raw ","trace_id":"","node_kind":" custom node ","is_fork":true,"is_compaction":false`, usageTraceMetadata{traceMetadataPointer(" execution raw "), traceMetadataPointer(""), traceMetadataPointer(" custom node "), traceMetadataPointer(true), traceMetadataPointer(false)}},
 	}
 }
@@ -81,7 +81,7 @@ func TestRedisUsageTraceMetadataSurvivesInboxSyncArchiveAndReplay(t *testing.T) 
 	if err != nil {
 		t.Fatalf("insert inbox messages: %v", err)
 	}
-	result, err := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{}).ProcessRedisUsageInbox(context.Background())
+	result, err := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{PricingCatalog: emptyPricingCatalogForTest()}).ProcessRedisUsageInbox(context.Background())
 	if err != nil {
 		t.Fatalf("process inbox messages: %v", err)
 	}
@@ -131,7 +131,32 @@ func TestRedisUsageTraceMetadataSurvivesInboxSyncArchiveAndReplay(t *testing.T) 
 		replayed = append(replayed, page...)
 		afterID = page[len(page)-1].ID
 	}
-	if !reflect.DeepEqual(replayed, original) {
-		t.Fatalf("hot/archive replay changed original event values: replay=%+v, original=%+v", replayed, original)
+	// v2 冻结了已发布旧迁移的读取列：旧聚合重放不依赖后续元数据与费用列。
+	legacyProjection := append([]entities.UsageEvent(nil), original...)
+	for index := range legacyProjection {
+		legacyProjection[index].ExecutionID = nil
+		legacyProjection[index].TraceID = nil
+		legacyProjection[index].NodeKind = nil
+		legacyProjection[index].IsFork = nil
+		legacyProjection[index].IsCompaction = nil
+		legacyProjection[index].CostUSD = nil
+		legacyProjection[index].CostAvailable = nil
+	}
+	if !reflect.DeepEqual(replayed, legacyProjection) {
+		t.Fatalf("legacy replay changed published event fields: replay=%+v, want=%+v", replayed, legacyProjection)
+	}
+	// 旧迁移只读投影不能影响 hot/archive 中保存的完整事件。
+	for _, event := range original {
+		table := "usage_events_archive"
+		if event.ID == original[len(original)-1].ID {
+			table = "usage_events"
+		}
+		var stored entities.UsageEvent
+		if err := db.Table(table).Where("id = ?", event.ID).Take(&stored).Error; err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(stored, event) {
+			t.Fatalf("legacy replay changed stored event: got=%+v, want=%+v", stored, event)
+		}
 	}
 }

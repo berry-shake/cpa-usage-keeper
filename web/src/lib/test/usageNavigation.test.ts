@@ -17,7 +17,6 @@ describe('usage page navigation', () => {
       ['overview', '/overview'],
       ['realtime', '/realtime'],
       ['analysis', '/analysis'],
-      ['ranking', '/ranking'],
       ['events', '/request-events'],
       ['auth-files', '/auth-files'],
       ['ai-provider', '/ai-provider'],

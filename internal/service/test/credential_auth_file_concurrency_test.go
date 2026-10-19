@@ -54,10 +54,6 @@ func (c *authFileReplacementClient) UpdateAuthFileStatus(_ context.Context, _, _
 func (c *authFileReplacementClient) FetchProviderKeyConfig(context.Context, string) (*response.ProviderKeyConfigResult, error) {
 	return nil, fmt.Errorf("unused")
 }
-func (c *authFileReplacementClient) UpdateProviderKeyExcludedModels(context.Context, string, int, []string) (int, error) {
-	return 0, fmt.Errorf("unused")
-}
-
 func (c *authFileReplacementClient) DeleteAuthFiles(context.Context, []string) error {
 	return fmt.Errorf("unused")
 }

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"cpa-usage-keeper/internal/benchmark/capacity"
-	"cpa-usage-keeper/internal/repository"
+	"cpa-usage-keeper/internal/helper"
 	_ "github.com/glebarez/go-sqlite"
 )
 
@@ -225,7 +225,7 @@ func TestResetDatasetCloneReplacesPreviousProbeState(t *testing.T) {
 	if err := capacity.ResetDatasetClone(t.Context(), source, destination); err != nil {
 		t.Fatalf("ResetDatasetClone returned error: %v", err)
 	}
-	destinationDB, err := sql.Open("sqlite", repository.BuildSQLiteFileURI(destination)+"?mode=ro")
+	destinationDB, err := sql.Open("sqlite", helper.BuildSQLiteFileURI(destination)+"?mode=ro")
 	if err != nil {
 		t.Fatalf("open restored clone: %v", err)
 	}

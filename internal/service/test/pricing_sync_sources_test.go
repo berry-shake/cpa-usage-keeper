@@ -11,7 +11,6 @@ import (
 
 	"cpa-usage-keeper/internal/cpa/dto/models"
 	"cpa-usage-keeper/internal/cpa/dto/response"
-	"cpa-usage-keeper/internal/service"
 )
 
 type liteLLMCatalogTransport struct{ t *testing.T }
@@ -32,28 +31,28 @@ func TestPricingSyncLiteLLMUsesSharedMatchingAndZeroCacheDefaults(t *testing.T) 
 	transport := http.DefaultTransport
 	http.DefaultTransport = liteLLMCatalogTransport{t}
 	t.Cleanup(func() { http.DefaultTransport = transport })
-	provider := service.NewPricingService(openUsageServiceTestDatabase(t), emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
+	provider := newPricingTestProvider(t, openUsageServiceTestDatabase(t), emptyPricingCatalogForTest(), stubModelsFetcher{result: &response.ModelsResult{Payload: models.ModelsResponse{Data: []models.ModelInfo{
 		{ID: "custom/gpt-test"}, {ID: "claude-test"}, {ID: "overflow"},
 	}}}})
-	preview, err := provider.PreviewPricingSync(context.Background(), "litellm")
+	preview, err := provider.FetchPricingSync(context.Background(), "litellm")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.SourceID != "litellm" || preview.Source != "LiteLLM" || len(preview.Matches) != 2 || len(preview.UnmatchedModels) != 1 {
+	if preview.Source != "litellm" || len(preview.Matches) != 2 || len(preview.UnmatchedModels) != 1 {
 		t.Fatalf("unexpected preview: %+v", preview)
 	}
 	for _, match := range preview.Matches {
 		if match.Model == "custom/gpt-test" {
-			if match.SourceProviderID != "openai" || math.Abs(match.PromptPricePer1M-2.5) > 1e-10 || match.CacheWritePricePer1M != 0 {
+			if match.Provider != "openai" || math.Abs(match.BasePrices.Input-2.5) > 1e-10 || match.BasePrices.CacheWrite != 0 {
 				t.Errorf("unexpected OpenAI match: %+v", match)
 			}
-		} else if match.PricingStyle != "claude" || math.Abs(match.CacheWritePricePer1M-3.75) > 1e-10 || match.CacheReadPricePer1M != 0 {
+		} else if match.PricingStyle != "claude" || math.Abs(match.BasePrices.CacheWrite-3.75) > 1e-10 || match.BasePrices.CacheRead != 0 {
 			t.Errorf("unexpected Claude match: %+v", match)
 		}
 	}
-	prices, err := provider.ListPricing(context.Background())
-	if err != nil || len(prices) != 0 {
-		t.Fatalf("preview must not save prices: %+v, %v", prices, err)
+	prices, err := provider.ListPricingModels(context.Background())
+	if err != nil || len(prices.Models) != 0 {
+		t.Fatalf("fetch must not save prices: %+v, %v", prices, err)
 	}
 }
 
@@ -87,13 +86,66 @@ func TestPricingSyncLiteLLMCacheHitPriceFallback(t *testing.T) {
 				t.Fatalf("unexpected preview: %+v", preview)
 			}
 			for _, match := range preview.Matches {
-				if match.SourceProviderID != "deepseek" || math.Abs(match.CacheReadPricePer1M-tc.cacheRead) > 1e-10 {
+				if match.Provider != "deepseek" || math.Abs(match.BasePrices.CacheRead-tc.cacheRead) > 1e-10 {
 					t.Errorf("expected cache read price %v: %+v", tc.cacheRead, match)
 				}
-				if math.Abs(match.PromptPricePer1M-0.28) > 1e-10 || math.Abs(match.CompletionPricePer1M-0.4) > 1e-10 || match.CacheWritePricePer1M != 0 {
+				if math.Abs(match.BasePrices.Input-0.28) > 1e-10 || math.Abs(match.BasePrices.Output-0.4) > 1e-10 || match.BasePrices.CacheWrite != 0 {
 					t.Errorf("unexpected other base prices: %+v", match)
 				}
 			}
 		})
+	}
+}
+
+func TestPricingSyncIncludesInactiveConfiguredModels(t *testing.T) {
+	transport := http.DefaultTransport
+	http.DefaultTransport = liteLLMCatalogTransport{t}
+	t.Cleanup(func() { http.DefaultTransport = transport })
+	provider, _ := newCatalogPricingService(t, openUsageServiceTestDatabase(t))
+	config := completeServiceConfig("gpt-test", 1)
+	config.ModelMultiplier = 0
+	if _, err := provider.SavePricingModel(context.Background(), config); err != nil {
+		t.Fatal(err)
+	}
+	fetched, err := provider.FetchPricingSync(context.Background(), "litellm")
+	if err != nil || len(fetched.Matches) != 1 || fetched.Matches[0].Model != "gpt-test" {
+		t.Fatalf("configured model without usage or CPA listing was lost: %+v, %v", fetched, err)
+	}
+	listed, err := provider.ListPricingModels(context.Background())
+	if err != nil || len(listed.Models) != 1 || listed.ConfigRevision != 1 || listed.Models[0].ModelMultiplier != 0 || listed.Models[0].BasePrices.Input != 1 {
+		t.Fatalf("fetch changed configured pricing: %+v, %v", listed, err)
+	}
+}
+
+func TestPricingSyncLiteLLMRegionAliasesAndMissingMetadata(t *testing.T) {
+	catalog := `{
+		"global.anthropic.claude-opus-4-7":{"mode":" CHAT ","input_cost_per_token":0.000005,"output_cost_per_token":0.000025,"cache_creation_input_token_cost":0.00000625},
+		"vertex_ai/gemini-1.5-pro":{"input_cost_per_token":0.00000125,"output_cost_per_token":0.00001},
+		"gpt-3.5-turbo":{"input_cost_per_token":0.000002,"output_cost_per_token":0.000004},
+		"sample_spec":{"input_cost_per_token":1,"output_cost_per_token":2},
+		"image":{"mode":"image_generation","input_cost_per_token":1,"output_cost_per_token":2}
+	}`
+	result := previewReviewCatalog(t, "litellm", catalog, "claude-opus-4-7", "global.anthropic.claude-opus-4-7", "gemini-1.5-pro", "gpt-3.5-turbo", "sample_spec", "image")
+	if len(result.Matches) != 4 || len(result.UnmatchedModels) != 2 {
+		t.Fatalf("lost legacy aliases or accepted non-model entries: %+v", result)
+	}
+	for _, match := range result.Matches {
+		if match.BasePrices.CacheRead != 0 {
+			t.Fatalf("missing cache read price must remain zero: %+v", match)
+		}
+		switch match.Model {
+		case "claude-opus-4-7", "global.anthropic.claude-opus-4-7":
+			if match.PricingStyle != "claude" || match.MatchedModel != "global.anthropic.claude-opus-4-7" || match.BasePrices.Input != 5 || match.BasePrices.CacheWrite != 6.25 {
+				t.Fatalf("lost Claude style, raw identity or base prices: %+v", match)
+			}
+		case "gemini-1.5-pro":
+			if match.BasePrices.Input != 1.25 {
+				t.Fatalf("versioned alias changed price: %+v", match)
+			}
+		case "gpt-3.5-turbo":
+			if match.PricingStyle != "openai" || match.BasePrices.Input != 2 {
+				t.Fatalf("versioned OpenAI model changed identity: %+v", match)
+			}
+		}
 	}
 }

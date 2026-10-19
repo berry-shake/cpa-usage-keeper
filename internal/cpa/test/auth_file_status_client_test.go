@@ -11,7 +11,7 @@ import (
 	"cpa-usage-keeper/internal/cpa"
 )
 
-const authFilesStatusEndpoint = "/v0/management/auth-files/status"
+const authFilesStatusEndpoint = "/v8/management/credentials/status"
 
 // TestUpdateAuthFileStatusPatchesManagementEndpoint 锁定单条凭证开关的 PATCH 合同，含 auth_index 消歧字段。
 func TestUpdateAuthFileStatusPatchesManagementEndpoint(t *testing.T) {

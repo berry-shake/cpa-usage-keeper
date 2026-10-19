@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/lib/api', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/api')>(),
   ...api,
+  fetchUsageCredentials: async () => ({ credentials: [] }),
   fetchStatus: async () => ({ timezone: 'Asia/Shanghai' }),
   fetchVersion: async () => ({ version: 'test' }),
   fetchCpaApiKeyOptions: async () => ({ options: [] }),

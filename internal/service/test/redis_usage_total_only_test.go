@@ -20,14 +20,19 @@ func TestProcessRedisUsageInboxPreservesImageTotalOnlyUsage(t *testing.T) {
 	if err := db.Create(&entities.ModelPriceSetting{Model: "gpt-image-2", PricingStyle: entities.ModelPricingStyleOpenAI, PromptPricePer1M: 1, CompletionPricePer1M: 2, PriceMultiplier: &multiplier}).Error; err != nil {
 		t.Fatal(err)
 	}
+	snapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pricingCatalog := pricing.NewCatalog(snapshot)
 	// 使用 issue #636 的完整 Token 形态，验证入库而非仅测试纯处理器。
-	_, err := repository.InsertRedisUsageInboxMessages(db, []repodto.RedisInboxInsert{{
+	_, err = repository.InsertRedisUsageInboxMessages(db, []repodto.RedisInboxInsert{{
 		Source: "usage",
 		RawMessage: `{
    "timestamp":"2026-10-13T08:00:00Z",
    "provider":"codex", "executor_type":"CodexExecutor", "auth_type":"apikey",
    "model":"gpt-image-2", "alias":"gpt-image-2", "endpoint":"POST /v1/images/edits",
-   "request_id":"image-total-only", "stream":false, "failed":false,
+   "execution_id":"fixture-execution","request_id":"image-total-only", "stream":false, "failed":false,
    "tokens":{"input_tokens":0,"output_tokens":0,"reasoning_tokens":0,"cached_tokens":0,"cache_read_tokens":0,"cache_read_tokens_present":true,"cache_creation_tokens":0,"total_tokens":2120}
   }`,
 		PoppedAt: time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC),
@@ -35,7 +40,7 @@ func TestProcessRedisUsageInboxPreservesImageTotalOnlyUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{BaseURL: "https://cpa.example.com"}).ProcessRedisUsageInbox(context.Background())
+	result, err := service.NewSyncServiceWithOptions(db, service.SyncServiceOptions{PricingCatalog: pricingCatalog, BaseURL: "https://cpa.example.com"}).ProcessRedisUsageInbox(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,12 +61,8 @@ func TestProcessRedisUsageInboxPreservesImageTotalOnlyUsage(t *testing.T) {
 	if hourly.TotalTokens != 2120 || hourly.InputTokens != 0 || hourly.OutputTokens != 0 {
 		t.Fatalf("unexpected overview: %+v", hourly)
 	}
-	snapshot, err := repository.LoadPricingSnapshot(context.Background(), db)
-	if err != nil {
-		t.Fatal(err)
-	}
 	start, end := event.Timestamp.Add(-time.Minute), event.Timestamp.Add(time.Minute)
-	page, err := service.NewUsageServiceWithOptions(db, service.UsageServiceOptions{PricingCatalog: pricing.NewCatalog(snapshot)}).ListUsageEvents(context.Background(), servicedto.UsageFilter{StartTime: &start, EndTime: &end})
+	page, err := service.NewUsageServiceWithOptions(db, service.UsageServiceOptions{PricingCatalog: pricingCatalog}).ListUsageEvents(context.Background(), servicedto.UsageFilter{StartTime: &start, EndTime: &end})
 	if err != nil {
 		t.Fatal(err)
 	}

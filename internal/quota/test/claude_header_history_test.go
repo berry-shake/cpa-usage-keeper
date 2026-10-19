@@ -133,7 +133,6 @@ func TestClaudeHeaderFanoutUsesRealAuthFileTypeForCacheAndHistory(t *testing.T) 
 	service := quota.NewServiceWithRegistryAndOptions(db, quota.NewProviderRegistry(nil), quota.ServiceOptions{
 		UsageHeaderSnapshotFlushInterval: time.Hour,
 		CodexQuotaHistoryFlushInterval:   time.Hour,
-		PricingCatalog:                   emptyPricingCatalogForTest(),
 	})
 	if !service.TryAppendUsageHeaderSnapshots([]*quota.UsageHeaderSnapshot{build("claude-auth", "claude"), build("codex-auth", "claude")}) {
 		t.Fatal("expected committed usage fanout to accept snapshots")
@@ -194,7 +193,6 @@ func TestClaudeDeleteClearsOnlyMatchingQueuedWindow(t *testing.T) {
 	service := quota.NewServiceWithRegistryAndOptions(db, quota.NewProviderRegistry(nil), quota.ServiceOptions{
 		UsageHeaderSnapshotFlushInterval: time.Hour,
 		CodexQuotaHistoryFlushInterval:   time.Hour,
-		PricingCatalog:                   emptyPricingCatalogForTest(),
 	})
 	if !service.TryAppendUsageHeaderSnapshots([]*quota.UsageHeaderSnapshot{build(now.Add(time.Minute), "0.30", "0.10")}) {
 		t.Fatal("expected queued observation")
@@ -219,7 +217,7 @@ func TestClaudeHeaderDoesNotMergeOldCodexCacheAfterIdentityTypeChanges(t *testin
 		t.Run(string(status), func(t *testing.T) {
 			db := openQuotaTestDatabase(t)
 			seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "shared-auth", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
-			service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(nil), emptyPricingCatalogForTest())
+			service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(nil))
 			defer service.StopRefreshTasks()
 			now := time.Now().Truncate(time.Second)
 			credits := 2
@@ -260,7 +258,7 @@ func TestClaudeActiveCheckSourcesWriteTrustedHistory(t *testing.T) {
 				FiveHour: &quota.ClaudeUsageWindow{Utilization: 0, HasUtilization: true, ResetsAt: reset.Format(time.RFC3339)},
 				SevenDay: &quota.ClaudeUsageWindow{Utilization: 25, HasUtilization: false, ResetsAt: reset.Add(7 * 24 * time.Hour).Format(time.RFC3339)},
 			}}}}
-			service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"claude": handler}), emptyPricingCatalogForTest())
+			service := quota.NewServiceWithRegistry(db, quota.NewProviderRegistry(map[string]quota.ProviderHandler{"claude": handler}))
 			response, err := service.Check(context.Background(), quota.CheckRequest{AuthIndex: "claude-auth", Source: source})
 			if err != nil || len(response.Quota) != 2 {
 				t.Fatalf("active refresh failed: response=%+v err=%v", response, err)
@@ -289,7 +287,6 @@ func TestClaudePendingMainGroupDoesNotOverwriteNewerActiveSevenDayCache(t *testi
 	seedUsageIdentity(t, db, entities.UsageIdentity{Identity: "claude-auth", Provider: "claude", Type: "claude", AuthType: entities.UsageIdentityAuthTypeAuthFile})
 	service := quota.NewServiceWithRegistryAndOptions(db, quota.NewProviderRegistry(nil), quota.ServiceOptions{
 		UsageHeaderSnapshotFlushInterval: time.Hour, CodexQuotaHistoryFlushInterval: time.Hour,
-		PricingCatalog: emptyPricingCatalogForTest(),
 	})
 	now := time.Now().Truncate(time.Second)
 	t1, t2, t3 := now.Add(-2*time.Minute), now.Add(-time.Minute), now
@@ -354,7 +351,6 @@ func TestClaudePendingPartialWindowsMergeIntoCacheAndHistory(t *testing.T) {
 			service := quota.NewServiceWithRegistryAndOptions(db, quota.NewProviderRegistry(nil), quota.ServiceOptions{
 				UsageHeaderSnapshotFlushInterval: time.Hour,
 				CodexQuotaHistoryFlushInterval:   time.Hour,
-				PricingCatalog:                   emptyPricingCatalogForTest(),
 			})
 			now := time.Now().Truncate(time.Second)
 			first := buildClaudePartialHeaderSnapshot(t, now, tc.first)
@@ -386,7 +382,6 @@ func TestClaudePendingPartialWindowKeepsNewerSameWindow(t *testing.T) {
 	service := quota.NewServiceWithRegistryAndOptions(db, quota.NewProviderRegistry(nil), quota.ServiceOptions{
 		UsageHeaderSnapshotFlushInterval: time.Hour,
 		CodexQuotaHistoryFlushInterval:   time.Hour,
-		PricingCatalog:                   emptyPricingCatalogForTest(),
 	})
 	now := time.Now().Truncate(time.Second)
 	newerFive := buildClaudePartialHeaderSnapshot(t, now, claudePartialHeader{atOffset: time.Second, window: "5h", utilization: "0.10"})

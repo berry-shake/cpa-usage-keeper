@@ -19,13 +19,14 @@ type analysisResponse struct {
 	RangeStart            *time.Time                `json:"range_start,omitempty"`
 	RangeEnd              *time.Time                `json:"range_end,omitempty"`
 	TokenUsage            []analysisTokenUsage      `json:"token_usage"`
+	ModelSpeed            analysisModelSpeed        `json:"model_speed"`
 	ModelUsage            analysisModelUsage        `json:"model_usage"`
 	APIKeyComposition     []analysisCompositionItem `json:"api_key_composition"`
 	ModelComposition      []analysisCompositionItem `json:"model_composition"`
 	AuthFilesComposition  []analysisCompositionItem `json:"auth_files_composition"`
 	AIProviderComposition []analysisCompositionItem `json:"ai_provider_composition"`
 	Heatmap               analysisHeatmap           `json:"heatmap"`
-	CostBreakdown         analysisCostBreakdown     `json:"cost_breakdown"`
+	CostSummary           analysisCostSummary       `json:"cost_summary"`
 	ModelEfficiency       []analysisModelEfficiency `json:"model_efficiency"`
 }
 
@@ -51,6 +52,31 @@ type analysisModelUsageSeries struct {
 	Model       string  `json:"model"`
 	TotalTokens []int64 `json:"total_tokens"`
 	Requests    []int64 `json:"requests"`
+}
+
+type analysisModelSpeed struct {
+	RangeStart *time.Time                 `json:"range_start,omitempty"`
+	RangeEnd   *time.Time                 `json:"range_end,omitempty"`
+	Buckets    []analysisModelSpeedBucket `json:"buckets"`
+	Series     []analysisModelSpeedSeries `json:"series"`
+}
+
+type analysisModelSpeedBucket struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+type analysisModelSpeedSample struct {
+	SpeedTPSSum      float64  `json:"speed_tps_sum"`
+	SpeedSampleCount int64    `json:"speed_sample_count"`
+	MeanTPS          *float64 `json:"mean_tps"`
+}
+
+type analysisModelSpeedSeries struct {
+	Model            string                     `json:"model"`
+	TotalTokens      int64                      `json:"total_tokens"`
+	SpeedSampleCount int64                      `json:"speed_sample_count"`
+	Samples          []analysisModelSpeedSample `json:"samples"`
 }
 
 type analysisCompositionItem struct {
@@ -90,13 +116,10 @@ type analysisHeatmapCell struct {
 	Intensity           float64 `json:"intensity"`
 }
 
-type analysisCostBreakdown struct {
-	UncachedInputCostUSD float64 `json:"uncached_input_cost_usd"`
-	CacheReadCostUSD     float64 `json:"cache_read_cost_usd"`
-	CacheWriteCostUSD    float64 `json:"cache_write_cost_usd"`
-	OutputCostUSD        float64 `json:"output_cost_usd"`
-	TotalCostUSD         float64 `json:"total_cost_usd"`
-	CostAvailable        bool    `json:"cost_available"`
+// analysisCostSummary 仅传递已存总费用及可用性；Token 分项在原图表字段中继续提供。
+type analysisCostSummary struct {
+	TotalCostUSD  float64 `json:"total_cost_usd"`
+	CostAvailable bool    `json:"cost_available"`
 }
 
 type analysisModelEfficiency struct {
@@ -260,18 +283,20 @@ func registerKeyUsageAnalysisRoute(router gin.IRoutes, usageProvider service.Usa
 	})
 }
 
+// emptyAnalysisResponse 保持无数据时总费用为零且可用，返回稳定的图表空数组。
 func emptyAnalysisResponse() analysisResponse {
 	return analysisResponse{
 		Granularity:           string(servicedto.AnalysisGranularityHourly),
 		Timezone:              time.Local.String(),
 		TokenUsage:            []analysisTokenUsage{},
+		ModelSpeed:            buildAnalysisModelSpeedPayload(servicedto.AnalysisModelSpeed{}),
 		ModelUsage:            analysisModelUsage{Buckets: []time.Time{}, Series: []analysisModelUsageSeries{}},
 		APIKeyComposition:     []analysisCompositionItem{},
 		ModelComposition:      []analysisCompositionItem{},
 		AuthFilesComposition:  []analysisCompositionItem{},
 		AIProviderComposition: []analysisCompositionItem{},
 		Heatmap:               analysisHeatmap{APIKeys: []string{}, APIKeyLabels: map[string]string{}, Models: []string{}, Cells: []analysisHeatmapCell{}},
-		CostBreakdown:         analysisCostBreakdown{CostAvailable: true},
+		CostSummary:           analysisCostSummary{CostAvailable: true},
 		ModelEfficiency:       []analysisModelEfficiency{},
 	}
 }
@@ -299,6 +324,7 @@ func loadCPAAPIKeyInfos(c *gin.Context, provider service.CPAAPIKeyProvider) (map
 	return infos, nil
 }
 
+// buildAnalysisPayload 透传已存总费用与可用性，保留原 Token、身份和 Key 脱敏响应合同。
 func buildAnalysisPayload(snapshot *servicedto.AnalysisSnapshot, apiKeyInfos map[string]analysisAPIKeyInfo) analysisResponse {
 	if snapshot == nil {
 		return emptyAnalysisResponse()
@@ -328,19 +354,16 @@ func buildAnalysisPayload(snapshot *servicedto.AnalysisSnapshot, apiKeyInfos map
 		RangeStart:            snapshot.RangeStart,
 		RangeEnd:              snapshot.RangeEnd,
 		TokenUsage:            tokenUsage,
+		ModelSpeed:            buildAnalysisModelSpeedPayload(snapshot.ModelSpeed),
 		ModelUsage:            buildAnalysisModelUsagePayload(snapshot.TokenUsage, snapshot.ModelUsage),
 		APIKeyComposition:     apiComposition,
 		ModelComposition:      modelComposition,
 		AuthFilesComposition:  authFilesComposition,
 		AIProviderComposition: aiProviderComposition,
 		Heatmap:               buildAnalysisHeatmapPayload(snapshot.Heatmap, apiKeyInfos),
-		CostBreakdown: analysisCostBreakdown{
-			UncachedInputCostUSD: snapshot.CostBreakdown.UncachedInputCostUSD,
-			CacheReadCostUSD:     snapshot.CostBreakdown.CacheReadCostUSD,
-			CacheWriteCostUSD:    snapshot.CostBreakdown.CacheWriteCostUSD,
-			OutputCostUSD:        snapshot.CostBreakdown.OutputCostUSD,
-			TotalCostUSD:         snapshot.CostBreakdown.TotalCostUSD,
-			CostAvailable:        snapshot.CostBreakdown.CostAvailable,
+		CostSummary: analysisCostSummary{
+			TotalCostUSD:  snapshot.CostSummary.TotalCostUSD,
+			CostAvailable: snapshot.CostSummary.CostAvailable,
 		},
 		ModelEfficiency: buildAnalysisModelEfficiencyPayload(snapshot.ModelEfficiency),
 	}
@@ -547,4 +570,19 @@ func sortedHeatmapKeysByRequests(requestsByKey map[string]int64) []string {
 		return requestsByKey[keys[i]] > requestsByKey[keys[j]]
 	})
 	return keys
+}
+
+func buildAnalysisModelSpeedPayload(speed servicedto.AnalysisModelSpeed) analysisModelSpeed {
+	result := analysisModelSpeed{RangeStart: speed.RangeStart, RangeEnd: speed.RangeEnd, Buckets: make([]analysisModelSpeedBucket, 0, len(speed.Buckets)), Series: make([]analysisModelSpeedSeries, 0, len(speed.Series))}
+	for _, bucket := range speed.Buckets {
+		result.Buckets = append(result.Buckets, analysisModelSpeedBucket{Start: bucket.Start, End: bucket.End})
+	}
+	for _, series := range speed.Series {
+		samples := make([]analysisModelSpeedSample, 0, len(series.Samples))
+		for _, sample := range series.Samples {
+			samples = append(samples, analysisModelSpeedSample{SpeedTPSSum: sample.SpeedTPSSum, SpeedSampleCount: sample.SpeedSampleCount, MeanTPS: sample.MeanTPS})
+		}
+		result.Series = append(result.Series, analysisModelSpeedSeries{Model: series.Model, TotalTokens: series.TotalTokens, SpeedSampleCount: series.SpeedSampleCount, Samples: samples})
+	}
+	return result
 }

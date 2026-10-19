@@ -35,6 +35,10 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
 	&& chmod +x /usr/local/bin/docker-entrypoint.sh
 VOLUME ["/data"]
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -q --spider "http://127.0.0.1:${APP_PORT:-8080}${APP_BASE_PATH:-}/healthz" || exit 1
+# 先去除前缀外围的空格、tab 与换行；路径规范化由就绪路由处理。
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD base_path="${APP_BASE_PATH:-}"; \
+    base_path="${base_path#"${base_path%%[![:space:]]*}"}"; \
+    base_path="${base_path%"${base_path##*[![:space:]]}"}"; \
+    wget -q -O /dev/null "http://127.0.0.1:${APP_PORT:-8080}${base_path}/readyz" || exit 1
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/app/cpa-usage-keeper"]

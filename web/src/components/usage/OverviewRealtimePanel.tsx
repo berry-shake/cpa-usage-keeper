@@ -1,10 +1,12 @@
+import { ChartLifecycleProvider, type ChartRefreshSignal } from './charts/chartLifecycle';
+import { RealtimeModelSpeedCard } from './model-speed/RealtimeModelSpeedCard';
 import { RealtimeCacheChart, RealtimeDiagnostics, RealtimeWindowCards } from './RealtimeInsights';
 import { RealtimeTokenShareRibbons } from './RealtimeTokenShareRibbons';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@/lib/chartjs';
 import type { ChartData, ChartOptions, Plugin } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Line } from './charts/UsageChart';
 import { LatencyScatterChart } from './LatencyScatterChart';
 import type {
   OverviewRealtimeBlock,
@@ -59,6 +61,9 @@ interface OverviewRealtimePanelProps {
   isMobile: boolean;
   timezone?: string;
   visibleDimensions?: readonly RealtimeDimensionKey[];
+  modelSpeedPreferenceScope?: string | null;
+  modelSpeedQueryKey?: string;
+  chartRefreshSignal?: ChartRefreshSignal;
 }
 
 const REALTIME_WINDOWS: OverviewRealtimeWindow[] = ['15m', '30m', '60m'];
@@ -528,7 +533,7 @@ function RealtimeChartFrame({ loading, emptyLabel, children }: { loading: boolea
   );
 }
 
-export function OverviewRealtimePanel({ realtime, loading, error, window, onWindowChange, isDark, isMobile, timezone, visibleDimensions = DEFAULT_VISIBLE_DIMENSIONS }: OverviewRealtimePanelProps) {
+export function OverviewRealtimePanel({ realtime, loading, error, window, onWindowChange, isDark, isMobile, timezone, visibleDimensions = DEFAULT_VISIBLE_DIMENSIONS, modelSpeedPreferenceScope = 'admin', modelSpeedQueryKey = window, chartRefreshSignal }: OverviewRealtimePanelProps) {
   const { t } = useTranslation();
   const data = realtime ?? emptyRealtime(window);
   const initialLoading = loading && !realtime;
@@ -598,6 +603,7 @@ export function OverviewRealtimePanel({ realtime, loading, error, window, onWind
   const visibleDimension = dimensions.find((dimension) => dimension.key === activeDimension) ?? dimensions[0];
 
   return (
+    <ChartLifecycleProvider queryKey={modelSpeedQueryKey} source={realtime} refreshSignal={chartRefreshSignal}>
     <div className={styles.overviewRealtimeSection}>
       <div className={styles.overviewRealtimeToolbar}>
         <div className={styles.overviewRealtimeHeading}>
@@ -680,19 +686,22 @@ export function OverviewRealtimePanel({ realtime, loading, error, window, onWind
             </RealtimeCard>
           </div>
 
-          <RealtimeCard
-            title={t('usage_stats.overview_realtime_cache_level')}
-            metrics={metricChips(cacheValues, (value) => `${formatFixedTwoDecimals(value)}%`, averageLabel, latestLabel, trendLabel)}
-            metricsTooltip={rollingMetricHint}
-            full
-          >
-            <RealtimeChartFrame loading={loading} emptyLabel={cacheEmptyLabel}>
-              <RealtimeCacheChart points={data.cache_level} labels={cacheLabels} isDark={isDark} isMobile={isMobile} />
-            </RealtimeChartFrame>
-          </RealtimeCard>
+          <div className={styles.overviewRealtimeResponseUsageRow}>
+            <RealtimeModelSpeedCard speed={realtime?.window === window ? data.model_speed : undefined} loading={(loading && !realtime) || Boolean(realtime && realtime.window !== window)} isDark={isDark} isMobile={isMobile} timezone={data.timezone ?? timezone} preferenceScope={modelSpeedPreferenceScope} queryKey={modelSpeedQueryKey} refreshSignal={chartRefreshSignal && chartRefreshSignal.source === realtime && data.model_speed ? { source: data.model_speed, revision: chartRefreshSignal.revision } : undefined} />
+            <RealtimeCard
+              title={t('usage_stats.overview_realtime_cache_level')}
+              metrics={metricChips(cacheValues, (value) => `${formatFixedTwoDecimals(value)}%`, averageLabel, latestLabel, trendLabel)}
+              metricsTooltip={rollingMetricHint}
+            >
+              <RealtimeChartFrame loading={loading} emptyLabel={cacheEmptyLabel}>
+                <RealtimeCacheChart points={data.cache_level} labels={cacheLabels} isDark={isDark} isMobile={isMobile} />
+              </RealtimeChartFrame>
+            </RealtimeCard>
+          </div>
           </div>
         </>
       )}
     </div>
+    </ChartLifecycleProvider>
   );
 }

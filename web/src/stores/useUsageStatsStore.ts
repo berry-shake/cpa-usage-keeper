@@ -5,6 +5,7 @@ import type { OverviewRealtimeBlock, OverviewRealtimeWindow, UsageCustomRangeUni
 export const USAGE_STATS_STALE_TIME_MS = 60_000;
 
 interface LoadUsageStatsOptions {
+  onLoaded?: (response: UsageOverviewResponse) => void;
   force?: boolean;
   staleTimeMs?: number;
   range?: UsageTimeRange;
@@ -19,6 +20,7 @@ interface LoadUsageStatsRealtimeOptions {
   staleTimeMs?: number;
   apiKeyId?: string;
   realtimeWindow?: OverviewRealtimeWindow;
+  onLoaded?: (response: OverviewRealtimeBlock) => void;
 }
 
 interface UsageStatsState {
@@ -68,6 +70,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
       force = false,
       staleTimeMs = USAGE_STATS_STALE_TIME_MS,
       range = '8h',
+      onLoaded,
       unit,
       start,
       end,
@@ -84,7 +87,8 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
     }
 
     if (loading && activeOverviewRequest) {
-      if (activeOverviewRequestKey === queryKey) {
+      // 显式刷新必须取消旧请求并重新取数，不能复用重算前同范围的在途结果。
+      if (!force && activeOverviewRequestKey === queryKey) {
         return activeOverviewRequest;
       }
       activeOverviewRequestController?.abort();
@@ -109,6 +113,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
           lastRefreshedAt: Date.now(),
           lastQueryKey: queryKey,
         });
+        onLoaded?.(overview);
       } catch (error) {
         if (controller.signal.aborted) {
           return;
@@ -142,6 +147,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
       staleTimeMs = USAGE_STATS_STALE_TIME_MS,
       apiKeyId,
       realtimeWindow,
+      onLoaded,
     } = options;
     const { lastRealtimeRefreshedAt, realtimeLoading, realtime, lastRealtimeQueryKey, realtimeError, lastRealtimeErrorQueryKey } = get();
     const now = Date.now();
@@ -156,7 +162,8 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
     }
 
     if (realtimeLoading && activeRealtimeRequest) {
-      if (activeRealtimeRequestKey === realtimeQueryKey) {
+      // 与总览保持同一刷新语义；旧请求即使晚到，也受下方 controller 身份检查约束。
+      if (!force && activeRealtimeRequestKey === realtimeQueryKey) {
         return activeRealtimeRequest;
       }
       activeRealtimeRequestController?.abort();
@@ -187,6 +194,7 @@ export const useUsageStatsStore = create<UsageStatsState>((set, get) => ({
           lastRealtimeRefreshedAt: Date.now(),
           lastRealtimeQueryKey: realtimeQueryKey,
         });
+        onLoaded?.(nextRealtime);
       } catch (error) {
         if (controller.signal.aborted) {
           return;

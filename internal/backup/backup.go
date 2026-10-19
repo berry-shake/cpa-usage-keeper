@@ -3,6 +3,8 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,14 +63,45 @@ func (w *Writer) WriteDatabase(ctx context.Context, db *sql.DB, backupAt time.Ti
 	return fullPath, nil
 }
 
-func copySQLiteDatabase(ctx context.Context, sourceDB *sql.DB, destPath string) error {
+// copySQLiteDatabase uses one consistent VACUUM snapshot without a CGO backup handle.
+func copySQLiteDatabase(ctx context.Context, sourceDB *sql.DB, destPath string) (copyErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	defer func() {
+		// SQLite reports interrupted operations with a driver error; retain the
+		// caller's cancellation identity without hiding that underlying error.
+		if copyErr != nil && ctx.Err() != nil {
+			copyErr = errors.Join(copyErr, ctx.Err())
+		}
+	}()
 	if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove existing backup database: %w", err)
 	}
-	if _, err := sourceDB.ExecContext(ctx, "VACUUM INTO ?", destPath); err != nil {
+	conn, err := sourceDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("open source database connection: %w", err)
+	}
+	defer conn.Close()
+	var queryOnly int
+	if err := conn.QueryRowContext(ctx, "PRAGMA query_only").Scan(&queryOnly); err != nil {
+		return fmt.Errorf("read backup source protection: %w", err)
+	}
+	if queryOnly != 0 {
+		// VACUUM writes its attached destination. The source remains mode=ro;
+		// restore this connection-local guard before returning it to the reader pool.
+		defer func() {
+			if _, err := conn.ExecContext(context.Background(), "PRAGMA query_only=ON"); err != nil {
+				copyErr = errors.Join(copyErr, fmt.Errorf("restore backup source protection: %w", err))
+				// Never return an unprotected connection to the pool after failed cleanup.
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			}
+		}()
+		if _, err := conn.ExecContext(ctx, "PRAGMA query_only=OFF"); err != nil {
+			return fmt.Errorf("prepare backup destination writes: %w", err)
+		}
+	}
+	if _, err := conn.ExecContext(ctx, "VACUUM INTO ?", destPath); err != nil {
 		return fmt.Errorf("copy sqlite backup: %w", err)
 	}
 	return nil

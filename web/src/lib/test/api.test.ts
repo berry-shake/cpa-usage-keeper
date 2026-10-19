@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, appPath, isUsageRangeBoundsConflict, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyAnalysis, fetchKeyAnalysisLatency, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, setCredentialDisabled, setCredentialPriority, startUsageQuotaInspection, syncRemotePricing, updateAuthSessionAlias, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
-
+import { ApiError, appPath, isCostsBusy, isUsageRangeBoundsConflict, createUsageEventRequestLogDownloadURL, deleteAuthFiles, exportUsageEvents, fetchAnalysis, fetchAnalysisLatency, fetchAuthSessions, fetchCodexQuotaHistory, fetchCpaApiKeyOptions, fetchCpaApiKeys, fetchCpaApiKeySettings, fetchKeyActivity, fetchKeyAnalysis, fetchKeyAnalysisLatency, fetchKeyOverview, fetchKeyOverviewRealtime, fetchQuotaAutoRefreshSettings, fetchUsageActivity, fetchUsageOverview, fetchUsageOverviewRealtime, fetchUsageQuotaCache, fetchUsageQuotaInspectionStatus, fetchUsageQuotaResetCredits, fetchUpdateCheck, fetchUsageEventModelFilterOptions, fetchUsageEventRequestLog, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities, fetchUsageIdentitiesPage, fetchUsageQuotaRefreshTask, fetchVersion, loginWithCPAAPIKey, logout, refreshUsageQuotas, resetUsageQuota, revokeAuthSession, setAuthFilesDisabled, setCredentialDisabled, setCredentialPriority, startUsageQuotaInspection, updateAuthSessionAlias, updateCpaApiKeyAlias, updateQuotaAutoRefreshSettings } from '../api';
+import { fetchUsageCredentials } from '../api';
 
 const headerValue = (init: RequestInit | undefined, name: string): string | null => new Headers(init?.headers).get(name);
 
@@ -29,6 +29,13 @@ describe('fetchUsageEvents', () => {
     expect(isUsageRangeBoundsConflict(new ApiError('expired range', 409))).toBe(true);
     expect(isUsageRangeBoundsConflict(new ApiError('invalid range', 400))).toBe(false);
     expect(isUsageRangeBoundsConflict(new Error('network error'))).toBe(false);
+  });
+
+  it('recognizes only the dedicated temporary cost-read response', () => {
+    expect(isCostsBusy(new ApiError('busy', 503, 'costs_busy'))).toBe(true);
+    expect(isCostsBusy(new ApiError('migration', 503, 'migration_in_progress'))).toBe(false);
+    expect(isCostsBusy(new ApiError('busy', 500, 'costs_busy'))).toBe(false);
+    expect(isCostsBusy(new Error('busy'))).toBe(false);
   });
 
   it('posts CPA API key logins to the dedicated auth endpoint', async () => {
@@ -492,12 +499,34 @@ describe('fetchUsageEvents', () => {
     expect(eventsUrl.searchParams.get('api_key_id')).toBe('9007199254740993');
   });
 
+  it('loads credential summaries with the selected range and API key', async () => {
+    const payload = { credentials: [] };
+    const fetchMock = mockJSON(payload);
+    const signal = new AbortController().signal;
+
+    await expect(fetchUsageCredentials(
+      { range: 'custom', unit: 'day', start: '2026-04-20', end: '2026-04-21' },
+      signal,
+      ' 9007199254740993 ',
+    )).resolves.toEqual(payload);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    const parsed = new URL(String(url), 'http://localhost');
+    expect(parsed.pathname).toBe('/api/v1/usage/credentials');
+    expect(parsed.searchParams.get('range')).toBe('custom');
+    expect(parsed.searchParams.get('start')).toBe('2026-04-20');
+    expect(parsed.searchParams.get('end')).toBe('2026-04-21');
+    expect(parsed.searchParams.get('api_key_id')).toBe('9007199254740993');
+    expect(init).toMatchObject({ credentials: 'include', signal });
+  });
+
   it('omits empty API key id from usage requests', async () => {
     const fetchMock = mockJSON({ usage: { total_requests: 0, success_count: 0, failure_count: 0, total_tokens: 0 }, events: [], total_count: 0, page: 1, page_size: 100, total_pages: 0 });
     const signal = new AbortController().signal;
 
     await fetchUsageOverview({ range: '24h' }, signal, '  ');
     await fetchUsageEvents({ range: '24h' }, signal, { apiKeyId: '' });
+    await fetchUsageCredentials({ range: '24h' }, signal, '  ');
 
     for (const call of fetchMock.mock.calls) {
       expect(new URL(String(call[0]), 'http://localhost').searchParams.get('api_key_id')).toBeNull();
@@ -933,32 +962,6 @@ describe('fetchUsageEvents', () => {
     expect(response.quota?.id).toBe('auth-1');
     expect(parsed.pathname).toBe('/api/v1/quota/refresh/auth-1');
     expect(init).toMatchObject({ credentials: 'include', signal });
-  });
-
-  it('posts to the remote pricing sync endpoint', async () => {
-    vi.stubGlobal('window', { __APP_BASE_PATH__: undefined });
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        source_url: 'https://example.test/prices.json',
-        source_urls: ['https://example.test/prices.json'],
-        imported_count: 10,
-        matched_count: 1,
-        updated_count: 1,
-        unmatched_models: [],
-        synced_at: '2026-05-03T01:02:03Z',
-        pricing: [],
-      }),
-    } as Response);
-
-    const response = await syncRemotePricing();
-
-    const [url, init] = fetchMock.mock.calls[0];
-    const parsed = new URL(String(url), 'http://localhost');
-
-    expect(response.matched_count).toBe(1);
-    expect(parsed.pathname).toBe('/api/v1/pricing/sync');
-    expect(init).toMatchObject({ credentials: 'include', method: 'POST' });
   });
 
   it('loads update check status from the protected endpoint', async () => {

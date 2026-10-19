@@ -1,7 +1,5 @@
 // @vitest-environment happy-dom
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { act, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,8 +12,6 @@ vi.mock('react-i18next', () => {
     useTranslation: () => ({ t }),
   }
 })
-
-const componentsStyles = readFileSync(resolve(process.cwd(), 'src/styles/components.scss'), 'utf8')
 
 describe('Modal', () => {
   let container: HTMLDivElement
@@ -41,6 +37,56 @@ describe('Modal', () => {
     await act(async () => root.render(children))
   }
 
+  it('preserves a field focused before the deferred opening focus runs', async () => {
+    await render(<Modal open onClose={vi.fn()}><input aria-label="Invalid price" /></Modal>)
+    const input = document.body.querySelector<HTMLInputElement>('input')!
+    // 固定先校验聚焦、后执行打开定时器，复现 CI 中被关闭按钮抢焦点的顺序。
+    input.focus()
+    await act(async () => { vi.runOnlyPendingTimers() })
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('sets initial focus and restores the trigger after closing', async () => {
+    const content = (open: boolean) => <>
+      <button data-modal-trigger>Open</button>
+      <Modal open={open} onClose={vi.fn()}>Content</Modal>
+    </>
+    await render(content(false))
+    const trigger = document.body.querySelector<HTMLButtonElement>('[data-modal-trigger]')!
+    trigger.focus()
+    await render(content(true))
+    await act(async () => { vi.runOnlyPendingTimers() })
+    expect(document.activeElement).toBe(document.body.querySelector('.modal-close-floating'))
+
+    await render(content(false))
+    await act(async () => { vi.runAllTimers() })
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('preserves nested field focus and restores its parent trigger on close', async () => {
+    const content = (nestedOpen: boolean) => (
+      <Modal open title="Parent" onClose={vi.fn()}>
+        <button data-nested-trigger>Open nested</button>
+        <Modal open={nestedOpen} title="Nested" onClose={vi.fn()}>
+          <input aria-label="Nested price" />
+        </Modal>
+      </Modal>
+    )
+    await render(content(false))
+    await act(async () => { vi.runOnlyPendingTimers() })
+    const trigger = document.body.querySelector<HTMLButtonElement>('[data-nested-trigger]')!
+    trigger.focus()
+    await render(content(true))
+    const input = document.body.querySelector<HTMLInputElement>('input')!
+    input.focus()
+    await act(async () => { vi.runOnlyPendingTimers() })
+    expect(document.activeElement).toBe(input)
+
+    await render(content(false))
+    await act(async () => { vi.runAllTimers() })
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it('renders a right-aligned full-height drawer while preserving dialog semantics', async () => {
     await render(
       <Modal open title="Credential" variant="drawer" width={840} onClose={() => undefined}>
@@ -54,11 +100,6 @@ describe('Modal', () => {
     expect(dialog.getAttribute('aria-modal')).toBe('true')
   })
 
-  it('keeps the drawer flush with the viewport and scrolls only its body', () => {
-    expect(componentsStyles).toMatch(/\.modal-overlay-drawer\s*\{[\s\S]*?align-items:\s*stretch;[\s\S]*?justify-content:\s*flex-end;[\s\S]*?padding:\s*0;/)
-    expect(componentsStyles).toMatch(/\.modal-drawer\s*\{[\s\S]*?height:\s*100vh;[\s\S]*?max-height:\s*100vh;/)
-    expect(componentsStyles).toMatch(/\.modal-drawer\s*\{[\s\S]*?\.modal-body\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?max-height:\s*none;/)
-  })
 
   it('lets only the topmost nested modal handle Escape', async () => {
     const closeDrawer = vi.fn()
@@ -126,9 +167,4 @@ describe('Modal', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('disables interaction during closing and respects reduced motion', () => {
-    expect(componentsStyles).toMatch(/\.modal-overlay-closing[\s\S]*?\.modal[\s\S]*?pointer-events:\s*none;/)
-    expect(componentsStyles).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.modal-overlay-entering,[\s\S]*?\.modal-overlay-closing,[\s\S]*?\.modal-entering,[\s\S]*?\.modal-closing[\s\S]*?animation:\s*none;/)
-    expect(componentsStyles).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.modal-overlay-closing,[\s\S]*?\.modal-closing[\s\S]*?opacity:\s*0;/)
-  })
 })

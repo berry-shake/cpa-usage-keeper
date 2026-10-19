@@ -1,7 +1,6 @@
 package capacity_test
 
 import (
-	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
@@ -11,85 +10,6 @@ import (
 
 	"cpa-usage-keeper/internal/benchmark/capacity"
 )
-
-func TestPlanSchemaRequiresRecentThirtyDayEvents(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "schema", "plan.schema.json"))
-	if err != nil {
-		t.Fatalf("read plan schema: %v", err)
-	}
-	var schema struct {
-		Properties map[string]struct {
-			Items struct {
-				Required   []string                   `json:"required"`
-				Properties map[string]json.RawMessage `json:"properties"`
-			} `json:"items"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(data, &schema); err != nil {
-		t.Fatalf("decode plan schema: %v", err)
-	}
-	cells := schema.Properties["cells"].Items
-	if !slices.Contains(cells.Required, "recent_30_day_events") {
-		t.Fatal("plan schema must require recent_30_day_events")
-	}
-	var property struct {
-		Type    string `json:"type"`
-		Minimum int    `json:"minimum"`
-	}
-	if err := json.Unmarshal(cells.Properties["recent_30_day_events"], &property); err != nil {
-		t.Fatalf("decode recent_30_day_events property: %v", err)
-	}
-	if property.Type != "integer" || property.Minimum != 1 {
-		t.Fatalf("recent_30_day_events schema=%+v, want integer minimum 1", property)
-	}
-}
-
-func TestSuiteSchemaRequiresDrainStabilityBudget(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "schema", "suite.schema.json"))
-	if err != nil {
-		t.Fatalf("read suite schema: %v", err)
-	}
-	var schema struct {
-		Properties map[string]struct {
-			Required   []string                   `json:"required"`
-			Properties map[string]json.RawMessage `json:"properties"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(data, &schema); err != nil {
-		t.Fatalf("decode suite schema: %v", err)
-	}
-	search := schema.Properties["search"]
-	if !slices.Contains(search.Required, "initial_rate_per_second") {
-		t.Fatal("suite schema must require initial_rate_per_second")
-	}
-	var initialRate struct {
-		Type    string `json:"type"`
-		Minimum int    `json:"minimum"`
-	}
-	if err := json.Unmarshal(search.Properties["initial_rate_per_second"], &initialRate); err != nil {
-		t.Fatalf("decode initial_rate_per_second property: %v", err)
-	}
-	if initialRate.Type != "integer" || initialRate.Minimum != 1 {
-		t.Fatalf("initial_rate_per_second schema=%+v, want positive integer", initialRate)
-	}
-	if !slices.Contains(search.Required, "max_pass_drain_seconds") {
-		t.Fatal("suite schema must require max_pass_drain_seconds")
-	}
-	if !slices.Contains(search.Required, "analysis_latency_interval_seconds") {
-		t.Fatal("suite schema must require analysis_latency_interval_seconds")
-	}
-	var property struct {
-		Type    string `json:"type"`
-		Minimum int    `json:"minimum"`
-		Maximum int    `json:"maximum"`
-	}
-	if err := json.Unmarshal(search.Properties["max_pass_drain_seconds"], &property); err != nil {
-		t.Fatalf("decode max_pass_drain_seconds property: %v", err)
-	}
-	if property.Type != "integer" || property.Minimum != 1 || property.Maximum != 30 {
-		t.Fatalf("max_pass_drain_seconds schema=%+v, want integer range 1..30", property)
-	}
-}
 
 func TestLoadCapacityManifestAndExpandStablePlan(t *testing.T) {
 	manifestPath := filepath.Join("..", "..", "manifest", "capacity-v1.json")

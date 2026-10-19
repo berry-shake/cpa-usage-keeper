@@ -29,6 +29,32 @@ type AnalysisModelUsageRecord struct {
 	Requests    int64
 }
 
+// AnalysisModelSpeedRecord 保存跨源桶的 sum/count，显示桶在仓储层使用真实时间边界合并。
+type AnalysisModelSpeedRecord struct {
+	RangeStart *time.Time
+	RangeEnd   *time.Time
+	Buckets    []AnalysisModelSpeedBucketRecord
+	Series     []AnalysisModelSpeedSeriesRecord
+}
+
+type AnalysisModelSpeedBucketRecord struct {
+	Start time.Time
+	End   time.Time
+}
+
+type AnalysisModelSpeedSampleRecord struct {
+	SpeedTPSSum      float64
+	SpeedSampleCount int64
+	MeanTPS          *float64
+}
+
+type AnalysisModelSpeedSeriesRecord struct {
+	Model            string
+	TotalTokens      int64
+	SpeedSampleCount int64
+	Samples          []AnalysisModelSpeedSampleRecord
+}
+
 type AnalysisCompositionRecord struct {
 	Key                 string
 	Label               string
@@ -57,13 +83,10 @@ type AnalysisHeatmapRecord struct {
 	CostAvailable       bool
 }
 
-type AnalysisCostBreakdownRecord struct {
-	UncachedInputCostUSD float64
-	CacheReadCostUSD     float64
-	CacheWriteCostUSD    float64
-	OutputCostUSD        float64
-	TotalCostUSD         float64
-	CostAvailable        bool
+// AnalysisCostSummaryRecord 只承载已存汇总的总 USD 金额及可用性，不虚构费用分项。
+type AnalysisCostSummaryRecord struct {
+	TotalCostUSD  float64
+	CostAvailable bool
 }
 
 type AnalysisModelEfficiencyRecord struct {
@@ -112,12 +135,13 @@ type AnalysisRecord struct {
 	RangeStart            *time.Time
 	RangeEnd              *time.Time
 	TokenUsage            []AnalysisTokenUsageBucketRecord
+	ModelSpeed            AnalysisModelSpeedRecord
 	ModelUsage            []AnalysisModelUsageRecord
 	APIKeyComposition     []AnalysisCompositionRecord
 	ModelComposition      []AnalysisCompositionRecord
 	AuthFilesComposition  []AnalysisCompositionRecord
 	AIProviderComposition []AnalysisCompositionRecord
 	Heatmap               []AnalysisHeatmapRecord
-	CostBreakdown         AnalysisCostBreakdownRecord
+	CostSummary           AnalysisCostSummaryRecord
 	ModelEfficiency       []AnalysisModelEfficiencyRecord
 }

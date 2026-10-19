@@ -30,18 +30,23 @@ func (tx *pricingExplicitTransaction) Rollback() error {
 	return err
 }
 
-// mutatePricing 串行完成写事务、事务内候选编译和提交后的原子发布。
-func (s *pricingService) mutatePricing(ctx context.Context, callback func(*gorm.DB) error) (*pricing.Snapshot, error) {
+// mutatePricingRevision 串行完成完整价格事务、修订递增和提交后发布。
+// 该锁只保护配置/修订的一致读取，不等待已经取得旧 Resolver 的事件批次。
+func (s *pricingService) mutatePricingRevision(ctx context.Context, callback func(*gorm.DB) error) (*pricing.Snapshot, int64, error) {
 	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("database is nil")
+		return nil, 0, fmt.Errorf("database is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
+	if s.recalculationRunning {
+		return nil, 0, ErrPricingBusy
+	}
 
 	var candidate *pricing.Snapshot
+	var revision int64
 	err := s.db.WithContext(ctx).Connection(func(connectionDB *gorm.DB) (err error) {
 		connection, ok := connectionDB.Statement.ConnPool.(*sql.Conn)
 		if !ok {
@@ -77,6 +82,10 @@ func (s *pricingService) mutatePricing(ctx context.Context, callback func(*gorm.
 		if err != nil {
 			return err
 		}
+		revision, err = repository.AdvancePricingConfigRevision(tx)
+		if err != nil {
+			return err
+		}
 		if err = explicitTx.Commit(); err != nil {
 			return err
 		}
@@ -84,9 +93,9 @@ func (s *pricingService) mutatePricing(ctx context.Context, callback func(*gorm.
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	// 只有显式 COMMIT 成功后才发布；失败路径已在同一物理连接上完成 ROLLBACK。
 	s.catalog.Replace(candidate)
-	return candidate, nil
+	return candidate, revision, nil
 }

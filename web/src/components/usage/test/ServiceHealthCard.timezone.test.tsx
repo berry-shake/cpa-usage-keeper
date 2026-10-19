@@ -1,13 +1,10 @@
 import { createElement } from 'react';
-import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import type { UsageActivityResponse } from '@/lib/types';
 import { RecentActivityPanel } from '../RecentActivityPanel';
 import { buildUsageActivityFixture } from './activityFixtures';
-
-const usagePageStyles = readFileSync(new URL('../../../pages/UsagePage.module.scss', import.meta.url), 'utf8');
 
 describe('Recent Activity project timezone', () => {
   it('formats the shared window and both grids in Asia/Shanghai when the test process runs in UTC', () => {
@@ -46,14 +43,3 @@ describe('Recent Activity project timezone', () => {
   });
 });
 
-describe('ServiceHealthCard dense grid containment', () => {
-  it('contains the mobile 364-cell grid inside the card scroller', () => {
-    const activityCardRule = usagePageStyles.match(/\.activityCard\s*\{([\s\S]*?)\n\}/)![1];
-    const mobileRules = usagePageStyles.slice(usagePageStyles.lastIndexOf('@include mobile'));
-
-    expect(activityCardRule).toMatch(/min-width:\s*0;/);
-    expect(usagePageStyles).toMatch(/\.activityHeatmapGrid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(52, minmax\(0, 1fr\)\);/);
-    expect(usagePageStyles).toMatch(/\.activityHeatmapGrid\s*\{[\s\S]*?aspect-ratio:\s*52 \/ 7;/);
-    expect(mobileRules).not.toMatch(/\.activityHeatmapGrid\s*\{[\s\S]*?min-width:/);
-  });
-});

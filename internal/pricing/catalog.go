@@ -3,8 +3,9 @@ package pricing
 import "sync/atomic"
 
 var sharedEmptySnapshot = &Snapshot{
-	modelsByName: map[string]compiledModel{},
-	modelConfigs: []ModelConfig{},
+	modelsByName:   map[string]compiledModel{},
+	modelConfigs:   []ModelConfig{},
+	pricingConfigs: []ModelPricingConfig{},
 }
 
 // EmptySnapshot 返回可显式注入的只读空价格快照。

@@ -110,7 +110,7 @@ func TestProviderMetadataSyncKeepsFailedSourcesAndStalesOnlySuccessfulTypes(t *t
 	fetcher.standardResults["vertex"] = &response.ProviderKeyConfigResult{StatusCode: 200, Payload: []providerconfig.ProviderKeyConfig{{APIKey: "invalid-without-auth-index"}}}
 	syncer := newMetadataTestSyncer(db, fetcher, func() time.Time { return now })
 	err := syncer.SyncMetadata(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "fetch gemini api keys: gemini unavailable") || !strings.Contains(err.Error(), "codex api keys response is nil") {
+	if err == nil || !strings.Contains(err.Error(), "fetch gemini api keys: gemini unavailable") || !strings.Contains(err.Error(), "codex api keys response is nil") || !strings.Contains(err.Error(), "vertex api keys contains an API key without auth_index") || strings.Contains(err.Error(), "invalid-without-auth-index") {
 		t.Fatalf("provider boundary warning = %v", err)
 	}
 	identities := loadMetadataIdentityMap(t, db)
@@ -131,13 +131,13 @@ func TestProviderMetadataSyncKeepsFailedSourcesAndStalesOnlySuccessfulTypes(t *t
 		t.Fatalf("empty Claude identity = %+v", claudeRow)
 	}
 	vertexRow := identities[metadataIdentityKey(entities.UsageIdentityAuthTypeAIProvider, "old-vertex")]
-	if !vertexRow.IsDeleted || vertexRow.DeletedAt == nil || !vertexRow.DeletedAt.Equal(now) || !vertexRow.UpdatedAt.Equal(now) {
-		t.Fatalf("invalid Vertex identity = %+v", vertexRow)
+	if vertexRow.IsDeleted || vertexRow.DeletedAt != nil || !vertexRow.UpdatedAt.Equal(oldTime) {
+		t.Fatalf("incomplete Vertex source changed identity deleted = %v", vertexRow.IsDeleted)
 	}
 }
 
-func TestProviderMetadataSyncNewSourcesTreatOnlyTyped404AsOptional(t *testing.T) {
-	db := openMetadataTestDatabase(t, "new-provider-optional-404.db")
+func TestProviderMetadataSyncFailedSourcesPreserveRowsAndEmptySourcesRemoveThem(t *testing.T) {
+	db := openMetadataTestDatabase(t, "provider-failure-and-empty.db")
 	oldTime := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 	firstNow := oldTime.Add(24 * time.Hour)
 	secondNow := firstNow.Add(time.Hour)
@@ -161,21 +161,21 @@ func TestProviderMetadataSyncNewSourcesTreatOnlyTyped404AsOptional(t *testing.T)
 	fetcher.standardErrors["meta"] = errors.New("meta endpoint missing")
 	currentNow := firstNow
 	syncer := newMetadataTestSyncer(db, fetcher, func() time.Time { return currentNow })
-	if err := syncer.SyncMetadata(context.Background()); err != nil {
-		t.Fatalf("typed 404 SyncMetadata returned error: %v", err)
+	if err := syncer.SyncMetadata(context.Background()); err == nil {
+		t.Fatal("failed sources returned no warning")
 	}
 	firstRows := loadMetadataIdentityMap(t, db)
 	xAIProvider := firstRows[metadataIdentityKey(entities.UsageIdentityAuthTypeAIProvider, "shared-xai-auth")]
 	if xAIProvider.IsDeleted || xAIProvider.DeletedAt != nil || !xAIProvider.UpdatedAt.Equal(oldTime) {
-		t.Fatalf("xAI provider after typed 404 = %+v", xAIProvider)
+		t.Fatalf("xAI provider after upstream failure = %+v", xAIProvider)
 	}
 	interactions := firstRows[metadataIdentityKey(entities.UsageIdentityAuthTypeAIProvider, "old-interactions")]
 	if interactions.IsDeleted || interactions.DeletedAt != nil || !interactions.UpdatedAt.Equal(oldTime) {
-		t.Fatalf("Interactions after typed 404 = %+v", interactions)
+		t.Fatalf("Interactions after upstream failure = %+v", interactions)
 	}
 	metaProvider := firstRows[metadataIdentityKey(entities.UsageIdentityAuthTypeAIProvider, "old-meta")]
 	if metaProvider.IsDeleted || metaProvider.DeletedAt != nil || !metaProvider.UpdatedAt.Equal(oldTime) {
-		t.Fatalf("Meta provider after typed 404 = %+v", metaProvider)
+		t.Fatalf("Meta provider after upstream failure = %+v", metaProvider)
 	}
 	fetcher.standardResults["xai"] = &response.ProviderKeyConfigResult{StatusCode: 200, Payload: []providerconfig.ProviderKeyConfig{}}
 	fetcher.standardErrors["xai"] = nil

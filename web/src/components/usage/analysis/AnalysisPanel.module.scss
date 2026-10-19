@@ -293,21 +293,7 @@
   justify-content: space-between;
   gap: 8px;
   flex-shrink: 0;
-  button {
-    display: grid;
-    place-items: center;
-    flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    margin: -4px -4px -4px 0;
-    padding: 0;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    &:hover { background: var(--bg-tertiary); }
-  }
+
 }
 
 .topModelsTooltipRows {
@@ -319,7 +305,7 @@
   margin: 0;
   padding: 0 4px 0 0;
   list-style: none;
-  color: var(--text-secondary);
+  color: inherit;
   li { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 6px; padding-block: 2px; }
 }
 

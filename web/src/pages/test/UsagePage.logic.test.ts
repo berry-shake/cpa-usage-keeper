@@ -553,7 +553,6 @@ describe('UsagePage active tab auto-refresh guard', () => {
     expect(shouldAutoRefreshUsageTab({ activeTab: 'overview', eventsPage: 2 })).toBe(true);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'realtime', eventsPage: 2 })).toBe(true);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'analysis', eventsPage: 1 })).toBe(false);
-    expect(shouldAutoRefreshUsageTab({ activeTab: 'ranking', eventsPage: 1 })).toBe(false);
     expect(shouldAutoRefreshUsageTab({ activeTab: 'settings', eventsPage: 1 })).toBe(false);
   });
 });
@@ -792,7 +791,6 @@ for (const [tab, expected] of [
   ['overview', true],
   ['realtime', false],
   ['analysis', true],
-  ['ranking', false],
   ['events', true],
   ['auth-files', true],
   ['ai-provider', true],
@@ -807,7 +805,6 @@ for (const [tab, expected] of [
   ['overview', true],
   ['realtime', true],
   ['analysis', true],
-  ['ranking', false],
   ['events', true],
   ['auth-files', true],
   ['ai-provider', true],
@@ -826,7 +823,6 @@ describe('UsagePage tab labels', () => {
       'translated:usage_stats.tab_overview',
       'translated:usage_stats.tab_realtime',
       'translated:usage_stats.tab_analysis',
-      'translated:usage_stats.tab_ranking',
       'translated:usage_stats.tab_events',
       'translated:usage_stats.tab_auth_files',
       'translated:usage_stats.tab_ai_provider',
@@ -834,20 +830,11 @@ describe('UsagePage tab labels', () => {
     ]);
   });
 
-  it('omits Ranking from the CPAMC embedded navigation', () => {
-    const values = getUsageTabOptions((key) => key, { includeRanking: false }).map((option) => option.value);
-
-    expect(values).toEqual(['overview', 'realtime', 'analysis', 'events', 'auth-files', 'ai-provider', 'settings']);
-  });
 });
 
 describe('UsagePage credentials tab migration', () => {
   it('migrates the legacy Credentials tab value to Auth Files', () => {
     expect(normalizeUsageTabValue('credentials')).toBe('auth-files');
-  });
-
-  it('keeps Ranking as an independent persisted tab value', () => {
-    expect(normalizeUsageTabValue('ranking')).toBe('ranking');
   });
 
   it('keeps each credential section scoped to its own tab', () => {

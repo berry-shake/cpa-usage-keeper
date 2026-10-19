@@ -142,7 +142,7 @@ func TestAuthAPIKeyLoginSetsViewerSessionCookieAndSessionSummary(t *testing.T) {
 	sessionResp := serveAPIGet(router, "/cpa/api/v1/auth/session", cookies[0])
 
 	body := sessionResp.Body.String()
-	if sessionResp.Code != http.StatusOK || !strings.Contains(body, `"authenticated":true`) || !strings.Contains(body, `"role":"api_key_viewer"`) || !strings.Contains(body, `"api_key":{"display_key":"sk-*********123456","alias":"Team Key"}`) {
+	if sessionResp.Code != http.StatusOK || !strings.Contains(body, `"authenticated":true`) || !strings.Contains(body, `"role":"api_key_viewer"`) || !strings.Contains(body, `"api_key":{"id":"42","display_key":"sk-*********123456","alias":"Team Key"}`) {
 		t.Fatalf("unexpected session response: %d %s", sessionResp.Code, body)
 	}
 	if strings.Contains(body, "sk-live123456") || strings.Contains(body, "sk-l************3456") {

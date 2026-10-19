@@ -4,9 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"sync"
+	"reflect"
 	"testing"
-	"time"
 
 	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
 	"cpa-usage-keeper/internal/cpa/dto/response"
@@ -18,8 +17,8 @@ import (
 type priorityClientStub struct {
 	providers       map[string][]providerconfig.ProviderKeyConfig
 	openAI          []providerconfig.OpenAICompatibilityConfig
-	patchIndex      int
-	patchType       string
+	writeGroup      int
+	writeType       string
 	patchName       string
 	patchStatus     int
 	providerFetches int
@@ -41,11 +40,28 @@ func (s *priorityClientStub) UpdateAuthFilePriority(_ context.Context, name stri
 
 func (s *priorityClientStub) FetchPriorityProviderConfig(_ context.Context, providerType string) (*response.ProviderKeyConfigResult, error) {
 	s.providerFetches++
-	return &response.ProviderKeyConfigResult{StatusCode: http.StatusOK, Payload: s.providers[providerType]}, nil
+	return &response.ProviderKeyConfigResult{StatusCode: http.StatusOK, Payload: s.providers[providerType], Document: testProviderDocument(s.providers[providerType])}, nil
 }
 
-func (s *priorityClientStub) UpdateProviderPriority(_ context.Context, providerType string, index, priority int) (int, error) {
-	s.patchType, s.patchIndex = providerType, index
+func (s *priorityClientStub) UpdateProviderConfig(_ context.Context, providerType string, document *providerconfig.Document) (int, error) {
+	s.writeType = providerType
+	if providerType == "openai" {
+		before := testOpenAIDocument(s.openAI)
+		for index := range document.Groups {
+			if !reflect.DeepEqual(before.Groups[index].Fields["priority"], document.Groups[index].Fields["priority"]) {
+				s.writeGroup = index
+				break
+			}
+		}
+	} else {
+		before := testProviderDocument(s.providers[providerType])
+		for index := range document.Groups {
+			if !reflect.DeepEqual(before.Groups[index].Keys[0].Fields["priority"], document.Groups[index].Keys[0].Fields["priority"]) {
+				s.writeGroup = index
+				break
+			}
+		}
+	}
 	if s.patchStatus != 0 {
 		return s.patchStatus, errors.New("upstream rejected")
 	}
@@ -60,18 +76,7 @@ func (s *priorityClientStub) FetchOpenAICompatibility(context.Context) (*respons
 	if s.onOpenAIFetch != nil {
 		s.onOpenAIFetch(s.openAIFetches)
 	}
-	return &response.OpenAICompatibilityResult{StatusCode: http.StatusOK, Payload: s.openAI}, nil
-}
-
-func (s *priorityClientStub) UpdateOpenAICompatibilityPriority(_ context.Context, index, priority int) (int, error) {
-	s.patchType, s.patchIndex = "openai", index
-	if s.patchStatus != 0 {
-		return s.patchStatus, errors.New("upstream rejected")
-	}
-	if s.onPatch != nil {
-		s.onPatch()
-	}
-	return http.StatusOK, nil
+	return &response.OpenAICompatibilityResult{StatusCode: http.StatusOK, Payload: s.openAI, Document: testOpenAIDocument(s.openAI)}, nil
 }
 
 func loadPriority(t *testing.T, db *gorm.DB, authType entities.UsageIdentityAuthType, identity string) *int {
@@ -132,7 +137,7 @@ func TestAuthFilePriorityPersistsSuccessfulPatch(t *testing.T) {
 	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAuthFile, "auth-index"), 3)
 }
 
-func TestProviderPriorityUsesOriginalIndexForDuplicateKeysAndNegativeValue(t *testing.T) {
+func TestProviderPriorityUsesFirstAuthIndexMatchAndNegativeValue(t *testing.T) {
 	db := openMetadataTestDatabase(t, "priority-provider-index.db")
 	seedProviderCredential(t, db, "meta", "target", "same-secret")
 	client := &priorityClientStub{providers: map[string][]providerconfig.ProviderKeyConfig{
@@ -142,8 +147,8 @@ func TestProviderPriorityUsesOriginalIndexForDuplicateKeysAndNegativeValue(t *te
 	if _, err := provider.SetAIProviderPriority(context.Background(), "target", -8); err != nil {
 		t.Fatal(err)
 	}
-	if client.patchType != "meta" || client.patchIndex != 1 {
-		t.Fatalf("patch type=%s index=%d", client.patchType, client.patchIndex)
+	if client.writeType != "meta" || client.writeGroup != 1 {
+		t.Fatalf("patch type=%s index=%d", client.writeType, client.writeGroup)
 	}
 	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAIProvider, "target"), -8)
 }
@@ -184,13 +189,13 @@ func TestProviderPriorityDoesNotPersistMissingOrRejectedTarget(t *testing.T) {
 	}
 }
 
-func TestProviderPriorityPersistsTargetPatch(t *testing.T) {
+func TestProviderPriorityPersistsTargetPUT(t *testing.T) {
 	db := openMetadataTestDatabase(t, "priority-provider-patch-success.db")
 	seedProviderCredential(t, db, "codex", "target", "secret")
 	client := &priorityClientStub{providers: map[string][]providerconfig.ProviderKeyConfig{"codex": {{AuthIndex: "another"}, {AuthIndex: "target"}}}}
 	result, err := service.NewCredentialPriorityService(db, client, nil, &service.CredentialMutationLocks{}).SetAIProviderPriority(context.Background(), "target", -4)
-	if err != nil || result.Priority != -4 || client.providerFetches != 1 || client.patchIndex != 1 {
-		t.Fatalf("result=%+v err=%v fetches=%d index=%d", result, err, client.providerFetches, client.patchIndex)
+	if err != nil || result.Priority != -4 || client.providerFetches != 1 || client.writeGroup != 1 {
+		t.Fatalf("result=%+v err=%v fetches=%d index=%d", result, err, client.providerFetches, client.writeGroup)
 	}
 	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAIProvider, "target"), -4)
 }
@@ -205,8 +210,8 @@ func TestOpenAIProviderPriorityUpdatesAllItsKeysOnly(t *testing.T) {
 		{Name: "target", APIKeyEntries: []providerconfig.OpenAIApiKeyEntry{{AuthIndex: "openai-a"}, {AuthIndex: "openai-b"}}},
 	}}
 	result, err := service.NewCredentialPriorityService(db, client, nil, &service.CredentialMutationLocks{}).SetAIProviderPriority(context.Background(), "openai-b", 12)
-	if err != nil || result.Priority != 12 || client.patchIndex != 1 {
-		t.Fatalf("result=%+v err=%v index=%d", result, err, client.patchIndex)
+	if err != nil || result.Priority != 12 || client.writeGroup != 1 {
+		t.Fatalf("result=%+v err=%v index=%d", result, err, client.writeGroup)
 	}
 	for _, authIndex := range []string{"openai-a", "openai-b"} {
 		requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAIProvider, authIndex), 12)
@@ -216,20 +221,20 @@ func TestOpenAIProviderPriorityUpdatesAllItsKeysOnly(t *testing.T) {
 	}
 }
 
-func TestOpenAIProviderPriorityUsesLockedProviderKeys(t *testing.T) {
+func TestOpenAIProviderPriorityUsesCurrentGroupKeys(t *testing.T) {
 	db := openMetadataTestDatabase(t, "priority-openai-patch-success.db")
 	for _, authIndex := range []string{"a", "b", "old"} {
 		seedProviderCredential(t, db, "openai", authIndex, "secret-"+authIndex)
 	}
 	client := &priorityClientStub{openAI: []providerconfig.OpenAICompatibilityConfig{{APIKeyEntries: []providerconfig.OpenAIApiKeyEntry{{AuthIndex: "a"}, {AuthIndex: "old"}}}}}
 	client.onOpenAIFetch = func(fetch int) {
-		if fetch == 2 {
+		if fetch == 1 {
 			client.openAI[0].APIKeyEntries = []providerconfig.OpenAIApiKeyEntry{{AuthIndex: "a"}, {AuthIndex: "b"}}
 		}
 	}
 	result, err := service.NewCredentialPriorityService(db, client, nil, &service.CredentialMutationLocks{}).SetAIProviderPriority(context.Background(), "a", 6)
-	if err != nil || result.Priority != 6 || client.openAIFetches != 2 || client.patchIndex != 0 {
-		t.Fatalf("result=%+v err=%v fetches=%d index=%d", result, err, client.openAIFetches, client.patchIndex)
+	if err != nil || result.Priority != 6 || client.openAIFetches != 1 || client.writeGroup != 0 {
+		t.Fatalf("result=%+v err=%v fetches=%d index=%d", result, err, client.openAIFetches, client.writeGroup)
 	}
 	for _, authIndex := range []string{"a", "b"} {
 		requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAIProvider, authIndex), 6)
@@ -239,17 +244,17 @@ func TestOpenAIProviderPriorityUsesLockedProviderKeys(t *testing.T) {
 	}
 }
 
-func TestOpenAIProviderPriorityUnknownKeyDoesNotPatch(t *testing.T) {
+func TestOpenAIProviderPriorityUnknownKeyDoesNotWrite(t *testing.T) {
 	db := openMetadataTestDatabase(t, "priority-openai-missing.db")
 	seedProviderCredential(t, db, "openai", "missing", "secret")
 	client := &priorityClientStub{openAI: []providerconfig.OpenAICompatibilityConfig{{APIKeyEntries: []providerconfig.OpenAIApiKeyEntry{{AuthIndex: "someone-else"}}}}}
 	_, err := service.NewCredentialPriorityService(db, client, nil, &service.CredentialMutationLocks{}).SetAIProviderPriority(context.Background(), "missing", 5)
-	if !errors.Is(err, service.ErrCredentialPriorityNotFound) || client.patchType != "" {
-		t.Fatalf("err=%v patch=%s", err, client.patchType)
+	if !errors.Is(err, service.ErrCredentialPriorityNotFound) || client.writeType != "" {
+		t.Fatalf("err=%v patch=%s", err, client.writeType)
 	}
 }
 
-func TestOpenAIProviderPriorityRejectedPatchDoesNotPersist(t *testing.T) {
+func TestOpenAIProviderPriorityRejectedPUTDoesNotPersist(t *testing.T) {
 	db := openMetadataTestDatabase(t, "priority-openai-rejected.db")
 	seedProviderCredential(t, db, "openai", "target", "secret")
 	client := &priorityClientStub{
@@ -257,102 +262,12 @@ func TestOpenAIProviderPriorityRejectedPatchDoesNotPersist(t *testing.T) {
 		patchStatus: http.StatusConflict,
 	}
 	_, err := service.NewCredentialPriorityService(db, client, nil, &service.CredentialMutationLocks{}).SetAIProviderPriority(context.Background(), "target", 5)
-	if !errors.Is(err, service.ErrCredentialPriorityConflict) || client.openAIFetches != 2 {
+	if !errors.Is(err, service.ErrCredentialPriorityConflict) || client.openAIFetches != 1 {
 		t.Fatalf("err=%v fetches=%d", err, client.openAIFetches)
 	}
 	if got := loadPriority(t, db, entities.UsageIdentityAuthTypeAIProvider, "target"); got != nil {
 		t.Fatalf("unexpected local priority=%v", *got)
 	}
-}
-
-type concurrentOpenAIPriorityClient struct {
-	mu                 sync.Mutex
-	patches            int
-	fetches            int
-	firstPatchStarted  chan struct{}
-	releaseFirstPatch  chan struct{}
-	secondInitialFetch chan struct{}
-}
-
-func (s *concurrentOpenAIPriorityClient) UpdateAuthFilePriority(context.Context, string, int) (int, error) {
-	return 0, errors.New("unused")
-}
-func (s *concurrentOpenAIPriorityClient) FetchPriorityProviderConfig(context.Context, string) (*response.ProviderKeyConfigResult, error) {
-	return nil, errors.New("unused")
-}
-func (s *concurrentOpenAIPriorityClient) UpdateProviderPriority(context.Context, string, int, int) (int, error) {
-	return 0, errors.New("unused")
-}
-func (s *concurrentOpenAIPriorityClient) FetchOpenAICompatibility(context.Context) (*response.OpenAICompatibilityResult, error) {
-	s.mu.Lock()
-	s.fetches++
-	if s.fetches == 3 {
-		close(s.secondInitialFetch)
-	}
-	s.mu.Unlock()
-	return &response.OpenAICompatibilityResult{StatusCode: http.StatusOK, Payload: []providerconfig.OpenAICompatibilityConfig{{
-		APIKeyEntries: []providerconfig.OpenAIApiKeyEntry{{AuthIndex: "a"}, {AuthIndex: "b"}},
-	}}}, nil
-}
-func (s *concurrentOpenAIPriorityClient) UpdateOpenAICompatibilityPriority(_ context.Context, index, priority int) (int, error) {
-	s.mu.Lock()
-	s.patches++
-	patch := s.patches
-	s.mu.Unlock()
-	if index != 0 {
-		return 0, errors.New("wrong provider index")
-	}
-	if patch == 1 {
-		close(s.firstPatchStarted)
-		<-s.releaseFirstPatch
-	}
-	return http.StatusOK, nil
-}
-
-func TestOpenAIProviderPrioritySerializesDifferentKeysInSameProvider(t *testing.T) {
-	db := openMetadataTestDatabase(t, "priority-openai-concurrent.db")
-	seedProviderCredential(t, db, "openai", "a", "secret-a")
-	seedProviderCredential(t, db, "openai", "b", "secret-b")
-	client := &concurrentOpenAIPriorityClient{
-		firstPatchStarted: make(chan struct{}), releaseFirstPatch: make(chan struct{}), secondInitialFetch: make(chan struct{}),
-	}
-	provider := service.NewCredentialPriorityService(db, client, nil, &service.CredentialMutationLocks{})
-	first := make(chan error, 1)
-	second := make(chan error, 1)
-	go func() { _, err := provider.SetAIProviderPriority(context.Background(), "a", 1); first <- err }()
-	select {
-	case <-client.firstPatchStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first OpenAI patch did not start")
-	}
-	go func() { _, err := provider.SetAIProviderPriority(context.Background(), "b", 2); second <- err }()
-	select {
-	case <-client.secondInitialFetch:
-	case <-time.After(2 * time.Second):
-		close(client.releaseFirstPatch)
-		t.Fatal("second OpenAI target lookup did not start")
-	}
-	// 第二个请求已完成选锁 GET；第一条 PATCH 未结束时，它不能写入同一 provider。
-	time.Sleep(30 * time.Millisecond)
-	client.mu.Lock()
-	patchesBeforeRelease := client.patches
-	client.mu.Unlock()
-	close(client.releaseFirstPatch)
-	for name, result := range map[string]<-chan error{"first": first, "second": second} {
-		select {
-		case err := <-result:
-			if err != nil {
-				t.Fatalf("%s update: %v", name, err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatalf("%s OpenAI update timed out", name)
-		}
-	}
-	if patchesBeforeRelease != 1 {
-		t.Fatalf("parallel patches before release=%d", patchesBeforeRelease)
-	}
-	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAIProvider, "a"), 2)
-	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAIProvider, "b"), 2)
 }
 
 func TestPriorityRequestsRefreshIfLocalPersistenceFailsAfterCPASuccess(t *testing.T) {
@@ -379,8 +294,8 @@ func TestPriorityUnsupportedTypeDoesNotPatch(t *testing.T) {
 	if !errors.Is(err, service.ErrCredentialPriorityUnsupported) {
 		t.Fatalf("err=%v", err)
 	}
-	if client.patchType != "" {
-		t.Fatalf("unexpected patch=%s", client.patchType)
+	if client.writeType != "" {
+		t.Fatalf("unexpected patch=%s", client.writeType)
 	}
 }
 

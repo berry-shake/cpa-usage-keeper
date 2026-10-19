@@ -96,7 +96,7 @@
 - **掌握额度**：查看凭证健康与剩余限额，支持限额刷新、优先级编辑和 Codex 限额历史。
 - **按需分享**：为单个 CPA API Key 提供独立的只读用量视图。
 
-此外，还支持可选的社区排名，以及通过 CPA 插件嵌入 CPAMC。可使用 Docker Compose、Homebrew 或二进制部署，登录保护默认开启。
+此外，还支持通过 CPA 插件嵌入 CPAMC。可使用 Docker Compose、Homebrew 或二进制部署，登录保护默认开启。
 
 ## 赞助与特别感谢
 
@@ -106,8 +106,8 @@
 
 ## 快速开始
 
-> 使用前请确认 CPA 已开启使用统计。v8 配置中的 `observability.usage.usage-statistics-enabled` 应设为 `true`；旧版配置使用顶层 `usage-statistics-enabled`。
->
+> Keeper 支持 CPA v8.0.12+。请开启 CPA 使用统计，将 `observability.usage.usage-statistics-enabled` 设为 `true`。
+
 > 同一 CPA 接入多个 usage 采集服务时，请确保均使用订阅模式，否则可能导致收数中断或数据不完整。
 
 Docker Compose 是推荐部署方式：首次部署可同时运行 CPA + Keeper，已有 CPA 时则使用 Keeper-only Compose。
@@ -125,6 +125,18 @@ Docker Compose 是推荐部署方式：首次部署可同时运行 CPA + Keeper�
 
 登录保护默认启用。启动 Keeper 前请配置 `LOGIN_PASSWORD`；只有部署环境已可靠隔离访问时，才显式设置 `AUTH_ENABLED=false`。
 
+### 本 fork 的 v2 升级说明
+
+- 保持 glebarez/modernc SQLite、`CGO_ENABLED=0` 和六平台交叉编译；统一 `release.yml` 使用预编译二进制组装双架构运行时镜像，健康检查使用 `/readyz`。
+- v1 数据首次启动时先生成并校验迁移备份，再回填持久化费用。升级前另存一份完整备份；回退 v1 必须从该备份复制到独立工作目录，不能直接打开已迁移数据库。
+- 价格管理切换为 v2 的编辑、拉取后审核应用和显式历史重算，旧一键同步入口不再保留。保存价格不会改变历史费用；保留 LiteLLM 名称规范化和已配置但不活跃模型的同步支持。
+- 凭证汇总继续支持时间范围和 API Key 筛选，费用来自持久化结果；重算期间遵守 `costs_busy`。移动端请求卡片、客户端元数据及强制 ingest 模式继续保留。
+- 排行功能及 `API_KEY_VIEWER_LOCAL_RANKING_ENABLED` 已移除；纯 Go benchmark 不提供原 CGO 原生 SQL trace，历史 benchmark 报告仍保留原测试环境信息。
+
+## Benchmark
+
+`linux/amd64` 生产型容量测试覆盖持续 ingestion、Dashboard 延迟、CPU 利用率和 Keeper cgroup 峰值内存，完整结果见 [容量 Benchmark 报告](./internal/benchmark/reports/capacity/README.zh.md)。
+
 <details>
 <summary>开发者参考：项目结构、本地运行与测试</summary>
 
@@ -139,7 +151,6 @@ internal/poller/         CPA 用量与配置同步
 internal/repository/     SQLite 持久化与聚合
 internal/service/        用量、定价与身份服务
 internal/quota/          Provider 限额刷新与巡检
-internal/ranking/        社区排名聚合与同步
 internal/benchmark/      容量套件、报告、manifest 与历史 Go microbenchmark
 deploy/                  部署模板
 web/                     React + TypeScript 前端
@@ -229,7 +240,7 @@ curl -fL https://raw.githubusercontent.com/Willxup/cpa-usage-keeper/main/deploy/
 
 **2. 填写 CPA 和 Keeper 配置**
 
-官方模板采用 v8 配置结构。按下表编辑 `cpa/config.yaml` 中的已有配置项，保留 YAML 层级与缩进；表中的点号表示嵌套路径，不是要新增的 YAML 键名：
+按下表编辑 `cpa/config.yaml` 中的已有配置项，保留 YAML 层级与缩进；表中的点号表示嵌套路径，不是要新增的 YAML 键名：
 
 | 配置项 | 设置说明 |
 | --- | --- |
@@ -238,7 +249,7 @@ curl -fL https://raw.githubusercontent.com/Willxup/cpa-usage-keeper/main/deploy/
 | `observability.usage.usage-statistics-enabled` | 改为 `true`，开启使用统计。 |
 | `access.api-keys` | 将示例密钥替换为自己的客户端调用密钥；这不是 CPA 管理密钥或 Keeper 登录密码。 |
 
-保留 `server.host` 为空字符串、`server.port` 为 `8317`、`oauth.auth-dir` 为 `"~/.cli-proxy-api"`，以匹配模板中的容器网络及目录挂载。不要在 v8 模板中追加同名含义的旧版配置项。
+保留 `server.host` 为空字符串、`server.port` 为 `8317`、`oauth.auth-dir` 为 `"~/.cli-proxy-api"`，以匹配模板中的容器网络及目录挂载。
 
 编辑下载的 `docker-compose.yml`，在 Keeper 的 `environment` 中填写两项：
 
@@ -287,7 +298,7 @@ LOGIN_PASSWORD=
 
 启动容器前请设置私有的 `LOGIN_PASSWORD`。
 
-无论 CPA 位于 Docker 宿主机还是其他主机，都需允许远程管理，并监听 Keeper 容器可访问的地址；只监听 `127.0.0.1` 时容器无法连接。v8 配置设置 `management.allow-remote: true`，并检查 `server.host`；旧版对应 `remote-management.allow-remote` 和顶层 `host`。
+无论 CPA 位于 Docker 宿主机还是其他主机，都需允许远程管理，并监听 Keeper 容器可访问的地址；只监听 `127.0.0.1` 时容器无法连接。设置 `management.allow-remote: true`，并检查 `server.host`。
 
 其它网络环境请将 `CPA_BASE_URL` 改为容器可访问的 CPA 地址。只有 Redis/RESP 地址与自动推导的地址不同时，才需要设置 `REDIS_QUEUE_ADDR`。
 
@@ -318,7 +329,7 @@ docker compose up -d cpa-usage-keeper
 
 #### 启动后没有数据？
 
-- 确认 CPA 使用统计已开启：v8 配置的 `observability.usage.usage-statistics-enabled` 为 `true`；旧版为顶层 `usage-statistics-enabled`。
+- 确认 CPA 使用统计已开启：`observability.usage.usage-statistics-enabled` 为 `true`。
 - 确认 Keeper 能访问 `CPA_BASE_URL`，且 `CPA_MANAGEMENT_KEY` 与 CPA 管理密钥一致。
 - 确认 CPA 已产生新的模型请求；仍没有数据时，用上面的日志命令检查连接或认证错误。
 
@@ -466,7 +477,6 @@ cp .env.example .env
 | `LOGIN_PASSWORD` | 鉴权启用时必填 | - | 登录密码 |
 | `CPA_REQUEST_LOG_ACCESS_ENABLED` | 否 | `false` | 允许管理员通过 Keeper 查看和下载 CPA 请求日志；需要 CPA 中存在对应日志，内容可能包含请求或响应数据 |
 | `AUTH_SESSION_TTL` | 否 | `168h` | 登录 session 有效时长 |
-| `API_KEY_VIEWER_LOCAL_RANKING_ENABLED` | 否 | `false` | 允许 API Key 登录用户只读查看本地排行；Community 排行始终只读 |
 
 ### 时区与请求行为
 
@@ -490,7 +500,7 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `REDIS_QUEUE_ADDR` | 否 | 从 `CPA_BASE_URL` 推导 | 显式设置时优先使用该地址；留空时沿用 `CPA_BASE_URL` 的主机和显式端口，未指定端口时使用 `8317`。独立地址填写 `host:port` |
-| `REDIS_QUEUE_TLS` | 否 | `false` | 是否使用 TLS 连接 Redis 队列；显式设置 `REDIS_QUEUE_ADDR` 且需要 TLS 时设为 `true` |
+| `REDIS_QUEUE_TLS` | 否 | `false` | 设为 `true` 强制启用 Redis 队列 TLS；未指定队列地址时，默认跟随 `CPA_BASE_URL` 的协议。`false` 不会覆盖自动推导的 TLS 设置。 |
 | `REDIS_QUEUE_BATCH_SIZE` | 否 | `10000` | 每次最多拉取的队列记录数 |
 | `REDIS_QUEUE_IDLE_INTERVAL` | 否 | `1s` | 队列为空时的检查间隔 |
 | `REDIS_INGEST_MODE` | 否 | `auto` | 远端 ingest 长期模式：`auto`、`subscribe`、`redis_pull`、`http_pull`。固定模式会跳过其他模式的启动探测并保持所选长期模式；`subscribe` 与 `redis_pull` 仍保留故障期间的临时 fallback 和恢复探测 |
@@ -504,7 +514,7 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 | `LOG_LEVEL` | 否 | `info` | 日志级别 |
 | `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
 | `LOG_RETENTION_DAYS` | 否 | `7` | 综合日志保留历史天数，并额外保留当天；`0` 表示不自动清理。仅错误日志固定保留历史 30 天及当天 |
-| `BACKUP_ENABLED` | 否 | `true` | 是否启用 SQLite 数据库备份 |
+| `BACKUP_ENABLED` | 否 | `true` | 是否启用定时数据库备份 |
 | `BACKUP_INTERVAL` | 否 | `24h` | 数据库备份间隔 |
 | `BACKUP_RETENTION_DAYS` | 否 | `7` | 备份保留天数 |
 | `USAGE_RAW_RETENTION_DAYS` | 否 | `0` | 原始请求总保留天数，仅清理归档表；`0` 永久保留，`>=90` 生效，负数及 `1～89` 按 `0` 处理并记录 warning，不影响启动 |
@@ -512,6 +522,16 @@ Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。
 Keeper 每天按配置时区在 04:30 自动归档超过 90 个本地自然日的原始请求记录。归档默认永久保留。设置 `USAGE_RAW_RETENTION_DAYS>=90` 后，每日归档完成后会分批删除超过总保留天数的归档记录，期限按请求发生时间及配置时区的自然日计算；热表的 90 天窗口不变。常规页面不直接查询归档明细；历史汇总和备份继续采用各自的保留策略。删除的原始记录无法用于后续历史重算；SQLite 文件不一定立即缩小，空闲空间可复用，并由现有条件式整理回收。
 
 启用文件日志后，`cpa-usage-keeper-YYYY-MM-DD.log` 会记录所有已输出级别；error、fatal 和 panic 级别还会同时写入 `cpa-usage-keeper-error-YYYY-MM-DD.log`，该文件固定保留历史 30 个本地自然日及当天。
+
+### v1 升级 v2 失败后的回退
+
+Keeper 会在迁移 v1 数据前备份数据库。如果迁移失败且备份验证通过，日志会输出英文回退说明及备份路径 `backup_path`。
+
+1. 停止 Keeper v2，保留故障数据库及其可能存在的 `-wal`、`-shm` 文件。
+2. 将升级前备份复制为独立数据目录中的 `<新 WORK_DIR>/app.db`，即将备份副本重命名为 `app.db`。保留原备份，不要混入故障数据库的文件。
+3. 安装 Keeper v1，将 `WORK_DIR` 设为该新目录。Docker 默认配置下，将新目录挂载到 `/data`，使恢复文件在容器内的路径为 `/data/app.db`。不要让 v1 直接打开迁移了一部分的数据库。
+
+恢复后的数据回到备份时点，不包含此后收到的用量。如果没有可验证的备份，应先找到并核实一份升级前备份，再尝试回退。
 
 ### 内置 HTTPS
 
@@ -555,10 +575,16 @@ CPA 与 Keeper 浏览器同源时，可以不设置 `CPA_PUBLIC_URL`，“返回
 CPA_PUBLIC_URL=https://cpa.example.com
 ```
 
-## Benchmark
-
-`linux/amd64` 生产型容量测试覆盖持续 ingestion、Dashboard 延迟、CPU 利用率和 Keeper cgroup 峰值内存，完整结果见 [容量 Benchmark 报告](./internal/benchmark/REPORT.zh.md)。
-
 ## License
 
 本项目基于 [MIT License](./LICENSE) 开源。
+
+## Star History
+
+<a href="https://star-history.dera.page/Willxup/cpa-usage-keeper">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Willxup/cpa-usage-keeper&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Willxup/cpa-usage-keeper" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Willxup/cpa-usage-keeper" />
+ </picture>
+</a>

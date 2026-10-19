@@ -11,7 +11,7 @@ import (
 
 var isolatedConfigEnvKeys = []string{
 	"APP_HOST", "APP_PORT", "APP_BASE_PATH", "CPA_PUBLIC_URL", "FRAME_ANCESTOR_ORIGINS", "WORK_DIR", "CPA_BASE_URL", "CPA_MANAGEMENT_KEY",
-	"CPA_REQUEST_LOG_ACCESS_ENABLED", "API_KEY_VIEWER_LOCAL_RANKING_ENABLED",
+	"CPA_REQUEST_LOG_ACCESS_ENABLED",
 	"REDIS_QUEUE_ADDR", "REDIS_QUEUE_TLS", "REDIS_QUEUE_BATCH_SIZE", "REDIS_QUEUE_IDLE_INTERVAL",
 	"REDIS_INGEST_MODE", "REDIS_INGEST_RECOVERY_INTERVAL",
 	"BACKUP_ENABLED", "BACKUP_INTERVAL", "BACKUP_RETENTION_DAYS",
@@ -27,7 +27,6 @@ func TestLoadOptionalAccessFlags(t *testing.T) {
 	}{
 		{"CPA_REQUEST_LOG_ACCESS_ENABLED", func(cfg *config.Config) bool { return cfg.CPARequestLogAccessEnabled }},
 		{"QUOTA_UPSTREAM_RESPONSES_ENABLED", func(cfg *config.Config) bool { return cfg.QuotaUpstreamResponsesEnabled }},
-		{"API_KEY_VIEWER_LOCAL_RANKING_ENABLED", func(cfg *config.Config) bool { return cfg.APIKeyViewerLocalRankingEnabled }},
 	} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/%t", tc.key, enabled), func(t *testing.T) {

@@ -1,6 +1,7 @@
 package test
 
 import (
+	"math"
 	"reflect"
 	"testing"
 
@@ -14,8 +15,8 @@ func TestUsageEventTraceMetadataMigrationPreservesLegacyRowsAndSchemaObjects(t *
 	db := openUnmigratedTestDatabase(t)
 	for _, table := range []string{"usage_events", "usage_events_archive"} {
 		for _, statement := range []string{
-			"CREATE TABLE " + table + " (id INTEGER PRIMARY KEY, request_id TEXT, total_tokens INTEGER)",
-			"INSERT INTO " + table + " (id, request_id, total_tokens) VALUES (7, 'existing-request', 123)",
+			"CREATE TABLE " + table + " (id INTEGER PRIMARY KEY, request_id TEXT, total_tokens INTEGER, cost_usd REAL, cost_available NUMERIC)",
+			"INSERT INTO " + table + " (id, request_id, total_tokens, cost_usd, cost_available) VALUES (7, 'existing-request', 123, 1.2345, 1)",
 			"CREATE INDEX idx_" + table + "_legacy_request ON " + table + " (request_id)",
 			"CREATE TRIGGER guard_" + table + " BEFORE UPDATE ON " + table + " BEGIN SELECT RAISE(ABORT, 'legacy rows must not be rewritten'); END",
 		} {
@@ -27,20 +28,25 @@ func TestUsageEventTraceMetadataMigrationPreservesLegacyRowsAndSchemaObjects(t *
 	runOnlyMigration(t, db, usageEventTraceMetadataMigrationVersion)
 	for _, table := range []string{"usage_events", "usage_events_archive"} {
 		var row struct {
-			ID           int64
-			RequestID    string
-			TotalTokens  int64
-			ExecutionID  *string
-			TraceID      *string
-			NodeKind     *string
-			IsFork       *bool
-			IsCompaction *bool
+			ID            int64
+			RequestID     string
+			TotalTokens   int64
+			CostUSD       *float64
+			CostAvailable *bool
+			ExecutionID   *string
+			TraceID       *string
+			NodeKind      *string
+			IsFork        *bool
+			IsCompaction  *bool
 		}
 		if err := db.Table(table).Take(&row).Error; err != nil {
 			t.Fatalf("load migrated %s row: %v", table, err)
 		}
 		if row.ID != 7 || row.RequestID != "existing-request" || row.TotalTokens != 123 {
 			t.Fatalf("legacy %s row changed: %+v", table, row)
+		}
+		if row.CostUSD == nil || math.Abs(*row.CostUSD-1.2345) > 1e-9 || row.CostAvailable == nil || !*row.CostAvailable {
+			t.Fatalf("legacy %s persisted cost changed: %+v", table, row)
 		}
 		if row.ExecutionID != nil || row.TraceID != nil || row.NodeKind != nil || row.IsFork != nil || row.IsCompaction != nil {
 			t.Fatalf("legacy %s metadata must remain unknown: %+v", table, row)

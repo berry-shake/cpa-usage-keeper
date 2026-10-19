@@ -34,14 +34,14 @@ func TestBlankJSONResponseBodyCheckDoesNotAllocate(t *testing.T) {
 
 func TestFetchManagementAPIKeysSendsBearerTokenAndParsesKeys(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/management/api-keys" {
+		if r.URL.Path != "/v8/management/config/access/api-keys" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
 			t.Errorf("expected management Authorization header, got %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"api-keys":["sk-alpha", "sk-beta"]}`))
+		_, _ = w.Write([]byte(`["sk-alpha", "sk-beta"]`))
 	}))
 	defer server.Close()
 
@@ -53,7 +53,7 @@ func TestFetchManagementAPIKeysSendsBearerTokenAndParsesKeys(t *testing.T) {
 	if result.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", result.StatusCode)
 	}
-	if string(result.Body) != `{"api-keys":["sk-alpha", "sk-beta"]}` {
+	if string(result.Body) != `["sk-alpha", "sk-beta"]` {
 		t.Fatalf("unexpected body: %s", string(result.Body))
 	}
 	if len(result.Payload.APIKeys) != 2 || result.Payload.APIKeys[0] != "sk-alpha" || result.Payload.APIKeys[1] != "sk-beta" {
@@ -63,7 +63,7 @@ func TestFetchManagementAPIKeysSendsBearerTokenAndParsesKeys(t *testing.T) {
 
 func TestFetchRequestLogByIDDownloadsFileWithBearerToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/management/request-log-by-id"+"/req-log-42" {
+		if r.URL.Path != "/v8/management/observability/logs/requests"+"/req-log-42" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
@@ -222,7 +222,7 @@ func TestIdleTimeoutReadCloserNilReceiver(t *testing.T) {
 func TestFetchManagementAPIKeysAllowsEmptyArray(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"api-keys":[]}`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer server.Close()
 
@@ -264,7 +264,7 @@ func TestFetchManagementAPIKeysRejectsInvalidJSON(t *testing.T) {
 
 func TestFetchAuthFilesParsesSyncMetadataFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/management/auth-files" {
+		if r.URL.Path != "/v8/management/credentials" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -295,7 +295,7 @@ func TestFetchAuthFilesParsesSyncMetadataFields(t *testing.T) {
 
 func TestFetchAuthFilesParsesCodexIDTokenFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/management/auth-files" {
+		if r.URL.Path != "/v8/management/credentials" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
@@ -337,7 +337,7 @@ func TestDeleteAuthFilesSendsNamesToManagementEndpoint(t *testing.T) {
 		if r.Method != http.MethodDelete {
 			t.Errorf("expected DELETE method, got %s", r.Method)
 		}
-		if r.URL.Path != "/v0/management/auth-files" {
+		if r.URL.Path != "/v8/management/credentials" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
@@ -371,7 +371,7 @@ func TestCallManagementAPIPostsWrappedRequest(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST method, got %s", r.Method)
 		}
-		if r.URL.Path != "/v0/management/api-call" {
+		if r.URL.Path != "/v8/management/requests/api-call" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
@@ -405,7 +405,7 @@ func TestCallManagementAPIPostsWrappedRequest(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"statusCode":200,"bodyText":"ok","body":{"remaining":10}}`))
+		_, _ = w.Write([]byte(`{"status_code":200,"header":{"X-Request-Id":["upstream-request"]},"body":"{\"remaining\":10}"}`))
 	}))
 	defer server.Close()
 
@@ -420,18 +420,18 @@ func TestCallManagementAPIPostsWrappedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallManagementAPI returned error: %v", err)
 	}
-	if result.StatusCode != http.StatusOK || result.BodyText != "ok" || string(result.Body) != `{"remaining":10}` {
+	if result.StatusCode != http.StatusOK || result.BodyText != `{"remaining":10}` || string(result.Body) != `"{\"remaining\":10}"` || result.Header["X-Request-Id"][0] != "upstream-request" {
 		t.Fatalf("unexpected api-call response: %+v", result)
 	}
 }
 
-func TestCallManagementAPIParsesSnakeCaseResponse(t *testing.T) {
+func TestCallManagementAPIPreservesPlainTextUpstreamBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/management/api-call" {
+		if r.URL.Path != "/v8/management/requests/api-call" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status_code":201,"body_text":"created","body":{"ok":true}}`))
+		_, _ = w.Write([]byte(`{"status_code":201,"header":{},"body":"created"}`))
 	}))
 	defer server.Close()
 
@@ -440,14 +440,14 @@ func TestCallManagementAPIParsesSnakeCaseResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallManagementAPI returned error: %v", err)
 	}
-	if result.StatusCode != http.StatusCreated || result.BodyText != "created" || string(result.Body) != `{"ok":true}` {
+	if result.StatusCode != http.StatusCreated || result.BodyText != "created" || string(result.Body) != `"created"` {
 		t.Fatalf("unexpected snake case api-call response: %+v", result)
 	}
 }
 
 func TestFetchUsageQueueUsesManagementEndpointAndParsesMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/management/usage-queue" {
+		if r.URL.Path != "/v8/management/observability/usage/queue" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		if got := r.URL.Query().Get("count"); got != "2" {
@@ -484,12 +484,12 @@ func TestFetchUsageQueueRejectsNonPositiveCount(t *testing.T) {
 func TestFetchModelsUsesExternalAPIKeyAndParsesOpenAICompatibleResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v0/management/api-keys":
+		case "/v8/management/config/access/api-keys":
 			if got := r.Header.Get("Authorization"); got != "Bearer management-secret" {
 				t.Errorf("expected management Authorization header, got %q", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"api-keys":["", "   ", "normal-api-key"]}`))
+			_, _ = w.Write([]byte(`["", "   ", "normal-api-key"]`))
 		case "/v1/models":
 			if got := r.Header.Get("Authorization"); got != "Bearer normal-api-key" {
 				t.Errorf("expected normal API Authorization header, got %q", got)
@@ -518,9 +518,9 @@ func TestFetchModelsUsesExternalAPIKeyAndParsesOpenAICompatibleResponse(t *testi
 func TestFetchModelsDoesNotUseProviderEndpointsWhenCPAManagementAPIKeysAreMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v0/management/api-keys":
-			_, _ = w.Write([]byte(`{"api-keys":[]}`))
-		case "/v0/management/claude-api-key", "/v0/management/codex-api-key", "/v0/management/openai-compatibility", "/v1/models":
+		case "/v8/management/config/access/api-keys":
+			_, _ = w.Write([]byte(`[]`))
+		case "/v8/management/config/api-keys/claude", "/v8/management/config/api-keys/codex", "/v8/management/config/api-keys/openai-compatibility", "/v1/models":
 			t.Errorf("FetchModels should not request %s when CPA management API keys are missing", r.URL.Path)
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
@@ -547,8 +547,8 @@ func TestFetchModelsRejectsInvalidResponses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/v0/management/api-keys":
-					_, _ = w.Write([]byte(`{"api-keys":["normal-api-key"]}`))
+				case "/v8/management/config/access/api-keys":
+					_, _ = w.Write([]byte(`["normal-api-key"]`))
 				case "/v1/models":
 					w.WriteHeader(tc.status)
 					_, _ = w.Write([]byte(tc.body))
@@ -569,7 +569,7 @@ func TestFetchModelsRejectsInvalidResponses(t *testing.T) {
 func TestNewClientTLSSkipVerify(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"api-keys":["test-key"]}`))
+		_, _ = w.Write([]byte(`["test-key"]`))
 	}))
 	defer server.Close()
 

@@ -96,7 +96,7 @@ Keep usage history for [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIP
 - **Track quotas**: monitor credential health and remaining quotas, refresh quotas, edit priorities, and explore Codex quota history.
 - **Share scoped access**: provide a read-only usage view for an individual CPA API Key.
 
-Optional community rankings and CPA plugin embedding in CPAMC are also available. Deploy with Docker Compose, Homebrew, or binaries; login protection is enabled by default.
+CPA plugin embedding in CPAMC is also available. Deploy with Docker Compose, Homebrew, or binaries; login protection is enabled by default.
 
 ## Sponsors and Special Thanks
 
@@ -106,8 +106,8 @@ Optional community rankings and CPA plugin embedding in CPAMC are also available
 
 ## Quick Start
 
-> Before using CPA Usage Keeper, enable CPA usage statistics. Set `observability.usage.usage-statistics-enabled` to `true` in v8 configurations; legacy configurations use the top-level `usage-statistics-enabled` setting.
->
+> Keeper supports CPA v8.0.12+. Enable CPA usage statistics by setting `observability.usage.usage-statistics-enabled` to `true`.
+
 > When multiple usage collectors share one CPA instance, ensure they all use subscription mode; otherwise, collection may stop or become incomplete.
 
 Docker Compose is the recommended deployment method. Use the full stack when deploying CPA and Keeper together, or the Keeper-only stack when CPA already exists.
@@ -125,6 +125,18 @@ Docker deployment requires Docker and Docker Compose; you do not need Go, Node.j
 
 Login protection is enabled by default. Configure `LOGIN_PASSWORD` before starting Keeper, or explicitly set `AUTH_ENABLED=false` only when access is reliably isolated by the deployment environment.
 
+### This fork's v2 upgrade
+
+- Retains glebarez/modernc SQLite, `CGO_ENABLED=0`, and six-platform cross-compilation. The unified `release.yml` assembles dual-architecture runtime images from prebuilt binaries and checks `/readyz`.
+- The first v1 startup creates and verifies a migration backup before backfilling stored costs. Keep an independent pre-upgrade backup; a v1 rollback must use a copy in a separate work directory, never the migrated database.
+- Pricing uses v2 editing, reviewed fetch/apply, and explicit historical recalculation instead of the old one-click sync. Saving prices does not change historical costs. LiteLLM name normalization and synchronization of configured-but-inactive models remain supported.
+- Credential summaries retain time-range and API-key filtering, read persisted costs, and honor `costs_busy` during recalculation. Mobile request cards, client metadata, and forced ingest modes remain available.
+- Ranking and `API_KEY_VIEWER_LOCAL_RANKING_ENABLED` are removed. Pure-Go benchmarks omit the old native CGO SQL tracing; historical reports retain their original environment metadata.
+
+## Benchmark
+
+Production-style `linux/amd64` capacity measurements for sustained ingestion, Dashboard latency, CPU utilization, and Keeper cgroup peak memory are available in the [Capacity Benchmark Report](./internal/benchmark/reports/capacity/README.md).
+
 <details>
 <summary>Developer reference: project structure, local setup, and tests</summary>
 
@@ -139,7 +151,6 @@ internal/poller/         CPA usage and metadata synchronization
 internal/repository/     SQLite persistence and aggregations
 internal/service/        Usage, pricing, and identity services
 internal/quota/          Provider quota refresh and inspection
-internal/ranking/        Community ranking aggregation and sync
 internal/benchmark/      Capacity suite, reports, manifests, and legacy microbenchmarks
 deploy/                  Deployment templates
 web/                     React + TypeScript frontend
@@ -229,7 +240,7 @@ Use this download command for a new deployment only; edit an existing configurat
 
 **2. Configure CPA and Keeper**
 
-The official template uses the v8 configuration layout. Edit the existing settings in `cpa/config.yaml` as listed below, preserving YAML nesting and indentation. Dots in the table denote nested paths, not literal YAML keys to add:
+Edit the existing settings in `cpa/config.yaml` as listed below, preserving YAML nesting and indentation. Dots in the table denote nested paths, not literal YAML keys to add:
 
 | Setting | What to configure |
 | --- | --- |
@@ -238,7 +249,7 @@ The official template uses the v8 configuration layout. Edit the existing settin
 | `observability.usage.usage-statistics-enabled` | Set to `true` to enable usage statistics. |
 | `access.api-keys` | Replace the example keys with your own client API keys; these are separate from the CPA management key and Keeper login password. |
 
-Keep `server.host` as an empty string, `server.port` as `8317`, and `oauth.auth-dir` as `"~/.cli-proxy-api"` to match the container network and volume mounts in the template. Do not append equivalent legacy settings to the v8 template.
+Keep `server.host` as an empty string, `server.port` as `8317`, and `oauth.auth-dir` as `"~/.cli-proxy-api"` to match the container network and volume mounts in the template.
 
 Edit the downloaded `docker-compose.yml` and fill in two values under Keeper's `environment`:
 
@@ -287,7 +298,7 @@ LOGIN_PASSWORD=
 
 Set a private `LOGIN_PASSWORD` before starting the container.
 
-Whether CPA runs on the Docker host or another machine, it must allow remote management and listen on an address reachable from the Keeper container; a listener bound only to `127.0.0.1` is not reachable. In v8 configurations, set `management.allow-remote: true` and check `server.host`; legacy configurations use `remote-management.allow-remote` and the top-level `host` setting.
+Whether CPA runs on the Docker host or another machine, it must allow remote management and listen on an address reachable from the Keeper container; a listener bound only to `127.0.0.1` is not reachable. Set `management.allow-remote: true` and check `server.host`.
 
 For other network layouts, set `CPA_BASE_URL` to a CPA address reachable from the container. Set `REDIS_QUEUE_ADDR` only when the Redis/RESP address differs from the automatically derived address.
 
@@ -318,7 +329,7 @@ docker compose up -d cpa-usage-keeper
 
 #### No Data After Startup?
 
-- Check that CPA usage statistics are enabled: `observability.usage.usage-statistics-enabled` must be `true` in v8 configurations, or the top-level `usage-statistics-enabled` in legacy configurations.
+- Check that CPA usage statistics are enabled: `observability.usage.usage-statistics-enabled` must be `true`.
 - Ensure Keeper can reach `CPA_BASE_URL` and that `CPA_MANAGEMENT_KEY` matches the CPA management key.
 - Check that CPA has received new model requests. If data is still missing, use the log command above to look for connection or authentication errors.
 
@@ -466,7 +477,6 @@ To trust additional embedding origins beyond `CPA_PUBLIC_URL` (for example a sep
 | `LOGIN_PASSWORD` | When auth is enabled | - | Login password |
 | `CPA_REQUEST_LOG_ACCESS_ENABLED` | No | `false` | Allow administrators to view and download CPA request logs through Keeper; corresponding logs must exist in CPA and may contain request or response data |
 | `AUTH_SESSION_TTL` | No | `168h` | Login session lifetime |
-| `API_KEY_VIEWER_LOCAL_RANKING_ENABLED` | No | `false` | Allow API Key viewers to read Local Ranking; Community Ranking remains read-only |
 
 ### Timezone And Request Behavior
 
@@ -490,7 +500,7 @@ Scheduled Auth Files quota refresh is configured from the gear button in the Aut
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `REDIS_QUEUE_ADDR` | No | Derived from `CPA_BASE_URL` | An explicit value takes precedence. When empty, use the hostname and explicit port from `CPA_BASE_URL`, or `8317` if no port is specified. Set `host:port` for a separate address |
-| `REDIS_QUEUE_TLS` | No | `false` | Use TLS for Redis queue connection; set `true` when `REDIS_QUEUE_ADDR` is explicit and requires TLS |
+| `REDIS_QUEUE_TLS` | No | `false` | Set to `true` to force TLS for the Redis queue; when no queue address is specified, TLS follows the protocol of `CPA_BASE_URL` by default. `false` does not override automatically inferred TLS settings. |
 | `REDIS_QUEUE_BATCH_SIZE` | No | `10000` | Maximum queue records per pull |
 | `REDIS_QUEUE_IDLE_INTERVAL` | No | `1s` | Empty queue check interval |
 | `REDIS_INGEST_MODE` | No | `auto` | Long-term remote ingest mode: `auto`, `subscribe`, `redis_pull`, or `http_pull`. A forced mode skips startup probes for other modes and retains the selected long-term mode; `subscribe` and `redis_pull` still retain their existing temporary fallback and recovery behavior |
@@ -504,7 +514,7 @@ Scheduled Auth Files quota refresh is configured from the gear button in the Aut
 | `LOG_LEVEL` | No | `info` | Log level |
 | `LOG_FILE_ENABLED` | No | `true` | Write persistent log files |
 | `LOG_RETENTION_DAYS` | No | `7` | Combined-log history days, plus the current day; `0` disables cleanup. Error-only logs keep 30 history days plus the current day |
-| `BACKUP_ENABLED` | No | `true` | Enable SQLite database backups |
+| `BACKUP_ENABLED` | No | `true` | Enable scheduled database backups |
 | `BACKUP_INTERVAL` | No | `24h` | Database backup interval |
 | `BACKUP_RETENTION_DAYS` | No | `7` | Backup retention days |
 | `USAGE_RAW_RETENTION_DAYS` | No | `0` | Total raw-request retention in days; only archives are deleted. `0` retains archives forever; `>=90` enables cleanup. Negative values and `1–89` fall back to `0` with a warning without preventing startup |
@@ -512,6 +522,16 @@ Scheduled Auth Files quota refresh is configured from the gear button in the Aut
 Keeper archives raw request records older than 90 local calendar days daily at 04:30 in the configured timezone. Archives are retained permanently by default. With `USAGE_RAW_RETENTION_DAYS>=90`, daily maintenance deletes expired archived records in batches after archiving, using the request timestamp and local calendar days in the configured timezone. The 90-day hot-table window remains unchanged. Normal pages do not directly query archived records; historical aggregates and backups keep their own retention policies. Deleted raw records cannot support later historical recalculation. Deletion may not immediately shrink the SQLite file: freed space can be reused and is reclaimed by the existing conditional compaction policy.
 
 When file logging is enabled, `cpa-usage-keeper-YYYY-MM-DD.log` contains all emitted levels. Error, fatal, and panic entries are also copied to `cpa-usage-keeper-error-YYYY-MM-DD.log`, which keeps the previous 30 local calendar dates plus the current date.
+
+### Rolling Back A Failed v1-to-v2 Upgrade
+
+Keeper creates a database backup before migrating v1 data. If migration fails and that backup is verified, the logs include English rollback instructions and its `backup_path`.
+
+1. Stop Keeper v2 and preserve the failed database together with any `-wal` and `-shm` files.
+2. Copy the pre-upgrade backup to `<new WORK_DIR>/app.db` in a separate data directory, renaming the backup copy to `app.db`. Keep the original backup intact; do not mix the copy with files from the failed database.
+3. Install Keeper v1 and set `WORK_DIR` to that new directory. With the default Docker setup, mount the new directory at `/data`, so the restored file is `/data/app.db` inside the container. Do not open the partially migrated database with v1.
+
+This returns data to the backup point. Usage received afterward is not included. If no verified backup is available, locate and validate a known pre-upgrade backup before attempting rollback.
 
 ### Built-In HTTPS
 
@@ -555,10 +575,16 @@ When CPA and Keeper share a browser origin, `CPA_PUBLIC_URL` can be omitted and 
 CPA_PUBLIC_URL=https://cpa.example.com
 ```
 
-## Benchmark
-
-Production-style `linux/amd64` capacity measurements for sustained ingestion, Dashboard latency, CPU utilization, and Keeper cgroup peak memory are available in the [Capacity Benchmark Report](./internal/benchmark/REPORT.md).
-
 ## License
 
 This project is open source under the [MIT License](./LICENSE).
+
+## Star History
+
+<a href="https://star-history.dera.page/Willxup/cpa-usage-keeper">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Willxup/cpa-usage-keeper&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Willxup/cpa-usage-keeper" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Willxup/cpa-usage-keeper" />
+ </picture>
+</a>

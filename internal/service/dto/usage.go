@@ -194,6 +194,29 @@ type RealtimeCacheLevelPoint struct {
 	InputTokens         int64
 }
 
+// RealtimeModelSpeed 只承载可见缓存窗口两半的逐请求速度统计。
+type RealtimeModelSpeed struct {
+	Available bool
+	Start     time.Time
+	Mid       time.Time
+	End       time.Time
+	Series    []RealtimeModelSpeedSeries
+}
+
+type RealtimeModelSpeedSeries struct {
+	Model            string
+	TotalTokens      int64
+	SpeedSampleCount int64
+	FirstHalf        RealtimeModelSpeedSample
+	SecondHalf       RealtimeModelSpeedSample
+}
+
+type RealtimeModelSpeedSample struct {
+	SpeedTPSSum      float64
+	SpeedSampleCount int64
+	MeanTPS          *float64
+}
+
 // UsageOverviewRealtime 是 Overview 页面实时图表区使用的数据块。
 type UsageOverviewRealtime struct {
 	Insights       *repodto.RealtimeInsightsRecord
@@ -202,6 +225,7 @@ type UsageOverviewRealtime struct {
 	WindowStart    time.Time
 	WindowEnd      time.Time
 	TokenVelocity  []RealtimeTokenVelocityPoint
+	ModelSpeed     RealtimeModelSpeed
 	LatencyScatter RealtimeLatencyScatter
 	CurrentUsage   RealtimeCurrentUsage
 	RequestLevel   []RealtimeRequestLevelPoint

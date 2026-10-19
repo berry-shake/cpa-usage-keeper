@@ -32,4 +32,3 @@ export const copyTextToClipboard = async (content: string) => {
     if (previouslyFocused?.isConnected) previouslyFocused.focus()
   }
 }
-

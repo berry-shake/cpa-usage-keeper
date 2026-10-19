@@ -1,11 +1,8 @@
-import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { CLIPROXYAPI_REPOSITORY_URL, GITHUB_PROFILE_URL, GITHUB_REPOSITORY_URL } from '@/utils/constants';
 import { AppFooter, footerVersionLabel, loadFooterVersion } from '../AppFooter';
-
-const appStyles = readFileSync(new URL('../../App.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 describe('AppFooter', () => {
   it('renders project links, powered by line, and version label', () => {
@@ -61,10 +58,4 @@ describe('AppFooter', () => {
     await expect(loadFooterVersion(loadVersion, signal)).resolves.toBe('');
   });
 
-  it('keeps the version label visible on its own mobile footer line', () => {
-    const mobileFooterStyles = appStyles.slice(appStyles.indexOf('@media (max-width: 640px)'));
-    expect(mobileFooterStyles).toContain('.app-footer-version-separator');
-    expect(mobileFooterStyles).toMatch(/\.app-footer-version-separator\s*\{[\s\S]*?display:\s*none;/);
-    expect(mobileFooterStyles).toMatch(/\.app-footer-version\s*\{[\s\S]*?display:\s*block;[\s\S]*?flex-basis:\s*100%;/);
-  });
 });

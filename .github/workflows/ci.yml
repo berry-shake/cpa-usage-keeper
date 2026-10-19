@@ -2,9 +2,13 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      full:
+        description: 'Run all checks before publishing a release'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,9 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      container: ${{ steps.filter.outputs.container }}
+      backend: ${{ (github.event_name == 'workflow_dispatch' || inputs.full) && 'true' || steps.filter.outputs.backend }}
+      frontend: ${{ (github.event_name == 'workflow_dispatch' || inputs.full) && 'true' || steps.filter.outputs.frontend }}
+      container: ${{ (github.event_name == 'workflow_dispatch' || inputs.full) && 'true' || steps.filter.outputs.container }}
       other: ${{ steps.filter.outputs.other }}
     steps:
       - name: Checkout repository
@@ -31,6 +35,8 @@ jobs:
 
       - name: Detect changed paths
         id: filter
+        # PR 按路径筛选；手动检查和 tag 发布验证不允许跳过任何检查。
+        if: ${{ github.event_name == 'pull_request' && !inputs.full }}
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           predicate-quantifier: some-with-excludes
@@ -107,23 +113,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up MSYS2
-        if: ${{ runner.os == 'Windows' }}
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: false
-          cache: true
-          path-type: inherit
-          install: mingw-w64-ucrt-x86_64-gcc
-
       - name: Run backend tests
-        if: ${{ runner.os != 'Windows' }}
-        run: go test ./cmd/... ./internal/...
-
-      - name: Run backend tests
-        if: ${{ runner.os == 'Windows' }}
-        shell: msys2 {0}
+        env:
+          CGO_ENABLED: '0'
         run: go test ./cmd/... ./internal/...
 
   frontend:
@@ -181,6 +173,7 @@ jobs:
     steps:
       - name: Verify CI results
         env:
+          FULL_CHECK: ${{ github.event_name == 'workflow_dispatch' || inputs.full }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           BACKEND_RESULT: ${{ needs.backend.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
@@ -191,7 +184,11 @@ jobs:
           fi
 
           for result in "$BACKEND_RESULT" "$FRONTEND_RESULT" "$CONTAINER_RESULT"; do
-            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
-              exit 1
+            if [[ "$result" == "success" ]]; then
+              continue
             fi
+            if [[ "$FULL_CHECK" != "true" && "$result" == "skipped" ]]; then
+              continue
+            fi
+            exit 1
           done

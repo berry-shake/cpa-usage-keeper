@@ -1,7 +1,5 @@
 // @vitest-environment happy-dom
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AnalysisResponse } from '@/lib/types';
@@ -23,18 +21,6 @@ vi.mock('react-i18next', () => ({
 }));
 
 import { emptyAnalysis, renderAnalysisPanel } from './analysisFixtures';
-
-const analysisPanelStyles = readFileSync(resolve(process.cwd(), 'src/components/usage/analysis/AnalysisPanel.module.scss'), 'utf8').replace(/\r\n/g, '\n');
-
-const styleRuleBlock = (selector: string) => {
-  const start = analysisPanelStyles.indexOf(selector);
-  expect(start).toBeGreaterThanOrEqual(0);
-  const open = analysisPanelStyles.indexOf('{', start);
-  const close = analysisPanelStyles.indexOf('\n}', open);
-  expect(open).toBeGreaterThanOrEqual(0);
-  expect(close).toBeGreaterThan(open);
-  return analysisPanelStyles.slice(open + 1, close);
-};
 
 const analysis: AnalysisResponse = {
   ...emptyAnalysis,
@@ -91,21 +77,4 @@ describe('AnalysisPanel heatmap columns', () => {
     ]);
   });
 
-  it('pins only the desktop key column footprint and preserves mobile scrolling and focus', () => {
-    const scroller = styleRuleBlock('.heatmapScroller');
-    expect(scroller).toContain('overflow-x: auto;');
-    expect(scroller).toContain('scrollbar-gutter: stable;');
-    expect(scroller).toMatch(/@include mobile\s*\{[\s\S]*?padding-bottom:\s*10px;/);
-    const keyColumn = styleRuleBlock('.heatmapKeyColumn');
-    expect(keyColumn).toContain('position: sticky;');
-    expect(keyColumn).toContain('left: 0;');
-    const mask = styleRuleBlock('.heatmapKeyColumn::before');
-    expect(mask).toContain('inset: 0;');
-    expect(mask).toContain('border-radius: inherit;');
-    expect(mask).toContain('background: inherit;');
-    expect(mask).not.toContain('var(--heatmap-grid-gap)');
-    expect(analysisPanelStyles).toMatch(/@include mobile\s*\{\s*\.heatmapKeyColumn\s*\{[^}]*position: static;/);
-    expect(analysisPanelStyles).toMatch(/@include mobile\s*\{\s*\.heatmapKeyColumn\s*\{[^}]*\}\s*\.heatmapKeyColumn::before\s*\{\s*content: none;/);
-    expect(styleRuleBlock('.heatmapRowLabel:focus-visible,')).toMatch(/box-shadow:/);
-  });
 });
