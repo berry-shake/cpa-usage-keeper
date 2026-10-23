@@ -11,11 +11,11 @@ import (
 const codexHeaderSnapshotValueMaxLength = 4096
 
 type UsageHeaderSnapshotInput struct {
-	// AuthType 是 UsageEvent 的标准化身份来源；只有 oauth 才能对应支持的 Auth File。
+	// AuthType 是 UsageEvent 的标准化身份来源；只有 oauth 才能对应支持的 Credential。
 	AuthType string
 	// AuthIndex 是 UsageEvent 携带的 CPA auth-index，空值不能建立 cache 或历史归属。
 	AuthIndex string
-	// Provider 选择当前 Header 的解码协议；cache/history 仍需核对数据库真实 Auth File type。
+	// Provider 选择当前 Header 的解码协议；cache/history 仍需核对数据库真实 Credential type。
 	Provider string
 	// ObservedAt 是 Header 对应 UsageEvent 的发生 instant，不得替换为解码或入队时间。
 	ObservedAt time.Time
@@ -26,7 +26,7 @@ type UsageHeaderSnapshotInput struct {
 type UsageHeaderSnapshot struct {
 	// AuthType 是标准化身份来源；Header 快照只接受 oauth。
 	AuthType string
-	// AuthIndex 是 CPA Auth File 稳定账号键，供 cache 身份匹配和历史回溯使用。
+	// AuthIndex 是 CPA Credential 稳定账号键，供 cache 身份匹配和历史回溯使用。
 	AuthIndex string
 	// Provider 是规范化后的已选解码来源，不替代 usage_identities.type 的身份校验。
 	Provider string

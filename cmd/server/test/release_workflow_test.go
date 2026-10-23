@@ -11,15 +11,9 @@ import (
 )
 
 type releaseWorkflow struct {
-	On   map[string]yaml.Node `yaml:"on"`
 	Jobs map[string]struct {
-		Uses  string         `yaml:"uses"`
-		Needs yaml.Node      `yaml:"needs"`
-		With  map[string]any `yaml:"with"`
 		Steps []struct {
-			Run  string            `yaml:"run"`
-			Uses string            `yaml:"uses"`
-			With map[string]string `yaml:"with"`
+			Run string `yaml:"run"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }

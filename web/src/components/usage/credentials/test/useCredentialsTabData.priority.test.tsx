@@ -12,7 +12,7 @@ type TabData = ReturnType<typeof useCredentialsTabData>
 let latest: TabData | null = null
 
 function Harness({ onNotice, onPrioritySaved }: { onNotice: (kind: 'success' | 'info' | 'error', text: string) => void; onPrioritySaved: () => void }) {
-  const data = useCredentialsTabData({ enabledAuthFiles: true, enabledAiProviders: true, onNotice, onPrioritySaved })
+  const data = useCredentialsTabData({ enabledCredentials: true, enabledAiProviders: true, onNotice, onPrioritySaved })
   useEffect(() => { latest = data }, [data])
   return null
 }
@@ -64,7 +64,7 @@ describe('credential priority save data flow', () => {
     })
     await act(async () => root.render(<Harness onNotice={onNotice} onPrioritySaved={onPrioritySaved} />))
     const beforePages = fetchMock.mock.calls.filter(([input]) => String(input).includes('/usage/identities/page')).length
-    await act(async () => { await expect(latest!.saveAuthFilePriority('local-id', 'stale', 3)).rejects.toThrow() })
+    await act(async () => { await expect(latest!.saveCredentialPriority('local-id', 'stale', 3)).rejects.toThrow() })
     expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/usage/identities/page')).length).toBeGreaterThan(beforePages)
     expect(onPrioritySaved).not.toHaveBeenCalled()
     expect(onNotice).toHaveBeenCalledWith('error', expect.any(String))

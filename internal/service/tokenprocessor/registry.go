@@ -110,9 +110,9 @@ var identityAliasDefinitions = []identityAliasDefinition{
 	{alias: "codex", handlerID: HandlerResponsesInclusive},
 	// xai identity 保留 Responses 格式的旧规则，但非零 Total 强纠错仍需 executor 合同。
 	{alias: "xai", handlerID: HandlerResponsesInclusive},
-	// meta Auth File type 与 CPA MetaExecutor 的 Responses 合同已核对；旧事件缺 executor 时可安全复用同一 handler，但仍只是 identity hint。
+	// meta Credential type 与 CPA MetaExecutor 的 Responses 合同已核对；旧事件缺 executor 时可安全复用同一 handler，但仍只是 identity hint。
 	{alias: "meta", handlerID: HandlerResponsesInclusive},
-	// devin Auth File type 已核对，但旧事件缺 executor 仍保持 strict，避免 partial Total 被错误重算。
+	// devin Credential type 已核对，但旧事件缺 executor 仍保持 strict，避免 partial Total 被错误重算。
 	{alias: "devin", handlerID: HandlerStrictPassThrough},
 	// CPA 的四种 Kimi identity exact alias 都保持 strict，不因站点假设 reasoning 包含关系。
 	{alias: "kimi", handlerID: HandlerStrictPassThrough},

@@ -28,7 +28,7 @@ func newUsageSourceResolver(identities []entities.UsageIdentity) usageSourceReso
 			continue
 		}
 		switch identity.AuthType {
-		case entities.UsageIdentityAuthTypeAuthFile:
+		case entities.UsageIdentityAuthTypeCredential:
 			if identity.IsDeleted {
 				deletedAuthIdentities[key] = identity
 			} else {
@@ -119,7 +119,7 @@ func (r usageSourceResolver) resolve(rawSource string, authIndex string) (usageS
 			return usageSourceResolutionFromIdentity(item, normalizedAuthIndex), true
 		}
 		if identity, ok := r.authIdentities[normalizedAuthIndex]; ok {
-			return resolveAuthFileIdentity(identity, normalizedAuthIndex), true
+			return resolveCredentialIdentity(identity, normalizedAuthIndex), true
 		}
 	}
 
@@ -133,14 +133,14 @@ func (r usageSourceResolver) resolve(rawSource string, authIndex string) (usageS
 			return usageSourceResolutionFromIdentity(item, normalizedAuthIndex), true
 		}
 		if identity, ok := r.deletedAuthIdentities[normalizedAuthIndex]; ok {
-			return resolveAuthFileIdentity(identity, normalizedAuthIndex), true
+			return resolveCredentialIdentity(identity, normalizedAuthIndex), true
 		}
 	}
 
 	return usageSourceResolution{}, false
 }
 
-func resolveAuthFileIdentity(identity entities.UsageIdentity, normalizedAuthIndex string) usageSourceResolution {
+func resolveCredentialIdentity(identity entities.UsageIdentity, normalizedAuthIndex string) usageSourceResolution {
 	displayName := firstNonEmptyString(identity.Name, normalizedAuthIndex)
 	return usageSourceResolution{
 		DisplayName: displayName,

@@ -47,14 +47,14 @@ type RequestLogStream struct {
 	ContentLength int64
 }
 
-type authFileStatusRequest struct {
+type credentialStatusRequest struct {
 	Name string `json:"name"`
 	// AuthIndex 只在单条凭证开关时携带；CPA 用它校验同名文件确实指向目标账号，批量接口保持原样。
 	AuthIndex string `json:"auth_index,omitempty"`
 	Disabled  bool   `json:"disabled"`
 }
 
-type authFilesDeleteRequest struct {
+type credentialsDeleteRequest struct {
 	Names []string `json:"names"`
 }
 
@@ -457,9 +457,9 @@ func (c *Client) FetchModels(ctx context.Context) (*response.ModelsResult, error
 	return result, nil
 }
 
-func (c *Client) FetchAuthFiles(ctx context.Context) (*response.AuthFilesResult, error) {
-	result := &response.AuthFilesResult{}
-	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementAuthFilesEndpoint, &result.Payload, "auth files")
+func (c *Client) FetchCredentials(ctx context.Context) (*response.CredentialsResult, error) {
+	result := &response.CredentialsResult{}
+	statusCode, body, err := c.doManagementJSONRequest(ctx, cpaManagementCredentialsEndpoint, &result.Payload, "credentials")
 	result.StatusCode = statusCode
 	result.Body = body
 	if err != nil {
@@ -468,18 +468,18 @@ func (c *Client) FetchAuthFiles(ctx context.Context) (*response.AuthFilesResult,
 	return result, nil
 }
 
-// UpdateAuthFileStatus 切换认证文件启用状态；authIndex 为空时退化为 CPA 原有的按文件名定位。
-func (c *Client) UpdateAuthFileStatus(ctx context.Context, name string, authIndex string, disabled bool) (int, error) {
-	statusCode, _, err := c.doManagementJSONRequestWithBody(ctx, http.MethodPatch, cpaManagementAuthFilesStatusEndpoint, authFileStatusRequest{
+// UpdateCredentialStatus 切换凭证启用状态；authIndex 为空时退化为 CPA 原有的按文件名定位。
+func (c *Client) UpdateCredentialStatus(ctx context.Context, name string, authIndex string, disabled bool) (int, error) {
+	statusCode, _, err := c.doManagementJSONRequestWithBody(ctx, http.MethodPatch, cpaManagementCredentialsStatusEndpoint, credentialStatusRequest{
 		Name:      name,
 		AuthIndex: authIndex,
 		Disabled:  disabled,
-	}, nil, "auth file status")
+	}, nil, "credential status")
 	return statusCode, err
 }
 
-func (c *Client) DeleteAuthFiles(ctx context.Context, names []string) error {
-	_, _, err := c.doManagementJSONRequestWithBody(ctx, http.MethodDelete, cpaManagementAuthFilesEndpoint, authFilesDeleteRequest{Names: names}, nil, "auth files delete")
+func (c *Client) DeleteCredentials(ctx context.Context, names []string) error {
+	_, _, err := c.doManagementJSONRequestWithBody(ctx, http.MethodDelete, cpaManagementCredentialsEndpoint, credentialsDeleteRequest{Names: names}, nil, "credentials delete")
 	return err
 }
 
@@ -517,13 +517,13 @@ func (c *Client) FetchCodexAPIKeys(ctx context.Context) (*response.ProviderKeyCo
 	return c.fetchProviderKeyConfig(ctx, cpaManagementCodexAPIKeyEndpoint, "codex api keys")
 }
 
-// FetchMetaAPIKeys 读取独立的 Meta API Key metadata endpoint，不经过 Auth File 或通用 quota 路径。
+// FetchMetaAPIKeys 读取独立的 Meta API Key metadata endpoint，不经过 Credential 或通用 quota 路径。
 func (c *Client) FetchMetaAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	// Meta 只在有效值投影中补默认地址。
 	return c.fetchProviderKeyConfig(ctx, cpaManagementMetaAPIKeyEndpoint, "meta api keys")
 }
 
-// FetchXAIAPIKeys 读取 xAI API Key metadata endpoint，不复用 OAuth Auth File 路径。
+// FetchXAIAPIKeys 读取 xAI API Key metadata endpoint，不复用 OAuth Credential 路径。
 func (c *Client) FetchXAIAPIKeys(ctx context.Context) (*response.ProviderKeyConfigResult, error) {
 	// 复用标准 provider key 解码器，忽略 websockets 等 Keeper 不消费的额外字段。
 	return c.fetchProviderKeyConfig(ctx, cpaManagementXAIAPIKeyEndpoint, "xai api keys")

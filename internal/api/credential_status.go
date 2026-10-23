@@ -12,9 +12,9 @@ type credentialStatusRequest struct {
 	Disabled *bool `json:"disabled"`
 }
 
-// registerCredentialStatusRoutes 注册认证文件与 AI 供应商的单条状态开关，前端只提供 auth_index。
+// registerCredentialStatusRoutes 注册凭证与 AI 供应商的单条状态开关，前端只提供 auth_index。
 func registerCredentialStatusRoutes(router gin.IRoutes, provider service.CredentialStatusProvider) {
-	router.PATCH("/auth-files/:auth_index/status", func(c *gin.Context) {
+	router.PATCH("/credentials/:auth_index/status", func(c *gin.Context) {
 		if provider == nil {
 			writeInternalError(c, "credential status provider is not configured", nil)
 			return
@@ -23,9 +23,9 @@ func registerCredentialStatusRoutes(router gin.IRoutes, provider service.Credent
 		if !ok {
 			return
 		}
-		response, err := provider.SetAuthFileDisabled(c.Request.Context(), c.Param("auth_index"), *request.Disabled)
+		response, err := provider.SetCredentialDisabled(c.Request.Context(), c.Param("auth_index"), *request.Disabled)
 		if err != nil {
-			writeCredentialStatusError(c, err, "auth file status update failed")
+			writeCredentialStatusError(c, err, "credential status update failed")
 			return
 		}
 		c.JSON(http.StatusOK, response)

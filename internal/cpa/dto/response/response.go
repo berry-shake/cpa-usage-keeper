@@ -3,8 +3,8 @@ package response
 import (
 	"encoding/json"
 
-	"cpa-usage-keeper/internal/cpa/dto/authfiles"
 	"cpa-usage-keeper/internal/cpa/dto/cpaapikeys"
+	"cpa-usage-keeper/internal/cpa/dto/credentials"
 	"cpa-usage-keeper/internal/cpa/dto/models"
 	"cpa-usage-keeper/internal/cpa/dto/providerconfig"
 )
@@ -23,11 +23,11 @@ type ModelsResult struct {
 	Payload    models.ModelsResponse
 }
 
-// AuthFilesResult 是 FetchAuthFiles 返回的 HTTP 包装，保留状态码、原始响应体和解析后的 DTO。
-type AuthFilesResult struct {
+// CredentialsResult 是 FetchCredentials 返回的 HTTP 包装，保留状态码、原始响应体和解析后的 DTO。
+type CredentialsResult struct {
 	StatusCode int
 	Body       []byte
-	Payload    authfiles.AuthFilesResponse
+	Payload    credentials.CredentialsResponse
 }
 
 // UsageQueueResult 是 FetchUsageQueue 返回的 HTTP 包装，payload 保留为 raw JSON 供 Redis usage 解码流程处理。

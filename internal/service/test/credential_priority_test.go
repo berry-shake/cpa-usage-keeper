@@ -27,7 +27,7 @@ type priorityClientStub struct {
 	onPatch         func()
 }
 
-func (s *priorityClientStub) UpdateAuthFilePriority(_ context.Context, name string, priority int) (int, error) {
+func (s *priorityClientStub) UpdateCredentialPriority(_ context.Context, name string, priority int) (int, error) {
 	s.patchName = name
 	if s.patchStatus != 0 {
 		return s.patchStatus, errors.New("upstream rejected")
@@ -95,46 +95,46 @@ func requirePriority(t *testing.T, got *int, want int) {
 	}
 }
 
-func TestAuthFilePriorityPersistsExplicitZero(t *testing.T) {
-	db := openMetadataTestDatabase(t, "priority-auth-file-zero.db")
-	seedAuthFileCredential(t, db, "auth.json", "auth-index")
+func TestCredentialPriorityPersistsExplicitZero(t *testing.T) {
+	db := openMetadataTestDatabase(t, "priority-credential-zero.db")
+	seedCredentialCredential(t, db, "auth.json", "auth-index")
 	client := &priorityClientStub{}
 	refresher := &credentialStatusRefresherStub{}
 	provider := service.NewCredentialPriorityService(db, client, refresher, &service.CredentialMutationLocks{})
-	result, err := provider.SetAuthFilePriority(context.Background(), "auth-index", 0)
+	result, err := provider.SetCredentialPriority(context.Background(), "auth-index", 0)
 	if err != nil || result.Priority != 0 || client.patchName != "auth.json" {
 		t.Fatalf("result=%+v err=%v patch=%q", result, err, client.patchName)
 	}
-	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAuthFile, "auth-index"), 0)
+	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeCredential, "auth-index"), 0)
 	if refresher.count() != 1 {
 		t.Fatalf("refresh count=%d", refresher.count())
 	}
 }
 
-func TestAuthFilePriorityRejectsUpstreamConflict(t *testing.T) {
-	db := openMetadataTestDatabase(t, "priority-auth-file-conflict.db")
-	seedAuthFileCredential(t, db, "auth.json", "auth-index")
+func TestCredentialPriorityRejectsUpstreamConflict(t *testing.T) {
+	db := openMetadataTestDatabase(t, "priority-credential-conflict.db")
+	seedCredentialCredential(t, db, "auth.json", "auth-index")
 	client := &priorityClientStub{patchStatus: http.StatusConflict}
 	provider := service.NewCredentialPriorityService(db, client, nil, &service.CredentialMutationLocks{})
-	_, err := provider.SetAuthFilePriority(context.Background(), "auth-index", 3)
+	_, err := provider.SetCredentialPriority(context.Background(), "auth-index", 3)
 	if !errors.Is(err, service.ErrCredentialPriorityConflict) {
 		t.Fatalf("err=%v, want conflict", err)
 	}
-	if got := loadPriority(t, db, entities.UsageIdentityAuthTypeAuthFile, "auth-index"); got != nil {
+	if got := loadPriority(t, db, entities.UsageIdentityAuthTypeCredential, "auth-index"); got != nil {
 		t.Fatalf("unexpected local priority=%v", *got)
 	}
 }
 
-func TestAuthFilePriorityPersistsSuccessfulPatch(t *testing.T) {
-	db := openMetadataTestDatabase(t, "priority-auth-file-patch-success.db")
-	seedAuthFileCredential(t, db, "auth.json", "auth-index")
+func TestCredentialPriorityPersistsSuccessfulPatch(t *testing.T) {
+	db := openMetadataTestDatabase(t, "priority-credential-patch-success.db")
+	seedCredentialCredential(t, db, "auth.json", "auth-index")
 	client := &priorityClientStub{}
 	refresher := &credentialStatusRefresherStub{}
-	result, err := service.NewCredentialPriorityService(db, client, refresher, &service.CredentialMutationLocks{}).SetAuthFilePriority(context.Background(), "auth-index", 3)
+	result, err := service.NewCredentialPriorityService(db, client, refresher, &service.CredentialMutationLocks{}).SetCredentialPriority(context.Background(), "auth-index", 3)
 	if err != nil || result.Priority != 3 || refresher.count() != 1 {
 		t.Fatalf("result=%+v err=%v refresh=%d", result, err, refresher.count())
 	}
-	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeAuthFile, "auth-index"), 3)
+	requirePriority(t, loadPriority(t, db, entities.UsageIdentityAuthTypeCredential, "auth-index"), 3)
 }
 
 func TestProviderPriorityUsesFirstAuthIndexMatchAndNegativeValue(t *testing.T) {

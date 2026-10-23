@@ -805,7 +805,7 @@ func redisUsageIdentityKeys(events []entities.UsageEvent) []usageEventIdentityKe
 func redisUsageIdentityAuthType(authType string) (entities.UsageIdentityAuthType, bool) {
 	switch normalizeRedisAuthType(authType) {
 	case "oauth":
-		return entities.UsageIdentityAuthTypeAuthFile, true
+		return entities.UsageIdentityAuthTypeCredential, true
 	case "apikey":
 		return entities.UsageIdentityAuthTypeAIProvider, true
 	default:
@@ -832,12 +832,12 @@ func missingRedisUsageIdentityKeys(keys []usageEventIdentityKey, byIdentity map[
 	return missing
 }
 
-// OAuth 优先信任已同步的 auth file type；查不到时再沿用历史 provider 兜底。
+// OAuth 优先信任已同步的 credential type；查不到时再沿用历史 provider 兜底。
 func resolveUsageEventType(event entities.UsageEvent, resolver usageEventTypeResolver) string {
 	switch normalizeRedisAuthType(event.AuthType) {
 	case "oauth":
 		if authIndex := strings.TrimSpace(event.AuthIndex); authIndex != "" {
-			key := usageEventIdentityKey{authType: entities.UsageIdentityAuthTypeAuthFile, identity: authIndex}
+			key := usageEventIdentityKey{authType: entities.UsageIdentityAuthTypeCredential, identity: authIndex}
 			if usageType := strings.TrimSpace(resolver.byIdentity[key]); usageType != "" {
 				return usageType
 			}

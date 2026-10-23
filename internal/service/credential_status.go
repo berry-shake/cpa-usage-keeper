@@ -35,14 +35,14 @@ type MetadataRefresher interface {
 
 // CredentialStatusClient 是凭证开关需要的 CPA 能力子集。
 type CredentialStatusClient interface {
-	UpdateAuthFileStatus(ctx context.Context, name string, authIndex string, disabled bool) (int, error)
+	UpdateCredentialStatus(ctx context.Context, name string, authIndex string, disabled bool) (int, error)
 	FetchProviderKeyConfig(ctx context.Context, providerType string) (*response.ProviderKeyConfigResult, error)
 	UpdateProviderConfig(ctx context.Context, providerType string, document *providerconfig.Document) (int, error)
 }
 
 // CredentialStatusProvider 暴露单条凭证开关，调用方只提供 CPA auth_index。
 type CredentialStatusProvider interface {
-	SetAuthFileDisabled(ctx context.Context, authIndex string, disabled bool) (CredentialStatusResponse, error)
+	SetCredentialDisabled(ctx context.Context, authIndex string, disabled bool) (CredentialStatusResponse, error)
 	SetAIProviderDisabled(ctx context.Context, authIndex string, disabled bool) (CredentialStatusResponse, error)
 }
 
@@ -55,7 +55,7 @@ type credentialStatusService struct {
 	db      *gorm.DB
 	client  CredentialStatusClient
 	refresh MetadataRefresher
-	// locks 按认证文件名或供应商配置路径串行化读改写，避免跨操作互相覆盖。
+	// locks 按凭证名或供应商配置路径串行化读改写，避免跨操作互相覆盖。
 	locks *CredentialMutationLocks
 }
 
@@ -63,17 +63,17 @@ func NewCredentialStatusService(db *gorm.DB, client CredentialStatusClient, refr
 	return &credentialStatusService{db: db, client: client, refresh: refresh, locks: locks}
 }
 
-// SetAuthFileDisabled 用列表里的 auth_index 反查文件名，再按 CPA 的 name + auth_index 定位唯一账号。
-func (s *credentialStatusService) SetAuthFileDisabled(ctx context.Context, authIndex string, disabled bool) (CredentialStatusResponse, error) {
+// SetCredentialDisabled 用列表里的 auth_index 反查文件名，再按 CPA 的 name + auth_index 定位唯一账号。
+func (s *credentialStatusService) SetCredentialDisabled(ctx context.Context, authIndex string, disabled bool) (CredentialStatusResponse, error) {
 	resolvedAuthIndex, err := s.validate(authIndex)
 	if err != nil {
 		return CredentialStatusResponse{}, err
 	}
 
-	identity, err := repository.FindActiveUsageIdentityByAuthTypeAndIdentity(ctx, s.db, entities.UsageIdentityAuthTypeAuthFile, resolvedAuthIndex)
+	identity, err := repository.FindActiveUsageIdentityByAuthTypeAndIdentity(ctx, s.db, entities.UsageIdentityAuthTypeCredential, resolvedAuthIndex)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return CredentialStatusResponse{}, fmt.Errorf("%w: auth file identity", ErrCredentialStatusNotFound)
+			return CredentialStatusResponse{}, fmt.Errorf("%w: credential identity", ErrCredentialStatusNotFound)
 		}
 		return CredentialStatusResponse{}, err
 	}
@@ -82,23 +82,23 @@ func (s *credentialStatusService) SetAuthFileDisabled(ctx context.Context, authI
 		name = strings.TrimSpace(*identity.FileName)
 	}
 	if name == "" {
-		return CredentialStatusResponse{}, fmt.Errorf("%w: auth file name is unavailable", ErrCredentialStatusValidation)
+		return CredentialStatusResponse{}, fmt.Errorf("%w: credential name is unavailable", ErrCredentialStatusValidation)
 	}
 
-	defer s.locks.lockAuthFile(name)()
+	defer s.locks.lockCredential(name)()
 
-	statusCode, err := s.client.UpdateAuthFileStatus(ctx, name, resolvedAuthIndex, disabled)
+	statusCode, err := s.client.UpdateCredentialStatus(ctx, name, resolvedAuthIndex, disabled)
 	if err != nil {
 		if statusCode == http.StatusNotFound {
-			return CredentialStatusResponse{}, fmt.Errorf("%w: auth file", ErrCredentialStatusNotFound)
+			return CredentialStatusResponse{}, fmt.Errorf("%w: credential", ErrCredentialStatusNotFound)
 		}
 		// CPA 只在插件虚拟子账号上返回 409：它没有独立文件，只能整组操作源文件，重试不会成功。
 		if statusCode == http.StatusConflict {
-			return CredentialStatusResponse{}, fmt.Errorf("%w: auth file", ErrCredentialStatusConflict)
+			return CredentialStatusResponse{}, fmt.Errorf("%w: credential", ErrCredentialStatusConflict)
 		}
-		return CredentialStatusResponse{}, fmt.Errorf("update auth file status: %w", err)
+		return CredentialStatusResponse{}, fmt.Errorf("update credential status: %w", err)
 	}
-	if err := s.persistDisabled(ctx, entities.UsageIdentityAuthTypeAuthFile, resolvedAuthIndex, disabled); err != nil {
+	if err := s.persistDisabled(ctx, entities.UsageIdentityAuthTypeCredential, resolvedAuthIndex, disabled); err != nil {
 		return CredentialStatusResponse{}, err
 	}
 	return CredentialStatusResponse{AuthIndex: resolvedAuthIndex, Disabled: disabled}, nil

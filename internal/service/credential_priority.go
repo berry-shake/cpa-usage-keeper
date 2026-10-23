@@ -24,14 +24,14 @@ var (
 )
 
 type CredentialPriorityClient interface {
-	UpdateAuthFilePriority(context.Context, string, int) (int, error)
+	UpdateCredentialPriority(context.Context, string, int) (int, error)
 	FetchPriorityProviderConfig(context.Context, string) (*response.ProviderKeyConfigResult, error)
 	UpdateProviderConfig(context.Context, string, *providerconfig.Document) (int, error)
 	FetchOpenAICompatibility(context.Context) (*response.OpenAICompatibilityResult, error)
 }
 
 type CredentialPriorityProvider interface {
-	SetAuthFilePriority(context.Context, string, int) (CredentialPriorityResponse, error)
+	SetCredentialPriority(context.Context, string, int) (CredentialPriorityResponse, error)
 	SetAIProviderPriority(context.Context, string, int) (CredentialPriorityResponse, error)
 }
 
@@ -51,12 +51,12 @@ func NewCredentialPriorityService(db *gorm.DB, client CredentialPriorityClient, 
 	return &credentialPriorityService{db: db, client: client, refresh: refresh, locks: locks}
 }
 
-func (s *credentialPriorityService) SetAuthFilePriority(ctx context.Context, authIndex string, priority int) (CredentialPriorityResponse, error) {
+func (s *credentialPriorityService) SetCredentialPriority(ctx context.Context, authIndex string, priority int) (CredentialPriorityResponse, error) {
 	authIndex, err := s.validate(authIndex)
 	if err != nil {
 		return CredentialPriorityResponse{}, err
 	}
-	identity, err := s.findIdentity(ctx, entities.UsageIdentityAuthTypeAuthFile, authIndex)
+	identity, err := s.findIdentity(ctx, entities.UsageIdentityAuthTypeCredential, authIndex)
 	if err != nil {
 		return CredentialPriorityResponse{}, err
 	}
@@ -65,19 +65,19 @@ func (s *credentialPriorityService) SetAuthFilePriority(ctx context.Context, aut
 		name = strings.TrimSpace(*identity.FileName)
 	}
 	if name == "" {
-		return CredentialPriorityResponse{}, fmt.Errorf("%w: auth file name is unavailable", ErrCredentialPriorityValidation)
+		return CredentialPriorityResponse{}, fmt.Errorf("%w: credential name is unavailable", ErrCredentialPriorityValidation)
 	}
 
-	defer s.locks.lockAuthFile(name)()
+	defer s.locks.lockCredential(name)()
 
-	statusCode, err := s.client.UpdateAuthFilePriority(ctx, name, priority)
+	statusCode, err := s.client.UpdateCredentialPriority(ctx, name, priority)
 	if err != nil {
 		return CredentialPriorityResponse{}, priorityWriteError(statusCode, err)
 	}
 	// 远端成功后更新本地并请求刷新；本地落库失败时也保留刷新机会，不回滚远端。
 	defer s.requestRefresh()
-	if err := repository.UpdateUsageIdentityPriority(ctx, s.db, entities.UsageIdentityAuthTypeAuthFile, authIndex, priority); err != nil {
-		return CredentialPriorityResponse{}, fmt.Errorf("persist auth file priority: %w", err)
+	if err := repository.UpdateUsageIdentityPriority(ctx, s.db, entities.UsageIdentityAuthTypeCredential, authIndex, priority); err != nil {
+		return CredentialPriorityResponse{}, fmt.Errorf("persist credential priority: %w", err)
 	}
 	return CredentialPriorityResponse{AuthIndex: authIndex, Priority: priority}, nil
 }

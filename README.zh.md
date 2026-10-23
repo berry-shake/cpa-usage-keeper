@@ -128,6 +128,7 @@ Docker Compose 是推荐部署方式：首次部署可同时运行 CPA + Keeper�
 ### 本 fork 的 v2 升级说明
 
 - 保持 glebarez/modernc SQLite、`CGO_ENABLED=0` 和六平台交叉编译；统一 `release.yml` 使用预编译二进制组装双架构运行时镜像，健康检查使用 `/readyz`。
+- v2.0.1 接入 Credentials 路由与可选 OIDC 登录，默认不启用 OIDC。发布工具链使用 Go 1.26.10 和 Node 24.22.1；保留凭证时间范围/API Key 筛选及单凭证限额操作的多语言说明。
 - v1 数据首次启动时先生成并校验迁移备份，再回填持久化费用。升级前另存一份完整备份；回退 v1 必须从该备份复制到独立工作目录，不能直接打开已迁移数据库。
 - 价格管理切换为 v2 的编辑、拉取后审核应用和显式历史重算，旧一键同步入口不再保留。保存价格不会改变历史费用；保留 LiteLLM 名称规范化和已配置但不活跃模型的同步支持。
 - 凭证汇总继续支持时间范围和 API Key 筛选，费用来自持久化结果；重算期间遵守 `costs_busy`。移动端请求卡片、客户端元数据及强制 ingest 模式继续保留。
@@ -160,10 +161,12 @@ web/                     React + TypeScript 前端
 
 ### 前置依赖
 
-- Go 1.26+
-- Node.js 24+
+- Go 1.26.10+
+- Node.js 24.22.1+
 - npm
 - 一个可用的 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 实例
+
+使用 nvm 时，在仓库根目录运行 `nvm install` 和 `nvm use`，即可选择 `.nvmrc` 中指定的版本。
 
 ### 本地运行
 
@@ -206,6 +209,15 @@ npm --prefix ./web run lint
 npm --prefix ./web run typecheck
 npm --prefix ./web run build
 ```
+
+### 图表时间处理
+
+- 使用响应/配置时区。自然日使用 `internal/timeutil.CivilDate` 和 `DayBounds`，滚动窗口使用真实时长；自然日不一定是24小时。
+- 通过 repository 的桶读取适配方法查询现有增量表。Overview 与 Latency 的小时锚点不同；Activity 保留既有364格及存量结束边界。查询修复不得改变写入桶或重切已有聚合。
+- 原始事件时间条件与真实时间过滤复用 `internal/repository/usage_event_time_read.go`。普通查询使用有界分段，近期缓存启动/重载使用开放上界读取；字段投影与生命周期逻辑保留在调用方。
+- 桶身份使用真实时刻或完整日期，不使用格式化钟面标签。时间戳按真实时间排序，日桶速率使用完整自然日的实际分钟数。
+- 复用 `web/src/utils/usage/timeLabels.ts` 获取时区日期部分、区分回拨时的重复钟面。保留各图表原有语言、精度、fallback和补点规则，仅对歧义钟面补offset。
+- 同时验证上海普通日期和DST跳时/回拨，覆盖浏览器与响应时区不同的情况；保留现有图表样式和生命周期行为。
 
 </details>
 
@@ -478,6 +490,42 @@ cp .env.example .env
 | `CPA_REQUEST_LOG_ACCESS_ENABLED` | 否 | `false` | 允许管理员通过 Keeper 查看和下载 CPA 请求日志；需要 CPA 中存在对应日志，内容可能包含请求或响应数据 |
 | `AUTH_SESSION_TTL` | 否 | `168h` | 登录 session 有效时长 |
 
+### OIDC 管理员登录
+
+Keeper 可通过一个 OpenID Connect 身份平台登录管理员。在平台中注册带客户端密钥的服务器端客户端，启用 Authorization Code Flow 和 PKCE S256，并精确注册公开回调地址：
+
+```text
+https://keeper.example.com/<APP_BASE_PATH>/api/v1/auth/oidc/callback
+```
+
+根路径部署省略 `<APP_BASE_PATH>/`。仍须保留 `AUTH_ENABLED=true` 和私有的 `LOGIN_PASSWORD`；身份平台暂时不可用时，密码登录继续可用。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `AUTH_OIDC_ENABLED` | `false` | 在独立页面的管理员登录页签启用 OIDC |
+| `AUTH_OIDC_PROMPT_LOGIN` | `true` | 发起登录时传递 `prompt=login` 要求重新认证；设为 `false` 时不传此参数，允许复用平台已有登录状态 |
+| `AUTH_OIDC_ISSUER` | 空 | 精确的 HTTP/HTTPS Issuer，包含平台租户路径 |
+| `AUTH_OIDC_CLIENT_ID` | 空 | 已注册的服务器端客户端 ID |
+| `AUTH_OIDC_CLIENT_SECRET` | 空 | 已注册的客户端密钥 |
+| `AUTH_OIDC_REDIRECT_URL` | 空 | 精确的 Keeper 公开回调地址，包含部署子路径 |
+| `AUTH_OIDC_ALLOWED_SUBJECTS` | `[]` | 可选的 JSON 字符串数组，精确匹配区分大小写的 `sub` |
+
+例如 `AUTH_OIDC_ALLOWED_SUBJECTS='["user-123","user,456"]'`。请使用平台实际签发给此客户端的 `sub`，不要替换成邮箱、显示名或猜测的平台用户 ID。缺省或空数组将应用准入交给身份平台：**通过此客户端认证的所有用户都会成为 Keeper 管理员**，请在平台中配置该应用的访问策略。邮箱和姓名仅用于显示。旧的 `AUTH_OIDC_ALLOWED_USERS` 非空时会阻止启动并提示迁移；删除旧配置前，须换成实际 subject，或在身份平台实施相应访问限制。
+
+每次新发起 OIDC 登录时，默认通过 `prompt=login` 要求重新认证，具体认证方式由身份平台决定。设置 `AUTH_OIDC_PROMPT_LOGIN=false` 可允许复用平台现有登录状态。此设置不会撤销已建立的 Keeper 会话，也不会退出身份平台。
+
+Keeper 使用标准 Discovery、JWKS、`openid profile email`、有签名的 ID Token、nonce、浏览器绑定及 PKCE S256。客户端密钥认证自动处理 `client_secret_basic` 和 `client_secret_post`。元数据端点可位于不同主机，并使用显式 HTTP/HTTPS 地址和已有查询参数。公共客户端、`form_post`、JWE、JWT Client Authentication、多 Issuer 选择和全局单点注销不属于本功能范围。
+
+推荐 Issuer、元数据端点和 Keeper 均使用 HTTPS。明确配置的 HTTP 地址直接生效，无需额外开关，也不限于 localhost；HTTP Discovery/JWKS 无法保护身份信任起点，HTTP Keeper Cookie 没有传输加密。HTTPS 失败不会自动降级 HTTP 或跳过证书验证。内部 CA 需要加入服务使用的受信任证书链。配置或元数据使用 HTTP 时会记录提示；HTTP 支持是对 Discovery 的 HTTPS 要求的兼容扩展，不会让明文链路获得传输安全。
+
+Issuer 使用平台公布的身份地址，须与 Discovery 和 ID Token 的 `iss` 精确一致。Keeper 服务端需要能访问 Discovery、Token 和 JWKS 端点，浏览器需要能访问授权端点；这些端点不要求同一主机。除非平台本身公布的身份地址就是容器内部地址，否则不能将 Issuer 随意替换为内部地址。
+
+请从与回调相同的公开 origin 打开 Keeper。HTTPS 反向代理应保留公开 `Host` 和 `X-Forwarded-Proto`（或提供 `X-Forwarded-Host`），并在 `TRUSTED_PROXY_CIDRS` 中配置实际代理网段。API Key 页签和 CPAMC 嵌入模式不显示 OIDC。登录成功会恢复合法的站内页面及查询参数。未完成登录保存在当前进程内，五分钟过期；重启中断的登录可以重新点击按钮发起。请在代理访问日志中过滤回调查询参数，其中包含短期授权码和 state。
+
+取消授权和身份平台故障不计入 OIDC 的来源认证失败额度；现有全局登录请求频率限制仍然生效。
+
+登录后的会话沿用 `AUTH_SESSION_TTL`，在会话管理中显示 **OIDC 登录**。退出只撤销 Keeper 本地会话；当 `AUTH_OIDC_PROMPT_LOGIN=false` 时，再次登录仍可能由身份平台自动认证。关闭 OIDC、切换 Issuer/Client ID 或收紧 subject 列表后，配置随重启生效，在业务就绪前永久撤销受影响会话，无需旧浏览器再次访问或打开会话管理页；仅更换客户端密钥不会撤销现有会话。平台侧删号或收紧访问权限不会自动撤销 Keeper 已有会话，需要在会话管理中撤销或等待 TTL 到期。回退到不支持 OIDC 的 Keeper 版本前，先用新版本撤销所有 OIDC 会话，再停止 Keeper 并替换程序；新增可空数据库列可以保留。
+
 ### 时区与请求行为
 
 | 变量 | 必填 | 默认值 | 说明 |
@@ -486,13 +534,13 @@ cp .env.example .env
 | `REQUEST_TIMEOUT` | 否 | `30s` | 请求 CPA HTTP 接口和 Redis 队列的超时时间 |
 | `TLS_SKIP_VERIFY` | 否 | `false` | 跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证；仅在使用自签名证书时启用 |
 
-### Auth Files 限额刷新
+### Credentials 限额刷新
 
-Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。设置保存在本地 SQLite，不依赖页面保持打开。
+Credentials 定时限额刷新在 Credentials 巡检弹窗的小齿轮中配置。设置保存在本地 SQLite，不依赖页面保持打开。
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | 手动刷新和定时刷新共用的 Auth Files 限额刷新队列最大并发数，最大 `100` |
+| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | 手动刷新和定时刷新共用的 Credentials 限额刷新队列最大并发数，最大 `100` |
 | `QUOTA_UPSTREAM_RESPONSES_ENABLED` | 否 | `false` | 缓存每个凭证最近一次限额查询的原始上游响应，并通过 quota task/cache API 返回，供浏览器 Network 面板排障；响应可能包含账号数据 |
 
 ### Redis 队列高级配置

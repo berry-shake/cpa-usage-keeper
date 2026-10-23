@@ -12,7 +12,7 @@ import { ModelSpeedLegend } from './ModelSpeedLegend';
 import { ModelSpeedTooltip } from './ModelSpeedTooltip';
 import { useModelSpeedSelection } from './modelSpeedSelection';
 import { MODEL_SPEED_ANIMATION_MS, useModelSpeedAnimation, type ModelSpeedRefreshSignal } from './modelSpeedAnimation';
-import { formatBucketLabel } from '../analysis/analysisTimeLabels';
+import { formatBucketLabels } from '../analysis/analysisTimeLabels';
 import panelStyles from '../analysis/AnalysisPanel.module.scss';
 import styles from './ModelSpeedChart.module.scss';
 
@@ -50,7 +50,7 @@ export function AnalysisModelSpeedCard({ speed: response, granularity = 'hourly'
   const [pickerOpen, setPickerOpen] = useState(false);
   const locale = i18n?.language ?? 'en';
   const models = useMemo(() => new Map(speed.series.map((series) => [series.model, series])), [speed]);
-  const labels = useMemo(() => speed.buckets.map((bucket) => formatBucketLabel(bucket.start, granularity, timezone)), [speed, granularity, timezone]);
+  const labels = useMemo(() => formatBucketLabels(speed.buckets.map((bucket) => bucket.start), granularity, timezone), [speed, granularity, timezone]);
   const chartData = useMemo<ChartData<'scatter', SpeedPoint[]>>(() => ({
     datasets: selected.map((model, modelIndex) => ({
       label: model,
@@ -203,7 +203,7 @@ export function AnalysisModelSpeedCard({ speed: response, granularity = 'hourly'
       <ModelSpeedLegend items={legendItems} />
     </div>
     {visibleHover && hoveredBucket && <ModelSpeedTooltip canvasRef={canvasRef} x={visibleHover.x} y={visibleHover.y} touch={visibleHover.touch} theme={theme}
-      title={formatModelSpeedTimeRange(hoveredBucket.start, hoveredBucket.end, timezone, locale, granularity === 'daily' ? 'date' : 'minutes')}
+      title={formatModelSpeedTimeRange(hoveredBucket.start, hoveredBucket.end, timezone, locale, granularity === 'daily' ? 'date' : 'minutes', speed.buckets.flatMap((bucket) => [bucket.start, bucket.end]))}
       rows={tooltipRows} dismiss={dismiss} />}
   </section>;
 }

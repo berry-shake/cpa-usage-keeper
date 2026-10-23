@@ -61,7 +61,7 @@ const item = (key: string, label: string, percent: number): AnalysisCompositionI
 const analysisWith = (items: AnalysisCompositionItem[]): AnalysisResponse => ({
   granularity: 'hourly', timezone: 'UTC', token_usage: [],
   api_key_composition: items, model_composition: items,
-  auth_files_composition: [], ai_provider_composition: [], model_efficiency: [],
+  credentials_composition: [], ai_provider_composition: [], model_efficiency: [],
   cost_summary: {
     total_cost_usd: 0, cost_available: true,
   },

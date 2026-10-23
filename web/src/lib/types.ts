@@ -8,12 +8,13 @@ export interface AuthSessionAPIKeySummary {
 
 export interface AuthSessionResponse {
   authenticated: boolean
+  oidc_login_enabled?: boolean
   role?: AuthRole
   api_key?: AuthSessionAPIKeySummary
 }
 
 export type AuthManagedSessionKind = 'admin' | 'api_key'
-export type AuthManagedSessionSource = 'standard' | 'embed'
+export type AuthManagedSessionSource = 'standard' | 'embed' | 'oidc'
 
 export interface AuthManagedSessionItem {
   id: string
@@ -172,7 +173,7 @@ export interface RealtimeUsageTopItem {
 export interface RealtimeCurrentUsage {
   models: RealtimeUsageTopItem[]
   api_keys: RealtimeUsageTopItem[]
-  auth_files: RealtimeUsageTopItem[]
+  credentials: RealtimeUsageTopItem[]
   ai_providers: RealtimeUsageTopItem[]
 }
 
@@ -259,7 +260,7 @@ export interface UsageOverviewComparisons {
   timezone?: string
   models: UsageComparisonItem[]
   api_keys?: UsageComparisonItem[]
-  auth_files?: UsageComparisonItem[]
+  credentials?: UsageComparisonItem[]
   ai_providers?: UsageComparisonItem[]
 }
 
@@ -702,7 +703,7 @@ export interface CodexQuotaHistoryResponse {
   cycles: CodexQuotaHistoryCycle[]
 }
 
-export interface AuthFilesManagementResponse {
+export interface CredentialsManagementResponse {
   names: string[]
   affected: number
 }
@@ -754,7 +755,7 @@ export interface UsageQuotaRefreshTaskRef {
 
 export interface UsageQuotaRefreshRejectedAuthIndex {
   authIndex: string
-  error: 'not_found' | 'not_auth_file' | 'unsupported' | 'duplicate' | 'duplicate_request' | 'invalid'
+  error: 'not_found' | 'not_credential' | 'unsupported' | 'duplicate' | 'duplicate_request' | 'invalid'
 }
 
 export interface UsageQuotaRefreshResponse {
@@ -903,7 +904,7 @@ export interface AnalysisResponse {
   model_usage?: AnalysisModelUsagePayload
   api_key_composition: AnalysisCompositionItem[]
   model_composition: AnalysisCompositionItem[]
-  auth_files_composition: AnalysisCompositionItem[]
+  credentials_composition: AnalysisCompositionItem[]
   ai_provider_composition: AnalysisCompositionItem[]
   heatmap: AnalysisHeatmapPayload
   cost_summary: AnalysisCostSummary
