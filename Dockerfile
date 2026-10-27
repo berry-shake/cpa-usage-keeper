@@ -1,13 +1,16 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM node:24.22.1-alpine AS web-builder
+ARG NODE_IMAGE=node:24.22.1-alpine
+ARG GO_IMAGE=golang:1.26.10-alpine
+
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS web-builder
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS go-builder
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /app
