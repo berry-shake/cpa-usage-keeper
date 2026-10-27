@@ -90,7 +90,11 @@ describe('quota history formatter equivalence', () => {
 describe('quota history formatter lifetime', () => {
   it('resolves defaults once per context and reuses UTC/local instances without constructing Intl during lookups', async () => {
     const { createQuotaHistoryDateTimeFormatter } = await import('../quotaHistoryFormatters')
-    const constructors = vi.spyOn(Intl, 'DateTimeFormat')
+    // Vitest 4 的 spyOn 在 new 时不会自动调用原构造器，显式 call-through 以保留
+    // resolvedOptions/format，同时继续统计构造次数。
+    const constructors = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (locale, options) {
+      return new NativeDateTimeFormat(locale, options)
+    })
     const format = createQuotaHistoryDateTimeFormatter('en-US')
     expect(constructors).toHaveBeenCalledTimes(1)
     for (let index = 0; index < 50; index++) {
@@ -128,7 +132,11 @@ describe('quota history formatter lifetime', () => {
 
   it('evicts after 16 keys and retains recently used instances across responses', async () => {
     const { createQuotaHistoryDateTimeFormatter } = await import('../quotaHistoryFormatters')
-    const constructors = vi.spyOn(Intl, 'DateTimeFormat')
+    // Vitest 4 的 spyOn 在 new 时不会自动调用原构造器，显式 call-through 以保留
+    // resolvedOptions/format，同时继续统计构造次数。
+    const constructors = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (locale, options) {
+      return new NativeDateTimeFormat(locale, options)
+    })
     const locales = ['en-US', 'zh-CN', 'fr-FR', 'de-DE', 'ja-JP', 'ko-KR', 'es-ES', 'it-IT', 'pt-BR', 'ru-RU', 'nl-NL', 'pl-PL', 'sv-SE', 'fi-FI', 'tr-TR', 'ar-EG', 'hi-IN']
     const value = '2026-08-21T12:34:56Z'
     const formats = locales.slice(0, 16).map(createQuotaHistoryDateTimeFormatter)
