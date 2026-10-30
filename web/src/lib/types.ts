@@ -913,6 +913,8 @@ export interface AnalysisResponse {
 }
 
 export interface CpaApiKeyDisplayItem {
+  sourceType: 'native' | 'plugin'
+  accessProvider: string
   id: string
   keyAlias: string
   displayKey: string
@@ -921,7 +923,7 @@ export interface CpaApiKeyDisplayItem {
 }
 
 export interface CpaApiKeySettingsItem extends CpaApiKeyDisplayItem {
-  apiKey: string
+  apiKey?: string
 }
 
 export interface CpaApiKeyOption {

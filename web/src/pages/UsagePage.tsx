@@ -807,6 +807,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     return null;
   }, [activeTab, realtimeWindow, usageRangeQuery]);
   const scopedApiKeys = useScopedAPIKeyOptions(apiKeyOptionsRequest, rememberScopedApiKeys, onAuthRequired, recoverRangeBoundsConflict);
+  const { refresh: refreshScopedApiKeys, invalidate: invalidateScopedApiKeys } = scopedApiKeys;
 
   const {
     usage,
@@ -1166,10 +1167,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onAuthRequired?.();
-        return;
+        throw error;
       }
       setApiKeySettingsError(error instanceof Error ? error.message : 'Failed to update CPA API key alias');
       showTopNotice('error', t('usage_stats.api_key_settings_alias_save_failed'));
+      throw error;
     } finally {
       setApiKeySettingsSavingId(null);
     }
@@ -1833,11 +1835,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
 
   const refreshActiveTab = useCallback(async () => {
     if (!apiKeyFilterReady && shouldShowApiKeyFilter(activeTab)) return;
-    await Promise.all([refreshActiveTabData(), scopedApiKeys.refresh()]);
-  }, [activeTab, apiKeyFilterReady, refreshActiveTabData, scopedApiKeys.refresh]);
+    await Promise.all([refreshActiveTabData(), refreshScopedApiKeys()]);
+  }, [activeTab, apiKeyFilterReady, refreshActiveTabData, refreshScopedApiKeys]);
 
   const refreshAutoRefreshTab = useCallback(async () => {
-    scopedApiKeys.invalidate();
+    invalidateScopedApiKeys();
     if (!apiKeyFilterReady && shouldShowApiKeyFilter(activeTab)) return;
     if (activeTab === 'realtime') {
       await loadRealtime();
@@ -1852,7 +1854,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       return;
     }
     await Promise.all([loadUsage(), loadActivity({ skipIfInFlight: true }), loadComparisons({ skipIfInFlight: true })]);
-  }, [activeTab, apiKeyFilterReady, credentialSectionVisibility.enabled, loadActivity, loadComparisons, loadCredentialStats, loadEvents, loadRealtime, loadUsage, refreshCredentials, scopedApiKeys.invalidate]);
+  }, [activeTab, apiKeyFilterReady, credentialSectionVisibility.enabled, loadActivity, loadComparisons, loadCredentialStats, loadEvents, loadRealtime, loadUsage, refreshCredentials, invalidateScopedApiKeys]);
 
   const handleAutoRefreshError = useCallback((error: unknown) => {
     if (recoverRangeBoundsConflict(error)) return;
