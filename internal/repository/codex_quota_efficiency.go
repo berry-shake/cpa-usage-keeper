@@ -97,6 +97,10 @@ func BuildCodexQuotaEfficiencyHistory(ctx context.Context, db *gorm.DB, query re
 	if err != nil {
 		return result, fmt.Errorf("list codex quota efficiency cycles: %w", err)
 	}
+	// pure-Go 驱动不会在查询返回后立即暴露取消；显式检查可避免取消后继续发起下一段查询。
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	if len(cycles) == 0 {
 		return result, nil
 	}
@@ -158,6 +162,9 @@ func BuildCodexQuotaEfficiencyHistory(ctx context.Context, db *gorm.DB, query re
 		Order("quota_percent_segments.cycle_id ASC, quota_percent_segments.first_observed_at ASC, quota_percent_segments.id ASC").
 		Find(&segments).Error; err != nil {
 		return result, fmt.Errorf("list codex quota efficiency segments: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 	segmentsByCycle := make(map[int64][]codexQuotaEfficiencySegmentRow, len(returnedCycles))
 	for start := 0; start < len(segments); {
@@ -429,6 +436,10 @@ func streamCodexQuotaEfficiencyUsage(ctx context.Context, db *gorm.DB, provider 
 
 	cursor := codexQuotaEfficiencyUsageCursor{works: works}
 	for _, read := range usageEventTimeReads(globalStart, globalEnd, false) {
+		// 取消后不得再打开下一个时区游标；pure-Go 驱动不会自动替我们拦截。
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := streamCodexQuotaEfficiencyUsageRead(ctx, db, provider, authIndex, read, &cursor); err != nil {
 			return err
 		}
