@@ -282,7 +282,6 @@ export function CredentialStatsCard({ credentials, loading, error = '' }: Creden
     <CredentialSectionShell
       title={t('usage_stats.credential_stats_title')}
       subtitle={t('usage_stats.credential_stats_subtitle')}
-      countLabel={t('usage_stats.credentials_count', { count: rows.length })}
       actions={loading && rows.length > 0 ? (
         <div className={styles.refreshStatus} aria-live="polite">
           <div className={styles.refreshIcon} aria-hidden="true">
