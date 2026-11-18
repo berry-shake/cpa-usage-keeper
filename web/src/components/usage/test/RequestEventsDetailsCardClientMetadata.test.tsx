@@ -186,9 +186,9 @@ describe('RequestEventsDetailsCard client metadata columns', () => {
 
       const clientIPValue = mobileMetadataItems[0].querySelector<HTMLElement>('dd');
       await act(async () => clientIPValue?.focus());
-      expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe(clientIP);
+      expect(document.body.querySelector('[role="tooltip"]:not([aria-hidden="true"])')?.textContent).toBe(clientIP);
       await act(async () => clientIPValue?.blur());
-      expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+      expect(document.body.querySelector('[role="tooltip"]:not([aria-hidden="true"])')).toBeNull();
     } finally {
       await mounted.unmount();
     }
