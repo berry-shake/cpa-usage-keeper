@@ -44,13 +44,14 @@ interface CredentialTableHeaderProps {
   cacheReadRateLabel: string
   sideLabel: string
   rowClassName?: string
+  metricsClassName?: string
 }
 
-export function CredentialTableHeader({ nameLabel, totalRequestsLabel, successRateLabel, totalTokensLabel, cacheReadRateLabel, sideLabel, rowClassName }: CredentialTableHeaderProps) {
+export function CredentialTableHeader({ nameLabel, totalRequestsLabel, successRateLabel, totalTokensLabel, cacheReadRateLabel, sideLabel, rowClassName, metricsClassName }: CredentialTableHeaderProps) {
   return (
     <div className={rowClassName}>
       <span>{nameLabel}</span>
-      <div>
+      <div className={metricsClassName}>
         <span>{totalRequestsLabel}</span>
         <span>{successRateLabel}</span>
         <span>{totalTokensLabel}</span>

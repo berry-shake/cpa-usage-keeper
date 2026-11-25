@@ -305,6 +305,7 @@ export function CredentialStatsCard({ credentials, loading, error = '' }: Creden
         {rows.length > 0 && (
           <CredentialTableHeader
             rowClassName={`${styles.tableHeader} ${showCost ? styles.tableHeaderWithCost : ''}`.trim()}
+            metricsClassName={styles.metricGroup}
             nameLabel={t('usage_stats.credential_name')}
             totalRequestsLabel={metricLabels.requests}
             successRateLabel={metricLabels.successRate}
