@@ -48,6 +48,7 @@ func TestCostReadRoutesRespectAuthAndExactFeeScope(t *testing.T) {
 		{"comparisons", http.MethodGet, "/usage/overview/comparisons", admin},
 		{"realtime", http.MethodGet, "/usage/overview/realtime", admin},
 		{"analysis", http.MethodGet, "/usage/analysis", admin},
+		{"identity models", http.MethodGet, "/usage/identities/1/models", admin},
 		{"events", http.MethodGet, "/usage/events", admin},
 		{"credentials", http.MethodGet, "/usage/credentials", admin},
 		{"CSV export", http.MethodGet, "/usage/events/export?format=csv", admin},

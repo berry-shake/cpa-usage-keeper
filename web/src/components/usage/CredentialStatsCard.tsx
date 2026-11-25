@@ -5,17 +5,19 @@ import { IconChevronDown } from '@/components/ui/icons';
 import { calculateCacheReadRate, formatUsd } from '@/utils/usage';
 import type { UsageCredential } from '@/lib/types';
 import {
-  cacheReadRateTone,
   CredentialBadge,
   CredentialSectionShell,
   CredentialTableHeader,
+} from './credentials/CredentialSectionShell';
+import {
+  cacheReadRateTone,
   formatCredentialNumber,
   formatCredentialPercent,
-  MetricPill,
   RequestMetric,
   successRateTone,
   TonePercent,
-} from './credentials/CredentialSectionShell';
+} from './credentials/credentialMetrics';
+import { MetricPill } from './credentials/cards/CredentialCardShell';
 import styles from './CredentialStatsCard.module.scss';
 
 export interface CredentialStatsCardProps {
@@ -281,7 +283,8 @@ export function CredentialStatsCard({ credentials, loading, error = '' }: Creden
   return (
     <CredentialSectionShell
       title={t('usage_stats.credential_stats_title')}
-      subtitle={t('usage_stats.credential_stats_subtitle')}
+      viewMode="list"
+      contentClassName=""
       actions={loading && rows.length > 0 ? (
         <div className={styles.refreshStatus} aria-live="polite">
           <div className={styles.refreshIcon} aria-hidden="true">
